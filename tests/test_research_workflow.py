@@ -100,7 +100,8 @@ def test_research_then_outline_prompt_contains_reference_brief(tmp_path):
     outline_graph = build_outline_collaboration_graph(CodexCLIAdapter(mock=True), store)
     outlined = outline_graph.invoke(researched.to_dict())
 
-    assert outlined["director_action"] == "propose_directions"
+    assert outlined["director_action"] == "run_outline_stage"
+    assert outlined["outline_stage"] == "direction"
     assert outlined["reference_brief"]
     assert outlined["retrieval_context"]
     assert outlined["canon_facts"]

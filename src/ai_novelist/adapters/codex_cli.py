@@ -103,6 +103,10 @@ class CodexCLIAdapter(AgentAdapter):
         return ""
 
     def _mock_response(self, prompt: str) -> str:
+        if "AGENT: outline_stage_role" in prompt:
+            return self._mock_outline_stage_role(prompt)
+        if "AGENT: outline_stage_synthesizer" in prompt:
+            return self._mock_outline_stage_synthesizer(prompt)
         if "AGENT: research_intent" in prompt:
             return self._mock_research_intent(prompt)
         if "AGENT: director" in prompt:
@@ -129,6 +133,69 @@ class CodexCLIAdapter(AgentAdapter):
             return self._mock_editor_review(revised="修订次数：0" not in prompt)
         return self._mock_outline(prompt)
 
+
+    def _mock_outline_stage_role(self, prompt: str) -> str:
+        stage = self._extract_prompt_field(prompt, "STAGE") or "direction"
+        role = self._extract_prompt_field(prompt, "ROLE") or "阶段 Agent"
+        labels = {
+            "direction": "方向定位",
+            "worldbuilding": "世界观设定",
+            "characters": "人物关系",
+            "story_flow": "故事流程",
+            "outline_draft": "总大纲草案",
+            "review_lock": "审稿锁定",
+        }
+        return (
+            f"- 机会：{role}认为{labels.get(stage, stage)}可以围绕月球城市、记忆罪案和纸质手稿形成清晰卖点。\n"
+            f"- 风险：需要避免在{labels.get(stage, stage)}阶段提前写成完整大纲。\n"
+            "- 建议：保留一个待用户确认的核心选择，并给出可锁定的阶段结论。"
+        )
+
+    def _mock_outline_stage_synthesizer(self, prompt: str) -> str:
+        stage = self._extract_prompt_field(prompt, "STAGE") or "direction"
+        data = {
+            "direction": (
+                "## Director 汇总\n本阶段建议锁定黑暗悬疑科幻方向：失忆工程师追查纸质手稿预言，并逐步面对自己参与记忆删除的旧罪。\n\n"
+                "## 候选项\n1. 记忆罪案：人物罪感最强。\n2. 月背冷库：设定纵深最强。\n3. 纸上叛乱：群像空间最大。\n\n"
+                "## 推荐选择\n推荐候选 1，并吸收候选 2 的月背冷库素材。\n\n"
+                "## 待确认问题\n是否锁定“黑暗悬疑科幻 + 记忆罪案”作为方向？"
+            ),
+            "worldbuilding": (
+                "## Director 汇总\n世界观以银湾月球城、记忆审计编号、月背冷库和灰籍居民为核心。规则服务案件推进，而不是孤立解释。\n\n"
+                "## 候选项\n1. 档案局维护秩序。\n2. 记忆公司垄断安全感。\n3. 地下写作者用纸质文本绕开预测系统。\n\n"
+                "## 推荐选择\n锁定三方冲突，让每条规则都带来现实代价。\n\n"
+                "## 待确认问题\n是否接受月背冷库保存被删除记忆这一核心规则？"
+            ),
+            "characters": (
+                "## Director 汇总\n林澈的弧光从逃避旧罪到公开自证；许岚代表被删除者后代；沈博士代表秩序化垄断。\n\n"
+                "## 候选项\n1. 林澈与许岚互相试探。\n2. 林澈与沈博士存在旧授权关系。\n3. 地下写作者联盟既帮助也利用主角。\n\n"
+                "## 推荐选择\n锁定主角旧罪与盟友受害史的关系冲突。\n\n"
+                "## 待确认问题\n是否接受林澈曾参与一次关键记忆删除？"
+            ),
+            "story_flow": (
+                "## Director 汇总\n故事按异常手稿、事故验证、冷库追查、旧罪曝光、公开自证推进。每阶段都扩大代价。\n\n"
+                "## 候选项\n1. 前三章主打事故倒计时。\n2. 中段主打冷库线索。\n3. 终局主打听证会公开自证。\n\n"
+                "## 推荐选择\n用纸质手稿作为每次转折的触发器。\n\n"
+                "## 待确认问题\n是否接受终局以公开旧罪换取灰籍身份恢复？"
+            ),
+            "outline_draft": (
+                "## Director 汇总\n总大纲草案分三幕：手稿预言事故、月背冷库真相、听证会公开自证。章节执行上先写前三章异常发现与追查入口。\n\n"
+                "## 候选项\n1. 10 章结构，节奏紧凑。\n2. 12 章结构，人物关系更充分。\n3. 15 章结构，群像扩展更多。\n\n"
+                "## 推荐选择\n采用 12 章结构，兼顾悬疑推进和人物弧光。\n\n"
+                "## 待确认问题\n是否以 12 章作为章节规划基准？"
+            ),
+            "review_lock": (
+                "## Director 汇总\n终审认为六阶段产物连续：方向、规则、人物、流程和章节基准一致，可以锁定为最终大纲。\n\n"
+                "## 约束审计\n未发现与检索上下文或已锁定阶段冲突的设定。\n\n"
+                "## 章节准备\n下一步可进入章节细纲，优先拆解第 1-3 章。\n\n"
+                "## 待确认问题\n是否锁定最终大纲并写入 outline.md？"
+            ),
+        }
+        return data.get(stage, data["direction"])
+
+    def _extract_prompt_field(self, prompt: str, name: str) -> str:
+        match = re.search(rf"^{name}:\s*(.*)$", prompt, re.MULTILINE)
+        return match.group(1).strip() if match else ""
 
     def _mock_research_intent(self, prompt: str) -> str:
         request = self._extract_director_request(prompt)

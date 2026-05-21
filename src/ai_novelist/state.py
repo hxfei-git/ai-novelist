@@ -8,6 +8,16 @@ from typing import Any, Literal
 ReviewStatus = Literal["draft", "approved", "rejected", "revision_requested", "stopped", "error"]
 EditorDecision = Literal["unknown", "pass", "revise", "stop"]
 NextAction = Literal["continue", "rewrite_chapter", "human_review", "persist", "stop"]
+OutlineStage = Literal[
+    "direction",
+    "worldbuilding",
+    "characters",
+    "story_flow",
+    "outline_draft",
+    "review_lock",
+    "done",
+]
+OutlineStageStatus = Literal["collecting", "options_ready", "locked", "revision_requested", "done"]
 
 
 @dataclass
@@ -53,6 +63,10 @@ class NovelState:
     pending_director_decision: dict[str, Any] = field(default_factory=dict)
     pending_question: str = ""
     active_task: str = ""
+    outline_stage: OutlineStage = "direction"
+    outline_stage_status: OutlineStageStatus = "collecting"
+    outline_stage_artifacts: dict[str, Any] = field(default_factory=dict)
+    outline_stage_history: list[dict[str, Any]] = field(default_factory=list)
     review_status: ReviewStatus = "draft"
     error: str = ""
 
@@ -103,6 +117,10 @@ class NovelState:
             pending_director_decision=normalize_dict(data.get("pending_director_decision", {})),
             pending_question=str(data.get("pending_question", "")),
             active_task=str(data.get("active_task", "")),
+            outline_stage=normalize_outline_stage(data.get("outline_stage", "direction")),
+            outline_stage_status=normalize_outline_stage_status(data.get("outline_stage_status", "collecting")),
+            outline_stage_artifacts=normalize_dict(data.get("outline_stage_artifacts", {})),
+            outline_stage_history=normalize_dict_list(data.get("outline_stage_history", [])),
             review_status=data.get("review_status", "draft"),
             error=str(data.get("error", "")),
         )
@@ -150,3 +168,15 @@ def normalize_dict(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {}
     return dict(value)
+
+
+def normalize_outline_stage(value: Any) -> OutlineStage:
+    stage = str(value or "direction").strip()
+    allowed = {"direction", "worldbuilding", "characters", "story_flow", "outline_draft", "review_lock", "done"}
+    return stage if stage in allowed else "direction"  # type: ignore[return-value]
+
+
+def normalize_outline_stage_status(value: Any) -> OutlineStageStatus:
+    status = str(value or "collecting").strip()
+    allowed = {"collecting", "options_ready", "locked", "revision_requested", "done"}
+    return status if status in allowed else "collecting"  # type: ignore[return-value]

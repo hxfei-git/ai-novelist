@@ -301,7 +301,8 @@ def build_task_prompt(state: NovelState, prompt_name: str) -> str:
         f"修订次数：{state.revision_count}\n"
         f"最大修订次数：{state.max_revisions}\n"
         f"编辑结论：{state.editor_decision}\n"
-        f"质量分：{state.quality_score}\n\n"
+        f"质量分：{state.quality_score}\n"
+        f"大纲阶段：{state.outline_stage} / {state.outline_stage_status}\n\n"
         f"## 检索上下文\n查询：{state.retrieval_query or '暂无'}\n\n{state.retrieval_context or '暂无'}\n\n来源：\n{format_retrieval_sources(state.retrieval_sources)}\n\n"
         f"## 已有世界观\n{state.worldbuilding or '暂无'}\n\n"
         f"## 已有总大纲\n{state.outline or '暂无'}\n\n"
@@ -375,6 +376,7 @@ OUTLINE_WORKFLOW_ACTIONS = {
     "revise_outline",
     "compare_versions",
     "show_outline",
+    "advance_outline_stage",
 }
 
 
@@ -438,6 +440,16 @@ def build_chat_graph(adapter: AgentAdapter, store: LocalStore, progress: Progres
 
 def director_node(data: dict, adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc = noop_progress) -> dict:
     state = NovelState.from_dict(data)
+    if state.active_workflow == "outline" and is_outline_stage_confirmation_text(state.user_request):
+        state.director_action = "advance_outline_stage"
+        state.director_intent = "approve"
+        state.active_artifact = "outline_stage"
+        state.director_message = "我会锁定当前大纲阶段，并进入下一阶段。"
+        state.active_task = "advance_outline_stage"
+        state.next_action = "advance_outline_stage"
+        append_message(state, "assistant", state.director_message)
+        store.save_state(state)
+        return state.to_dict()
     prompt = build_director_prompt(state)
     progress("Director", "正在理解你的需求...")
     try:
@@ -539,49 +551,24 @@ def run_selected_agent(data: dict, adapter: AgentAdapter, store: LocalStore, pro
 
 def run_selected_outline_agent(state: NovelState, adapter: AgentAdapter, store: LocalStore, action: str, progress: ProgressFunc = noop_progress) -> dict:
     from ai_novelist.graph_outline import (
-        compare_outline_versions_node,
-        generate_outline_node,
-        propose_directions_node,
-        review_outline_node,
-        revise_outline_node,
+        advance_outline_stage_node,
+        run_outline_stage_node,
+        show_outline_stage_node,
     )
 
-    current = state.to_dict()
-    if action == "propose_directions":
-        progress("DirectionProposer", "正在生成多个创作方向...")
-        current = propose_directions_node(current, adapter, store)
-        state = NovelState.from_dict(current)
-        state.director_message = "已生成三个大纲/创意方向，请选择一个或继续提出修改。"
-    elif action == "generate_outline":
-        progress("OutlinePlanner", "正在生成大纲草案...")
-        current = generate_outline_node(current, adapter, store)
-        progress("OutlineEditor", "正在审查大纲...")
-        current = review_outline_node(current, adapter, store)
-        state = NovelState.from_dict(current)
-        state.director_message = f"已生成并审查大纲：{state.editor_decision}，质量分 {state.quality_score}。"
-    elif action == "review_outline":
-        progress("OutlineEditor", "正在审查大纲...")
-        current = review_outline_node(current, adapter, store)
-        state = NovelState.from_dict(current)
-        state.director_message = f"大纲审查完成：{state.editor_decision}，质量分 {state.quality_score}。"
-    elif action == "revise_outline":
-        progress("OutlineReviser", "正在按反馈修订大纲...")
-        current = revise_outline_node(current, adapter, store)
-        progress("VersionComparator", "正在比较大纲版本...")
-        current = compare_outline_versions_node(current, adapter, store)
-        progress("OutlineEditor", "正在审查大纲...")
-        current = review_outline_node(current, adapter, store)
-        state = NovelState.from_dict(current)
-        state.director_message = f"已按反馈修订大纲并复审：{state.editor_decision}，质量分 {state.quality_score}。"
-    elif action == "compare_versions":
-        progress("VersionComparator", "正在比较大纲版本...")
-        current = compare_outline_versions_node(current, adapter, store)
-        state = NovelState.from_dict(current)
-        state.director_message = "已比较最近的大纲版本，差异摘要已写入编辑意见。"
-    progress("Done", outline_done_message(action))
-    append_message(state, "assistant", state.director_message)
-    store.save_state(state)
-    return state.to_dict()
+    if action == "show_outline":
+        return show_outline_stage_node(state.to_dict(), store)
+    if action in {"advance_outline_stage", "persist_outline", "persist_outputs"}:
+        progress("OutlineStage", "正在锁定当前大纲阶段...")
+        return advance_outline_stage_node(state.to_dict(), adapter, store)
+
+    progress("OutlineStage", "正在执行当前大纲共创阶段...")
+    state.director_action = "run_outline_stage"
+    result = NovelState.from_dict(run_outline_stage_node(state.to_dict(), adapter, store))
+    progress("Done", outline_done_message("run_outline_stage"))
+    append_message(result, "assistant", result.director_message)
+    store.save_state(result)
+    return result.to_dict()
 
 
 def persist_available_outputs(data: dict, store: LocalStore) -> dict:
@@ -692,6 +679,12 @@ def build_reference_summary(state: NovelState, max_chars: int = 2200) -> str:
     return summary or "暂无"
 
 
+def is_outline_stage_confirmation_text(text: str) -> bool:
+    lowered = text.strip().lower()
+    exact = {"确认", "下一阶段", "进入下一阶段", "确认进入下一阶段", "锁定", "锁定当前阶段", "ok", "yes", "approve", "confirm"}
+    return lowered in exact or any(marker in text for marker in ("确认进入下一阶段", "锁定并进入", "进入下一阶段", "推进到下一阶段"))
+
+
 def task_progress_message(task: AgentTask) -> tuple[str, str]:
     if task == "worldbuild":
         return "WorldBuilder", "正在设计世界观..."
@@ -748,8 +741,10 @@ def build_director_prompt(state: NovelState) -> str:
         f"参考简报：{'已有' if state.reference_brief else '暂无'}\n"
         f"检索查询：{state.retrieval_query or '暂无'}\n"
         f"编辑结论：{state.editor_decision}\n"
-        f"质量分：{state.quality_score}\n\n"
+        f"质量分：{state.quality_score}\n"
+        f"大纲阶段：{state.outline_stage} / {state.outline_stage_status}\n\n"
         f"## 已获取参考信息摘要\n{build_reference_summary(state, max_chars=1200) if state.reference_brief or state.retrieval_context or state.research_sources else '暂无'}\n\n"
+        f"## 最近编辑意见和待确认项\n{state.editor_notes[-1800:] if state.editor_notes.strip() else '暂无'}\n\n"
         f"## 最近对话\n{history or '暂无'}\n\n"
         f"最新用户输入：{state.user_request}\n"
     )

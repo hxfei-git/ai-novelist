@@ -309,10 +309,10 @@ def test_chat_prints_outline_body_after_generate_outline(tmp_path, capsys):
     print_chat_turn_result(type("State", (), result)(), store)
     captured = capsys.readouterr().out
 
-    assert result["director_action"] == "generate_outline"
-    assert "当前大纲：" in captured
-    assert "# 总大纲" in captured
-    assert "最近编辑意见：" in captured
+    assert result["director_action"] == "run_outline_stage"
+    assert "当前大纲阶段：方向定位 / options_ready" in captured
+    assert "黑暗悬疑科幻" in captured
+    assert result["outline"] == ""
 
 
 def test_chat_generate_outline_reports_progress_without_mutating_message(tmp_path):
@@ -327,11 +327,11 @@ def test_chat_generate_outline_reports_progress_without_mutating_message(tmp_pat
     result = graph.invoke(state.to_dict())
 
     assert ("Director", "正在理解你的需求...") in events
-    assert ("OutlinePlanner", "正在生成大纲草案...") in events
-    assert ("OutlineEditor", "正在审查大纲...") in events
-    assert events[-1] == ("Done", "大纲草案已生成，等待你查看、修改或保存。")
+    assert ("OutlineStage", "正在执行当前大纲共创阶段...") in events
+    assert events[-1] == ("Done", "当前任务已完成。")
     assert "[Director]" not in result["director_message"]
-    assert "# 总大纲" in result["outline"]
+    assert result["outline"] == ""
+    assert result["outline_stage_status"] == "options_ready"
 
 
 def test_unsaved_outline_status_does_not_present_path_as_openable(tmp_path):
@@ -358,10 +358,10 @@ def test_chat_new_story_idea_enters_outline_workflow(tmp_path):
     state.messages.append({"role": "user", "content": state.user_request})
     result = graph.invoke(state.to_dict())
 
-    assert result["director_action"] == "propose_directions"
+    assert result["director_action"] == "run_outline_stage"
     assert result["active_workflow"] == "outline"
-    assert result["current_stage"] == "propose_directions"
-    assert any(version.get("kind") == "directions" for version in result["outline_versions"])
+    assert result["current_stage"] == "direction"
+    assert "direction" in result["outline_stage_artifacts"]
 
 
 def test_chat_second_turn_in_outline_workflow_uses_outline_graph(tmp_path):
@@ -379,9 +379,10 @@ def test_chat_second_turn_in_outline_workflow_uses_outline_graph(tmp_path):
     first.messages.append({"role": "user", "content": first.user_request})
     second = outline_graph.invoke(first.to_dict())
 
-    assert second["director_action"] == "revise_outline"
+    assert second["director_action"] == "run_outline_stage"
     assert second["active_workflow"] == "outline"
-    assert "修订版总大纲" in second["outline"]
+    assert second["outline_stage"] == "direction"
+    assert second["outline"] == ""
 
 
 def test_outline_workflow_save_clears_active_workflow(tmp_path):

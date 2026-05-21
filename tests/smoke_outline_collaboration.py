@@ -27,18 +27,22 @@ def main() -> int:
         graph = build_outline_collaboration_graph(CodexCLIAdapter(mock=True), store)
 
         state = run_turn(graph, store, state, "生成大纲")
-        assert state.outline
-        assert state.editor_decision == "revise"
+        assert state.outline_stage == "direction"
+        assert state.outline_stage_status == "options_ready"
+        assert "direction" in state.outline_stage_artifacts
+        assert not state.outline
         assert not store.outline_path("demo").exists()
 
-        state = run_turn(graph, store, state, "大纲太普通，强化主角罪感，第三幕更黑暗")
-        assert state.editor_decision == "pass"
-        assert state.revision_count == 1
-        assert "修订版总大纲" in state.outline
+        state = run_turn(graph, store, state, "方向太普通，强化主角罪感，第三幕更黑暗")
+        assert state.outline_stage == "direction"
+        assert state.outline_stage_status == "options_ready"
+        assert not state.outline
 
-        state = run_turn(graph, store, state, "保存大纲")
-        assert state.review_status == "approved"
-        assert store.outline_path("demo").exists()
+        state = run_turn(graph, store, state, "确认进入下一阶段")
+        assert state.outline_stage == "worldbuilding"
+        assert state.outline_stage_artifacts["direction"]["status"] == "locked"
+        assert "worldbuilding" in state.outline_stage_artifacts
+        assert not store.outline_path("demo").exists()
 
     print("outline collaboration smoke ok")
     return 0

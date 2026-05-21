@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from collections.abc import Callable
 from typing import Any, Literal
@@ -204,7 +205,12 @@ class DirectorService:
         if decision.action == "research":
             result_state = self._run_research(state)
         elif decision.action == "persist_outputs":
-            result_state = NovelState.from_dict(persist_available_outputs(state.to_dict(), self.store))
+            if state.active_workflow == "outline" and state.outline_stage != "done":
+                from ai_novelist.graph_outline import advance_outline_stage_node
+
+                result_state = NovelState.from_dict(advance_outline_stage_node(state.to_dict(), self.adapter, self.store))
+            else:
+                result_state = NovelState.from_dict(persist_available_outputs(state.to_dict(), self.store))
         elif decision.action == "show_status":
             result_state = NovelState.from_dict(show_status_node(state.to_dict(), self.store))
         elif decision.action == "show_outline":
@@ -299,8 +305,10 @@ def build_service_director_prompt(state: NovelState, store: LocalStore, channel:
         f"章节细纲：{'已有' if state.chapter_plan else '暂无'}\n"
         f"章节正文：{'已有' if state.chapter_draft else '暂无'}\n"
         f"编辑意见：{'已有' if state.editor_notes else '暂无'}\n"
-        f"待确认决策：{'有' if state.pending_director_decision else '无'}\n\n"
+        f"待确认决策：{'有' if state.pending_director_decision else '无'}\n"
+        f"大纲阶段：{state.outline_stage} / {state.outline_stage_status}\n\n"
         f"## 已获取参考信息摘要\n{build_reference_summary(state, max_chars=1200) if state.reference_brief or state.retrieval_context or state.research_sources else '暂无'}\n\n"
+        f"## 最近编辑意见和待确认项\n{state.editor_notes[-1800:] if state.editor_notes.strip() else '暂无'}\n\n"
         f"## 最近对话\n{history or '暂无'}\n\n"
         f"最新用户输入：{state.user_request}\n"
     )
@@ -318,7 +326,90 @@ def parse_service_director_output(output: str, state: NovelState) -> DirectorDec
         legacy["task_args"] = {}
         decision = DirectorDecision.from_dict(legacy)
     hydrate_decision_args(decision, state)
+    apply_pending_confirmation_feedback(decision, state)
     return decision
+
+
+def apply_pending_confirmation_feedback(decision: DirectorDecision, state: NovelState) -> None:
+    questions = extract_confirmation_questions(state)
+    if not questions or not has_confirmation_feedback(state.user_request):
+        return
+
+    constraints = confirmation_feedback_constraints(state.user_request, questions)
+    if not constraints:
+        return
+
+    for item in constraints:
+        if item not in decision.locked_constraints:
+            decision.locked_constraints.append(item)
+
+    feedback_instruction = "；".join(constraints)
+    if decision.instruction:
+        decision.instruction = f"{decision.instruction}；{feedback_instruction}"
+    else:
+        decision.instruction = feedback_instruction
+    decision.task_args["instruction"] = decision.instruction
+
+    if state.outline.strip() and state.editor_decision == "revise" and decision.action == "ask_user":
+        decision.action = "revise_outline"
+        decision.requires_confirmation = True
+        decision.intent = "revise"
+        decision.target = "outline"
+        decision.user_message = "我会把这些确认项作为锁定约束纳入大纲修订。"
+
+
+def extract_confirmation_questions(state: NovelState) -> list[str]:
+    text = "\n".join(
+        item
+        for item in [
+            state.editor_notes,
+            state.pending_question,
+            "\n".join(state.pending_questions),
+        ]
+        if item
+    )
+    questions: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        line = re.sub(r"^[-*+•\d.、\s]+", "", line).strip()
+        if not line:
+            continue
+        if "？" in line or "?" in line or line.startswith(("是否", "能否", "要不要")):
+            questions.append(line)
+    return list(dict.fromkeys(questions))[-6:]
+
+
+def has_confirmation_feedback(text: str) -> bool:
+    if any(word in text for word in ("接受", "接收", "同意", "认可", "采用")):
+        return True
+    return bool(re.search(r"\b(ok|yes|approve|confirm)\b", text, re.IGNORECASE))
+
+
+def confirmation_feedback_constraints(text: str, questions: list[str]) -> list[str]:
+    accept_pattern = re.compile(r"接受|接收|同意|认可|采用|\bok\b|\byes\b|\bapprove\b|\bconfirm\b", re.IGNORECASE)
+    first_accept = accept_pattern.search(text)
+    constraints: list[str] = []
+    question_index = 0
+
+    if first_accept:
+        explicit_answer = text[: first_accept.start()].strip(" ：:，,。.!！?？；; \n\t")
+        accept_count = len(accept_pattern.findall(text[first_accept.start() :]))
+    else:
+        explicit_answer = text.strip(" ：:，,。.!！?？；; \n\t")
+        accept_count = 0
+
+    if explicit_answer and questions:
+        constraints.append(f"用户确认：{questions[0]} -> {explicit_answer}")
+        question_index = 1
+
+    if accept_count and not explicit_answer and accept_count >= len(questions):
+        remaining = questions
+    else:
+        remaining = questions[question_index : question_index + accept_count]
+    constraints.extend(f"用户接受：{question}" for question in remaining)
+    return constraints
 
 
 def parse_json_object(output: str) -> dict[str, Any]:
@@ -439,7 +530,7 @@ def confirmation_choices() -> list[DirectorChoice]:
 
 
 def is_confirmation(text: str) -> bool:
-    return text.strip().lower() in {"1", "y", "yes", "ok", "okay", "confirm", "approve", "确认", "可以", "继续", "执行", "是"}
+    return text.strip().lower() in {"1", "y", "yes", "ok", "okay", "confirm", "approve", "确认", "可以", "继续", "执行", "是", "接受", "接收", "同意", "认可"}
 
 
 def is_rejection(text: str) -> bool:

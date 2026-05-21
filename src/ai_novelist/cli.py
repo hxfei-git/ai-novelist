@@ -277,6 +277,22 @@ def run_compose_command(
     effective_timeout = args.timeout or settings.codex_timeout_seconds
     adapter = make_agent_adapter(args, settings, effective_timeout)
     print_real_mode_notice(args.mock, adapter, effective_timeout)
+    if not state.outline.strip() or not store.outline_path(state.project_id).exists():
+        state.user_request = "请启动或继续阶段化大纲共创"
+        state.active_workflow = "outline"
+        append_message(state, "user", state.user_request)
+        store.save_state(state)
+        graph = build_outline_collaboration_graph(adapter, store)
+        result = NovelState.from_dict(graph.invoke(state.to_dict()))
+        print_outline_turn_result(result, store)
+        if args.auto_approve and result.outline_stage_status == "options_ready" and result.outline_stage != "done":
+            result.user_request = "确认进入下一阶段"
+            append_message(result, "user", result.user_request)
+            store.save_state(result)
+            result = NovelState.from_dict(graph.invoke(result.to_dict()))
+            print_outline_turn_result(result, store)
+        return 1 if result.error else 0
+
     graph = build_composer_graph(adapter, store, review_func=make_compose_review_func(args.auto_approve))
     result = NovelState.from_dict(graph.invoke(state.to_dict()))
 
@@ -417,7 +433,8 @@ def print_project_startup_context(state: NovelState, store: LocalStore) -> None:
     lines = [
         f"Director> 当前项目状态：{state.project_id}",
         f"- 参考简报：{'已有' if state.reference_brief.strip() else '暂无'}",
-        f"- 大纲：{'已有' if state.outline.strip() else '暂无'}",
+        f"- 大纲：{'已锁定' if state.outline_stage == 'done' and state.outline.strip() else '阶段共创中' if state.active_workflow == 'outline' else '暂无'}",
+        f"- 大纲阶段：{state.outline_stage} / {state.outline_stage_status}",
         f"- 世界观：{'已有' if state.worldbuilding.strip() else '暂无'}",
         f"- 章节细纲：{'已有' if state.chapter_plan.strip() else '暂无'}",
         f"- 章节正文：{'已有' if state.chapter_draft.strip() else '暂无'}",
@@ -448,7 +465,7 @@ def print_chat_turn_result(state: NovelState, store: LocalStore) -> None:
 
     if state.director_action == "research":
         print_research_result(state, store)
-    elif state.director_action in {"generate_outline", "revise_outline", "review_outline", "compare_versions"}:
+    elif state.director_action in {"run_outline_stage", "advance_outline_stage", "show_outline_stage", "generate_outline", "revise_outline", "review_outline", "compare_versions"}:
         print_outline_artifacts(state)
     elif state.director_action == "propose_directions":
         print_direction_proposal(state)
@@ -472,6 +489,12 @@ def print_research_result(state: NovelState, store: LocalStore) -> None:
 
 
 def print_outline_artifacts(state: NovelState) -> None:
+    artifact = state.outline_stage_artifacts.get(state.outline_stage)
+    if artifact:
+        print(f"\n当前大纲阶段：{artifact.get('label', state.outline_stage)} / {state.outline_stage_status}")
+        synthesis = str(artifact.get("synthesis", "")).strip()
+        if synthesis:
+            print(synthesis)
     if state.outline:
         print("\n当前大纲：")
         print(state.outline)
@@ -525,6 +548,22 @@ def run_writer_command(
     effective_timeout = args.timeout or settings.codex_timeout_seconds
     adapter = make_agent_adapter(args, settings, effective_timeout)
     print_real_mode_notice(args.mock, adapter, effective_timeout)
+    if task == "plan_outline":
+        state.user_request = "请启动或继续阶段化大纲共创"
+        state.active_workflow = "outline"
+        append_message(state, "user", state.user_request)
+        store.save_state(state)
+        graph = build_outline_collaboration_graph(adapter, store)
+        result = NovelState.from_dict(graph.invoke(state.to_dict()))
+        print_outline_turn_result(result, store)
+        if args.auto_approve and result.outline_stage_status == "options_ready" and result.outline_stage != "done":
+            result.user_request = "确认进入下一阶段"
+            append_message(result, "user", result.user_request)
+            store.save_state(result)
+            result = NovelState.from_dict(graph.invoke(result.to_dict()))
+            print_outline_turn_result(result, store)
+        return 1 if result.error else 0
+
     graph = build_writer_graph(adapter, store, task, review_func=make_writer_review_func(args.auto_approve))
     result = NovelState.from_dict(graph.invoke(state.to_dict()))
 

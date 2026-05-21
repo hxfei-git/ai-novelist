@@ -14,6 +14,7 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
 - Research/检索增强：chat 可先搜索原始资料，生成通用 `retrieval_context`，并继续产出兼容旧流程的参考简报和来源列表。
 - 本地小说知识库优先 RAG：chat 可配置本地 `.txt/.md` 语料目录，research 优先检索本地语料；本地无命中时回退 mock 或真实联网搜索。
 - 大纲共创增强：outline collaboration graph，支持方向提案、生成、审稿、用户反馈、修订、版本比较、锁定约束、查看正文和保存。
+- Director 交互增强：用户始终只和 Director 对话；Director 会把口语化、多项确认和“接收/接受/同意”等回复转译为下游 Agent 可执行的 `instruction` 与 `locked_constraints`。
 - mock 模式：不依赖外部模型即可端到端验证。
 - 真实模式：Codex CLI 或 DeepSeek API。
 
@@ -107,6 +108,8 @@ Prompt 模板层
 ```
 
 ## 3. Chat 主入口调度
+
+用户侧所有直接交互都应先进入 Director。Director 负责理解自然语言、合并上下文中的待确认项，并把用户反馈转译为下游 Agent 能直接执行的 `task_args/instruction/locked_constraints`；用户不需要、也不应直接按其他 prompts 的格式和子 Agent 对话。
 
 `run_chat_command` 每轮加载同一个项目的 `state.json`，根据状态和用户输入选择子图：
 
@@ -220,6 +223,8 @@ outline prompt 已注入 retrieval/research 上下文：
 writer prompt（worldbuild、plan_outline、plan_chapters、write_chapter、review）也会注入通用检索上下文，复用已有 `/research` 搜索结果。
 
 如果存在原作不确定点，prompt 要求先确认，不得擅自补完原作设定。
+
+当上一轮编辑意见包含多个待确认问题时，Director prompt 会带入最近编辑意见正文；若用户用“答案 + 接收/接受/同意”回复，Director 会按顺序把明确答案和接受项写入锁定约束，再触发大纲修订确认。
 
 ## 6. Compose 图
 
@@ -514,3 +519,33 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 - `DirectorTurnResult` 增加 `choices`，用于表达可交互选项；当前确认场景返回 `confirm/确认执行/1` 与 `cancel/取消/2`。
 - CLI `chat` 在收到 `choices` 时渲染编号菜单，用户可输入 `1` 确认、`2` 取消，同时继续兼容“确认/取消/yes/no”等文本。
 - 该结构可直接映射到未来飞书按钮或卡片 action，不需要重新解析自然语言确认。
+
+
+## 17. 阶段化大纲共创流程
+
+已完成：
+
+- 大纲生成改为固定六阶段：方向定位、世界观设定、人物关系、故事流程、总大纲草案、审稿锁定。
+- `NovelState` 新增 `outline_stage`、`outline_stage_status`、`outline_stage_artifacts`、`outline_stage_history`，旧 `state.json` 缺字段时默认从 `direction/collecting` 加载。
+- `LocalStore` 新增 `outline_stages/<stage>.md` 路径和保存/读取方法；阶段产物逐阶段落盘，最终 `outline.md` 只在审稿锁定阶段确认后写入。
+- `graph_outline` 新增阶段执行节点：每轮按当前阶段调用 3 个固定角色 `AGENT: outline_stage_role`，再调用 `AGENT: outline_stage_synthesizer` 汇总。
+- 用户反馈默认重跑当前阶段；“确认进入下一阶段/锁定”才推进；“回到世界观/重做人设/查看故事流程”等可切换或展示阶段产物。
+- `chat`、`outline`、`plan-outline`、`compose` 入口均遵守阶段化流程；新项目不会再一次性生成完整总大纲。
+- `compose` 在没有已保存大纲时只启动/继续当前大纲阶段并停止；已有 `outline.md` 的旧项目仍可继续章节细纲和正文。
+- Mock adapter 支持 `outline_stage_role` 与 `outline_stage_synthesizer`，保证阶段测试稳定。
+
+当前边界：
+
+- 阶段产物解析目前以 Markdown 汇总为主，`candidates` 和 `pending questions` 尚未拆成更细结构化字段。
+- 旧的一次性 outline 节点仍保留在代码中，主要用于兼容工具函数和旧测试路径；推荐入口已转向阶段节点。
+- DirectorService 的确认模型仍会对部分动作要求执行确认；阶段推进本身由明确的“确认进入下一阶段”触发。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest
+.venv/bin/python tests/smoke_outline_collaboration.py
+.venv/bin/python tests/smoke_phase2_chat.py
+```
+
+结果：`78 passed`；两个 smoke 均通过。

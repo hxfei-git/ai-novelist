@@ -28,6 +28,7 @@
 - `research/retrieval`：搜索原始资料，生成通用 `retrieval_context`，并继续生成兼容旧流程的参考简报、原作事实、来源列表和不确定点。
 - 本地小说知识库优先 RAG：可通过 `AI_NOVELIST_LOCAL_CORPUS_DIR` 或 `chat --local-corpus-dir` 指定 `.txt/.md` 语料目录，research 本地命中时不调用 mock/web。
 - `outline`：交互式大纲共创流程，支持方向、生成、审稿、修订、版本比较、查看、锁定和保存。
+- Director 交互转译增强：所有用户输入仍先进入 Director；Director prompt 现在包含最近编辑意见和待确认项，并能把“答案 + 接收/接受/同意”的多项确认合并成下游可执行约束。
 - `compose`：一次性完整多 Agent 创作图。
 - 单步 Agent 命令：`worldbuild`、`plan-outline`、`plan-chapters`、`write-chapter`、`review`。
 
@@ -219,10 +220,11 @@ worldbuild
 .venv/bin/python tests/smoke_phase2_chat.py
 ```
 
-当前验证结果：`65 passed`；本轮目标测试 `tests/test_search_backend.py tests/test_research_workflow.py` 为 `24 passed`。
+当前验证结果：`75 passed`。本轮新增验证：`tests/test_director_service.py` 为 `6 passed`，覆盖多项确认转译和“接收/接受”确认词。
 
 ## 8. 设计决策
 
+- 用户只和 Director 交互，Director 负责把口语化反馈、多个待确认项的回答和确认词转译为明确的 `instruction`、`task_args` 与 `locked_constraints` 后再调度子 Agent。
 - `chat` 是唯一推荐主入口，`outline` 和单步命令保留为兼容/调试能力。
 - Director 不直接替代子 Agent，只判断意图、提炼指令、记录约束并调度节点。
 - research 在大纲前执行，避免把已有小说/IP/专有名词当普通题材生成错误同人设定。
@@ -350,3 +352,23 @@ Smoke 验证：`.venv/bin/python tests/smoke_phase2_chat.py`，结果 `phase2 ch
 ```
 
 结果：`44 passed`。
+
+
+## 16. 本轮更新：六阶段大纲共创
+
+- 将新项目大纲入口改为六阶段共创：方向定位 -> 世界观设定 -> 人物关系 -> 故事流程 -> 总大纲草案 -> 审稿锁定。
+- 新增阶段状态字段与 `projects/<project>/outline_stages/<stage>.md`，每阶段保存角色短评和 Director 汇总；最终第 6 阶段确认后才写 `outline.md`。
+- `chat`、`outline`、`plan-outline`、`compose` 不再在新项目上静默生成完整大纲；`compose` 会先推进当前大纲阶段并停止。
+- `--auto-approve` 只确认当前已有阶段产物，不会一次性跑完整六阶段。
+- Mock adapter 增加阶段角色与阶段汇总输出，测试可确定地覆盖阶段推进。
+- 保留旧项目兼容：已有 `outline` 且 `outline.md` 已保存时，`compose` 可继续章节写作；已有草案仍可“查看大纲/保存大纲”。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest
+.venv/bin/python tests/smoke_outline_collaboration.py
+.venv/bin/python tests/smoke_phase2_chat.py
+```
+
+结果：全量 `78 passed`；`outline collaboration smoke ok`；`phase2 chat smoke ok`。

@@ -13,38 +13,53 @@ def run_outline_turn(graph, state, store, text):
     return NovelState.from_dict(graph.invoke(state.to_dict()))
 
 
-def test_outline_collaboration_approve_persists_outline(tmp_path):
+def test_outline_collaboration_generates_only_first_stage(tmp_path):
     store = LocalStore(tmp_path)
     state = store.create_project("Demo", "demo")
     state.idea = "月球城市失忆工程师"
     graph = build_outline_collaboration_graph(CodexCLIAdapter(mock=True), store)
 
     state = run_outline_turn(graph, state, store, "请生成大纲")
-    assert state.outline
-    assert state.review_status == "revision_requested"
+
+    assert state.outline_stage == "direction"
+    assert state.outline_stage_status == "options_ready"
+    assert "direction" in state.outline_stage_artifacts
+    assert "黑暗悬疑科幻" in state.outline_stage_artifacts["direction"]["synthesis"]
+    assert not state.outline
+    assert not store.outline_path("demo").exists()
+    assert store.outline_stage_path("demo", "direction").exists()
+
+
+def test_outline_confirmation_advances_one_stage(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.idea = "月球城市失忆工程师"
+    graph = build_outline_collaboration_graph(CodexCLIAdapter(mock=True), store)
+
+    state = run_outline_turn(graph, state, store, "请生成大纲")
+    state = run_outline_turn(graph, state, store, "确认进入下一阶段")
+
+    assert state.outline_stage == "worldbuilding"
+    assert state.outline_stage_status == "options_ready"
+    assert state.outline_stage_artifacts["direction"]["status"] == "locked"
+    assert "worldbuilding" in state.outline_stage_artifacts
     assert not store.outline_path("demo").exists()
 
-    state = run_outline_turn(graph, state, store, "保存大纲")
-    assert state.review_status == "approved"
-    assert store.outline_path("demo").exists()
 
-
-def test_outline_collaboration_revise_creates_new_version(tmp_path):
+def test_outline_feedback_stays_on_current_stage(tmp_path):
     store = LocalStore(tmp_path)
     state = store.create_project("Demo", "demo")
     state.idea = "月球城市失忆工程师"
     graph = build_outline_collaboration_graph(CodexCLIAdapter(mock=True), store)
 
     state = run_outline_turn(graph, state, store, "请生成大纲")
-    original_version_count = len(state.outline_versions)
-    state = run_outline_turn(graph, state, store, "大纲太普通，强化主角罪感，第三幕更黑暗")
+    state = run_outline_turn(graph, state, store, "方向太普通，强化主角罪感，第三幕更黑暗")
 
-    assert state.director_action == "revise_outline"
-    assert state.revision_count == 1
-    assert len(state.outline_versions) > original_version_count
-    assert "修订版总大纲" in state.outline
-    assert "主角罪感" in state.revision_instruction
-    assert state.editor_decision == "pass"
+    assert state.director_action == "run_outline_stage"
+    assert state.outline_stage == "direction"
+    assert state.outline_stage_status == "options_ready"
+    assert not state.outline
+    assert not store.outline_path("demo").exists()
 
 
 def test_outline_collaboration_lock_persists_constraints(tmp_path):
@@ -60,32 +75,37 @@ def test_outline_collaboration_lock_persists_constraints(tmp_path):
     assert "失忆工程师" in state.locked_constraints[0]
 
 
-def test_outline_editor_revise_does_not_persist_directly(tmp_path):
+def test_six_stage_confirmation_persists_final_outline(tmp_path):
     store = LocalStore(tmp_path)
     state = store.create_project("Demo", "demo")
     state.idea = "月球城市失忆工程师"
     graph = build_outline_collaboration_graph(CodexCLIAdapter(mock=True), store)
 
     state = run_outline_turn(graph, state, store, "生成大纲")
+    for _ in range(6):
+        state = run_outline_turn(graph, state, store, "确认进入下一阶段")
 
-    assert state.editor_decision == "revise"
-    assert state.review_status == "revision_requested"
-    assert state.outline
-    assert not store.outline_path("demo").exists()
+    assert state.outline_stage == "done"
+    assert state.outline_stage_status == "done"
+    assert state.review_status == "approved"
+    assert "最终锁定总大纲" in state.outline
+    assert store.outline_path("demo").exists()
 
 
-def test_outline_variant_generates_directions_and_waits(tmp_path):
+def test_outline_stage_view_can_show_story_flow(tmp_path):
     store = LocalStore(tmp_path)
     state = store.create_project("Demo", "demo")
     state.idea = "月球城市失忆工程师"
     graph = build_outline_collaboration_graph(CodexCLIAdapter(mock=True), store)
 
-    state = run_outline_turn(graph, state, store, "variant: 给我三个不同方向")
+    state = run_outline_turn(graph, state, store, "生成大纲")
+    state = run_outline_turn(graph, state, store, "确认进入下一阶段")
+    state = run_outline_turn(graph, state, store, "确认进入下一阶段")
+    state = run_outline_turn(graph, state, store, "确认进入下一阶段")
+    state = run_outline_turn(graph, state, store, "查看故事流程")
 
-    assert state.director_action == "propose_directions"
-    assert state.next_action == "end"
-    assert any(version.get("kind") == "directions" for version in state.outline_versions)
-    assert not store.outline_path("demo").exists()
+    assert state.director_action == "show_outline_stage"
+    assert "故事流程" in state.director_message
 
 
 def test_old_state_json_missing_new_fields_still_loads():
@@ -99,23 +119,24 @@ def test_old_state_json_missing_new_fields_still_loads():
     assert state.retrieval_context == ""
     assert state.retrieval_query == ""
     assert state.retrieval_sources == []
+    assert state.outline_stage == "direction"
+    assert state.outline_stage_status == "collecting"
 
 
-def test_chat_routes_outline_revision_request(tmp_path):
+def test_chat_routes_outline_request_to_stage_flow(tmp_path):
     store = LocalStore(tmp_path)
     state = store.create_project("Demo", "demo")
     state.idea = "月球城市失忆工程师"
-    state.outline = "# 旧大纲\n主角追查手稿。"
     graph = build_chat_graph(CodexCLIAdapter(mock=True), store)
 
-    state.user_request = "大纲太普通，强化主角罪感"
+    state.user_request = "生成大纲"
     state.messages.append({"role": "user", "content": state.user_request})
     result = graph.invoke(state.to_dict())
 
-    assert result["director_action"] == "revise_outline"
-    assert "强化主角罪感" in result["revision_instruction"]
-    assert "修订版总大纲" in result["outline"]
-    assert result["editor_decision"] == "pass"
+    assert result["director_action"] == "run_outline_stage"
+    assert result["outline_stage"] == "direction"
+    assert result["outline_stage_status"] == "options_ready"
+    assert result["outline"] == ""
 
 
 def test_outline_prompt_injects_retrieval_context():
