@@ -16,6 +16,9 @@ dependencies = [
 dev = [
   "pytest>=8.0",
 ]
+feishu = [
+  "lark-oapi>=1.6.5",
+]
 
 [project.scripts]
 ai-novelist = "ai_novelist.cli:main"

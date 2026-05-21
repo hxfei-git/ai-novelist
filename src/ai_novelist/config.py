@@ -21,6 +21,9 @@ class Settings:
     search_base_url: str = ""
     search_timeout_seconds: int = 20
     local_corpus_dir: str = ""
+    feishu_app_id: str = ""
+    feishu_app_secret: str = ""
+    feishu_domain: str = "feishu"
 
 
 def load_settings() -> Settings:
@@ -37,6 +40,9 @@ def load_settings() -> Settings:
         search_base_url=os.getenv("AI_NOVELIST_SEARCH_BASE_URL", "").strip(),
         search_timeout_seconds=int(os.getenv("AI_NOVELIST_SEARCH_TIMEOUT", "20")),
         local_corpus_dir=os.getenv("AI_NOVELIST_LOCAL_CORPUS_DIR", "").strip(),
+        feishu_app_id=os.getenv("AI_NOVELIST_FEISHU_APP_ID", "").strip(),
+        feishu_app_secret=os.getenv("AI_NOVELIST_FEISHU_APP_SECRET", "").strip(),
+        feishu_domain=os.getenv("AI_NOVELIST_FEISHU_DOMAIN", "feishu").strip().lower(),
     )
 
 

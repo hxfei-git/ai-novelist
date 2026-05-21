@@ -10,6 +10,7 @@ from ai_novelist.adapters.codex_cli import CodexCLIAdapter
 from ai_novelist.adapters.deepseek import DeepSeekAdapter
 from ai_novelist.config import Settings, load_settings
 from ai_novelist.director_service import DirectorService
+from ai_novelist.feishu import FeishuBotService, FeishuConfigError, run_feishu_long_connection
 from ai_novelist.graph_minimal import build_minimal_graph
 from ai_novelist.graph_outline import build_outline_collaboration_graph
 from ai_novelist.graph_research import build_research_graph, detect_research_need_text
@@ -54,6 +55,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_compose_command(args, store, settings)
         if args.command == "chat":
             return run_chat_command(args, store, settings)
+        if args.command == "feishu":
+            return run_feishu_command(args, store, settings)
         if args.command == "worldbuild":
             return run_writer_command(args, store, settings, "worldbuild")
         if args.command == "plan-outline":
@@ -66,7 +69,7 @@ def main(argv: list[str] | None = None) -> int:
             return run_writer_command(args, store, settings, "review")
         if args.command == "show":
             return show_project(args, store)
-    except (LocalStoreError, SearchBackendError) as exc:
+    except (LocalStoreError, SearchBackendError, FeishuConfigError) as exc:
         print(f"错误：{exc}", file=sys.stderr)
         return 2
 
@@ -105,6 +108,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="本地 RAG 语料目录，默认读 AI_NOVELIST_LOCAL_CORPUS_DIR；配置后 research 优先检索 .txt/.md",
     )
     chat_parser.add_argument(
+        "--search-provider",
+        choices=("mock", "serpapi", "tavily", "exa"),
+        help="搜索提供方，默认读 AI_NOVELIST_SEARCH_PROVIDER；--mock 会强制使用 mock",
+    )
+
+    feishu_parser = subparsers.add_parser("feishu", help="启动飞书长连接机器人")
+    feishu_parser.add_argument("--mock", action="store_true", help="使用本地 mock 输出，不调用真实模型")
+    feishu_parser.add_argument("--timeout", type=int, help="真实模型调用超时时间，单位秒")
+    feishu_parser.add_argument("--provider", choices=("codex", "deepseek"), help="模型提供方，默认读 AI_NOVELIST_MODEL_PROVIDER")
+    feishu_parser.add_argument("--model", help="模型名；DeepSeek 默认 deepseek-chat")
+    feishu_parser.add_argument(
+        "--local-corpus-dir",
+        help="本地 RAG 语料目录，默认读 AI_NOVELIST_LOCAL_CORPUS_DIR；配置后 research 优先检索 .txt/.md",
+    )
+    feishu_parser.add_argument(
         "--search-provider",
         choices=("mock", "serpapi", "tavily", "exa"),
         help="搜索提供方，默认读 AI_NOVELIST_SEARCH_PROVIDER；--mock 会强制使用 mock",
@@ -352,6 +370,26 @@ def run_chat_command(
             return 1
         if turn.state and turn.state.director_action == "stop":
             break
+    return 0
+
+
+def run_feishu_command(
+    args: argparse.Namespace,
+    store: LocalStore,
+    settings: Settings,
+) -> int:
+    effective_timeout = args.timeout or settings.codex_timeout_seconds
+    adapter = make_agent_adapter(args, settings, effective_timeout)
+    print_real_mode_notice(args.mock, adapter, effective_timeout)
+    service = DirectorService(
+        store=store,
+        adapter=adapter,
+        search_backend=make_search_backend(args, settings),
+        progress=print_progress,
+    )
+    bot = FeishuBotService(store=store, director=service)
+    print("启动 ai-novelist 飞书长连接机器人。", file=sys.stderr)
+    run_feishu_long_connection(settings, bot.handle_text)
     return 0
 
 

@@ -200,6 +200,81 @@ worldbuild -> plan_outline -> plan_chapters -> write_chapter -> editor_review
   --timeout 180
 ```
 
+## 飞书长连接机器人
+
+飞书入口复用 DirectorService，与 CLI `chat` 使用同一套项目状态和 Agent 编排。第一版使用飞书官方 `lark-oapi` 长连接接收单聊文本消息，不需要公网 Webhook；确认选项以纯文本编号显示。
+
+### 1. 在飞书开放平台创建应用
+
+1. 打开飞书开放平台：<https://open.feishu.cn/>。
+2. 进入开发者后台，创建“企业自建应用”。
+3. 在应用详情页找到 `App ID` 和 `App Secret`，后续会配置到本地环境变量。
+4. 在“添加应用能力”中添加“机器人”能力，并设置机器人名称、头像等基础信息。
+
+### 2. 配置权限和事件
+
+在应用后台配置机器人需要的权限和事件：
+
+- 权限：允许机器人发送消息，通常是 `im:message:send_as_bot`。
+- 事件：订阅接收消息事件 `im.message.receive_v1`。
+- 事件订阅方式：选择“使用长连接接收事件”。
+
+当前代码走长连接，不需要配置公网 HTTPS Webhook。企业内部应用如果需要审批，请先在飞书后台提交发布或启用应用，再把机器人添加到你的飞书单聊会话里。
+
+### 3. 本地安装和启动
+
+安装可选依赖：
+
+```bash
+cd /home/ubuntu/1.project/ai-novelist
+.venv/bin/pip install -e ".[feishu]"
+```
+
+配置飞书应用凭据：
+
+```bash
+export AI_NOVELIST_FEISHU_APP_ID="cli_xxx"
+export AI_NOVELIST_FEISHU_APP_SECRET="你的 App Secret"
+```
+
+先用 mock 模式启动，验证链路不调用真实模型：
+
+```bash
+.venv/bin/ai-novelist feishu --mock
+```
+
+真实模型模式可沿用 `chat` 的 `--provider`、`--model`、`--timeout`、`--search-provider` 和 `--local-corpus-dir` 参数，例如：
+
+```bash
+.venv/bin/ai-novelist feishu --provider deepseek --model deepseek-chat --timeout 180
+```
+
+这个进程需要持续运行；进程停止后，本地程序就不会再接收飞书消息。
+
+### 4. 在飞书里使用
+
+第一版建议先和机器人单聊。可用命令：
+
+```text
+/project
+/project demo-novel
+查看状态
+我想写一个月球城市失忆工程师的悬疑科幻
+```
+
+`/project` 会查看当前项目；`/project demo-novel` 会切换或创建本地项目 `demo-novel`。会话映射保存在 `projects/.feishu_sessions.json`。同一个 `open_id` 会使用当前项目；没有映射时自动创建 `feishu-<open_id>`。
+
+如果机器人要求确认，会返回纯文本编号：
+
+```text
+1. 确认执行
+2. 取消
+```
+
+回复 `1` 或 `2` 即可。
+
+当前限制：只支持单聊文本；暂不支持群聊 @、飞书交互卡片按钮、Webhook 或后台队列。
+
 ## 单步命令
 
 这些命令保留用于单独重跑某个 Agent：
@@ -256,13 +331,14 @@ codex doctor
 .venv/bin/python tests/smoke_outline_collaboration.py
 ```
 
-当前已验证：`55 passed`，并通过 `smoke_outline_collaboration.py`、`smoke_phase2_chat.py`。
+当前已验证：`.venv/bin/python -m pytest` 为 `85 passed`，并通过 `smoke_outline_collaboration.py`、`smoke_phase2_chat.py`。
 
 ## 当前限制
 
-- 当前是本地 CLI，不是飞书或 Web 服务。
+- 当前主要是本地 CLI；飞书入口为长连接单聊机器人，不是 Web 服务。
 - 真实模式每个 Agent 独立调用一次 Codex CLI，没有流式 token 展示。
 - `compose` 只处理指定章节，不批量生成多章。
 - `outline` 的共创循环由 CLI 或 chat 的下一轮用户输入驱动，不是后台常驻会话。
 - `chat` 是单轮图循环驱动，保存时只保存当前已有产物，不会强制补齐缺失产物。
+- 飞书入口暂不支持群聊 @、交互卡片、Webhook 或后台队列。
 - 没有数据库、队列、多用户权限、并发锁或 Claude Code Adapter。

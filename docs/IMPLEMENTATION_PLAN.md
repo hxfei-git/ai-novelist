@@ -17,10 +17,9 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
 - Director 交互增强：用户始终只和 Director 对话；Director 会把口语化、多项确认和“接收/接受/同意”等回复转译为下游 Agent 可执行的 `instruction` 与 `locked_constraints`。
 - mock 模式：不依赖外部模型即可端到端验证。
 - 真实模式：Codex CLI 或 DeepSeek API。
+- 阶段 3 飞书长连接机器人最小闭环：支持飞书单聊文本、`/project` 项目切换、纯文本确认选项和同步调用 DirectorService。
 
 未完成：
-
-- 阶段 3 飞书机器人入口。
 - 真实联网搜索后端已实现：`WebSearchBackend` 支持 SerpAPI、Tavily、Exa；默认仍是 mock，需要 API Key 才会联网。
 - 通用检索上下文已实现：`retrieval_context` 会注入 outline 和 writer prompts，但不会自动触发额外搜索。
 - 后台任务队列、数据库、多用户存储、并发锁。
@@ -36,6 +35,7 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
   v
 本地 CLI: ai-novelist
   |-- chat: 唯一推荐主入口，Director 管理上下文并调度子工作流
+  |-- feishu: 飞书长连接单聊入口，复用 DirectorService
   |-- outline: 保留为大纲共创调试/兼容入口，共享同一 state
   |-- compose: 一次性多 Agent 创作
   |-- worldbuild / plan-outline / plan-chapters / write-chapter / review: 单 Agent 兼容命令
@@ -345,6 +345,7 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 - `tests/smoke_outline_collaboration.py`：大纲生成、修订、保存 smoke。
 - `tests/smoke_phase2_compose.py`：compose smoke。
 - `tests/smoke_phase2_chat.py`：chat smoke。
+- `tests/test_feishu_integration.py`：飞书会话映射、`/project` 命令、回复格式化和配置校验。
 
 验收命令：
 
@@ -369,7 +370,8 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 - `persist_outputs` 只保存当前已有产物，不会自动补齐缺失产物。
 - `compose` 只围绕指定章节运行，不批量生成多章。
 - 本地文件存储没有并发锁。
-- 没有飞书、数据库、队列、Web UI、多租户权限或 Claude Code Adapter。
+- 飞书入口暂为长连接单聊文本机器人；群聊 @、交互卡片、Webhook、后台队列未实现。
+- 没有数据库、队列、Web UI、多租户权限或 Claude Code Adapter。
 
 ## 11. 本地 RAG 后续推进计划
 
@@ -446,21 +448,36 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 
 ### 与阶段 3 飞书接入的关系
 
-本地 RAG 的 V3-V6 不阻塞飞书入口，但 V6 的 `RetrievalService` 与飞书 service 层复用价值高。推荐顺序是先完成 V3-V4，随后抽 service 层，再决定 V5/V6 与飞书阶段的优先级。
+本地 RAG 的 V3-V6 不阻塞飞书入口。当前优先级已调整为先打通飞书长连接链路，再基于真实使用反馈继续推进 V3/V4 证据质量与缓存优化。
 
-## 12. 阶段 3 后续计划
+## 12. 阶段 3 飞书长连接入口
+
+已完成最小闭环：
 
 ```text
-飞书用户
-  -> 飞书机器人 / Webhook
-  -> 会话映射与消息去重
-  -> 调用现有 chat 主入口
-  -> 后台执行 research / outline / writing 长任务
-  -> 飞书消息回复摘要和审核入口
+飞书单聊用户
+  -> lark-oapi 长连接事件
+  -> FeishuBotService 文本处理
+  -> FeishuSessionStore 映射 open_id 到 project_id
+  -> DirectorService.handle_turn(project_id, text, channel="feishu")
+  -> LocalStore/state.json/project_context.md
+  -> 回复飞书文本消息
 ```
 
-下一步应先抽出 service 层，把 CLI 循环中对 `LocalStore`、graph invoke、search backend 和用户输入归一化的逻辑复用给飞书入口。
+关键行为：
 
+- CLI 新增 `ai-novelist feishu`，通过 `lark-oapi` 长连接接收飞书消息。
+- 可选依赖为 `pip install -e ".[feishu]"`，运行时需要 `AI_NOVELIST_FEISHU_APP_ID` 和 `AI_NOVELIST_FEISHU_APP_SECRET`。
+- 第一版只处理单聊文本消息；非文本消息回复“当前只支持文本消息”。
+- `/project` 查看当前项目，`/project <project_id>` 切换或创建项目；映射保存在 `projects/.feishu_sessions.json`。
+- 普通文本消息复用 `DirectorService`，确认选项渲染为 `1. 确认执行`、`2. 取消`，不接卡片 action。
+- research、outline、writing 等任务同步执行；长任务期间飞书回复会等待结果。
+
+当前边界：
+
+- 未实现群聊 @、飞书交互卡片、Webhook 回调、后台队列、消息去重、并发锁和权限隔离。
+- `AI_NOVELIST_FEISHU_DOMAIN` 已预留配置字段，当前长连接使用 SDK 默认域。
+- 飞书层不得直接调用 graph；后续优化仍应收敛在 DirectorService 或其下游工作流。
 
 ## 13. Research 意图管理改造
 

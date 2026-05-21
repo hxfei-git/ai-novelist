@@ -372,3 +372,25 @@ Smoke 验证：`.venv/bin/python tests/smoke_phase2_chat.py`，结果 `phase2 ch
 ```
 
 结果：全量 `78 passed`；`outline collaboration smoke ok`；`phase2 chat smoke ok`。
+
+
+## 17. 本轮更新：飞书长连接最小闭环
+
+- 新增 `ai-novelist feishu` 子命令，启动飞书官方 `lark-oapi` 长连接机器人。
+- 新增可选依赖 `feishu = ["lark-oapi>=1.6.5"]`，运行时通过 `AI_NOVELIST_FEISHU_APP_ID` 和 `AI_NOVELIST_FEISHU_APP_SECRET` 配置应用凭据。
+- 新增 `src/ai_novelist/feishu/`：`FeishuBotService` 负责文本处理，`FeishuSessionStore` 负责 `open_id -> project_id` 映射，`runner` 负责 SDK 长连接与文本回复。
+- 第一版支持单聊文本、`/project` 查看当前项目、`/project <project_id>` 切换或创建项目；会话映射保存到 `projects/.feishu_sessions.json`。
+- 普通飞书消息统一调用 `DirectorService.handle_turn(..., channel="feishu")`，确认选项用纯文本编号渲染，产物路径追加到回复末尾。
+- 按用户选择，飞书优先于 RAG V3/V4 推进；本轮不做群聊 @、交互卡片、Webhook、后台队列或多用户权限。
+- README 和 IMPLEMENTATION_PLAN 已同步飞书运行方式、配置、边界和测试覆盖。
+- README 已补充飞书开放平台配置步骤：创建企业自建应用、添加机器人能力、订阅 `im.message.receive_v1`、选择长连接事件接收、配置本地环境变量并启动机器人。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_feishu_integration.py
+.venv/bin/ai-novelist --help
+.venv/bin/ai-novelist feishu --help
+```
+
+结果：飞书单元测试 `7 passed`；全量 `.venv/bin/python -m pytest` 为 `85 passed`；`smoke_outline_collaboration.py` 与 `smoke_phase2_chat.py` 均通过；两个 help 命令可正常显示，其中 `feishu --help` 首次在默认沙箱触发 bwrap 错误，已用提权重跑通过。
