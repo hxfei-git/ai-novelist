@@ -302,12 +302,25 @@ def build_task_prompt(state: NovelState, prompt_name: str) -> str:
         f"最大修订次数：{state.max_revisions}\n"
         f"编辑结论：{state.editor_decision}\n"
         f"质量分：{state.quality_score}\n\n"
+        f"## 检索上下文\n查询：{state.retrieval_query or '暂无'}\n\n{state.retrieval_context or '暂无'}\n\n来源：\n{format_retrieval_sources(state.retrieval_sources)}\n\n"
         f"## 已有世界观\n{state.worldbuilding or '暂无'}\n\n"
         f"## 已有总大纲\n{state.outline or '暂无'}\n\n"
         f"## 已有章节细纲\n{state.chapter_plan or '暂无'}\n\n"
         f"## 当前章节草稿\n{state.chapter_draft or '暂无'}\n\n"
         f"## 最近编辑意见\n{state.editor_notes or '暂无'}\n"
     )
+
+
+def format_retrieval_sources(sources: list[dict]) -> str:
+    if not sources:
+        return "暂无"
+    lines = []
+    for item in sources[:5]:
+        title = str(item.get("title", "无标题"))
+        url = str(item.get("url", ""))
+        source = str(item.get("source", "search"))
+        lines.append(f"- {title} ({source}): {url}")
+    return "\n".join(lines)
 
 
 def parse_editor_review(editor_notes: str) -> tuple[str, int]:

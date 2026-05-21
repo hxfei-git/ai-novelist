@@ -11,7 +11,7 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
 - 阶段 1：最小 LangGraph + 模型适配器 + 本地存储。
 - 阶段 2：compose 多 Agent 小说创作图。
 - 阶段 2 增强：Director Agent chat 主入口。
-- Research 增强：chat 可先用 `MockSearchBackend` 生成参考简报和来源列表，再进入 outline collaboration graph。
+- Research/检索增强：chat 可先搜索原始资料，生成通用 `retrieval_context`，并继续产出兼容旧流程的参考简报和来源列表。
 - 大纲共创增强：outline collaboration graph，支持方向提案、生成、审稿、用户反馈、修订、版本比较、锁定约束、查看正文和保存。
 - mock 模式：不依赖外部模型即可端到端验证。
 - 真实模式：Codex CLI 或 DeepSeek API。
@@ -20,6 +20,7 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
 
 - 阶段 3 飞书机器人入口。
 - 真实联网搜索后端已实现：`WebSearchBackend` 支持 SerpAPI、Tavily、Exa；默认仍是 mock，需要 API Key 才会联网。
+- 通用检索上下文已实现：`retrieval_context` 会注入 outline 和 writer prompts，但不会自动触发额外搜索。
 - 后台任务队列、数据库、多用户存储、并发锁。
 - Claude Code Adapter。
 - 多章节批量自动续写。
@@ -46,11 +47,12 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
   `-- DeepSeekAdapter
   |
   v
-Research 层
+Research / Retrieval 层
   |-- SearchResult: title / url / snippet / source
-  |-- SearchBackend.search(query, limit=5)
+  |-- SearchBackend.search(query, limit=5)  # 只负责原始搜索结果
   |-- MockSearchBackend
-  `-- WebSearchBackend: SerpAPI / Tavily / Exa
+  |-- WebSearchBackend: SerpAPI / Tavily / Exa
+  `-- retrieval_context_synthesizer.md: LLM 整理通用检索上下文，失败时规则 fallback
   |
   v
 LangGraph 编排层
@@ -108,7 +110,7 @@ Prompt 模板层
 ```text
 用户输入
   -> 写入 state.user_request + messages
-  -> 如果需要 research: build_research_graph
+  -> 如果需要 research: build_research_graph(search_backend, store, adapter=adapter)
   -> 否则如果 state.active_workflow == "outline": build_outline_collaboration_graph
   -> 否则: build_chat_graph
   -> 打印 Director 消息、阶段日志和产物正文
@@ -134,6 +136,7 @@ START
   -> detect_research_need
   -> build_research_queries
   -> search_sources
+  -> synthesize_retrieval_context
   -> synthesize_reference_brief
   -> save_research_result
   -> ask_user_confirm
@@ -142,6 +145,9 @@ START
 
 输出与持久化：
 
+- `state.retrieval_query`
+- `state.retrieval_context`
+- `state.retrieval_sources`
 - `state.reference_brief`
 - `state.canon_facts`
 - `state.research_sources`
@@ -192,11 +198,16 @@ START
 - `persist_outline` 保存 `outline.md`，并清空 `active_workflow`，`current_stage` 进入 `chapter_plan`。
 - 用户明确 `stop / 退出 / 结束` 会清空 `active_workflow/current_stage`。
 
-outline prompt 已注入 research 上下文：
+outline prompt 已注入 retrieval/research 上下文：
 
+- `retrieval_query`
+- `retrieval_context`
+- `retrieval_sources`
 - `reference_brief`
 - `canon_facts`
 - `research_uncertainties`
+
+writer prompt（worldbuild、plan_outline、plan_chapters、write_chapter、review）也会注入通用检索上下文，复用已有 `/research` 搜索结果。
 
 如果存在原作不确定点，prompt 要求先确认，不得擅自补完原作设定。
 
@@ -322,12 +333,13 @@ research 示例：
 .venv/bin/python tests/smoke_phase2_chat.py
 ```
 
-当前已验证：`43 passed`，并通过 `smoke_outline_collaboration.py`、`smoke_phase2_chat.py`。
+当前已验证：`55 passed`，并通过 `smoke_outline_collaboration.py`、`smoke_phase2_chat.py`。
 
 ## 10. 当前限制
 
 - 仍是本地 CLI，不是长期运行服务。
 - research 默认只有 mock 搜索；真实搜索需要配置 `AI_NOVELIST_SEARCH_PROVIDER` 和 API Key。
+- 当前不会基于大纲自动搜索，也不会为每个 worldbuild/write/review 任务自动搜索；只消费已有检索上下文。
 - chat/outline 的多轮共创由 CLI 循环驱动，不是后台会话服务。
 - 真实模式每个 Agent 独立调用一次模型，没有流式 token 展示。
 - `persist_outputs` 只保存当前已有产物，不会自动补齐缺失产物。

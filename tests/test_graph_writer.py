@@ -1,7 +1,7 @@
 from ai_novelist.adapters.codex_cli import CodexCLIAdapter, CodexCLIError
 from ai_novelist.cli import print_chat_turn_result, should_use_outline_graph
 from ai_novelist.graph_outline import build_outline_collaboration_graph
-from ai_novelist.graph_writer import build_chat_graph, build_composer_graph, build_writer_graph, parse_director_output, parse_editor_review
+from ai_novelist.graph_writer import build_chat_graph, build_composer_graph, build_task_prompt, build_writer_graph, parse_director_output, parse_editor_review
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
 
@@ -383,3 +383,17 @@ def test_chat_can_view_outline_graph_generated_outline_body(tmp_path):
     assert result["director_action"] == "show_outline"
     assert "# 共创大纲" in result["director_message"]
     assert result["active_workflow"] == "outline"
+
+
+def test_writer_prompt_injects_retrieval_context_for_all_writer_tasks():
+    state = NovelState(project_id="demo", title="Demo")
+    state.retrieval_query = "苟在初圣"
+    state.retrieval_context = "# 检索上下文\n- 谨慎成长"
+    state.retrieval_sources = [{"title": "来源", "url": "https://example.test/source", "source": "test"}]
+
+    for prompt_name in ["world_builder", "outline_planner", "chapter_planner", "chapter_writer", "editor"]:
+        prompt = build_task_prompt(state, prompt_name)
+        assert "## 检索上下文" in prompt
+        assert "查询：苟在初圣" in prompt
+        assert "# 检索上下文" in prompt
+        assert "来源 (test): https://example.test/source" in prompt

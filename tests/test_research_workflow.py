@@ -7,6 +7,7 @@ from ai_novelist.config import Settings
 from ai_novelist.research import MockSearchBackend, SearchBackendError, WebSearchBackend
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
+from ai_novelist.adapters.base import AgentAdapterError
 from ai_novelist.adapters.codex_cli import CodexCLIAdapter
 
 
@@ -34,6 +35,9 @@ def test_research_graph_persists_reference_brief_and_sources(tmp_path):
     assert result.canon_facts
     assert result.research_sources
     assert result.research_uncertainties
+    assert result.retrieval_query == "苟在初圣"
+    assert result.retrieval_sources == result.research_sources
+    assert "# 检索上下文" in result.retrieval_context
     assert store.reference_brief_path("demo").exists()
     assert store.research_sources_path("demo").exists()
     assert events[0] == ("Research", "正在识别需要调研的原作信息...")
@@ -64,6 +68,7 @@ def test_research_then_outline_prompt_contains_reference_brief(tmp_path):
 
     assert outlined["director_action"] == "propose_directions"
     assert outlined["reference_brief"]
+    assert outlined["retrieval_context"]
     assert outlined["canon_facts"]
 
 
@@ -103,3 +108,47 @@ def test_make_search_backend_uses_configured_web_provider():
     assert isinstance(backend, WebSearchBackend)
     assert backend.provider == "tavily"
     assert backend.timeout_seconds == 9
+
+
+class RetrievalSummaryAdapter:
+    def __init__(self):
+        self.prompts = []
+
+    def complete(self, prompt, workspace):
+        self.prompts.append(prompt)
+        return "# LLM 检索上下文\n\n## 可用事实\n- LLM 提炼后的事实"
+
+
+class FailingRetrievalSummaryAdapter:
+    def complete(self, prompt, workspace):
+        raise AgentAdapterError("summary failed")
+
+
+def test_research_graph_uses_llm_to_synthesize_retrieval_context(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.user_request = "/research 苟在初圣"
+    adapter = RetrievalSummaryAdapter()
+    graph = build_research_graph(MockSearchBackend(), store, adapter=adapter)
+
+    result = NovelState.from_dict(graph.invoke(state.to_dict()))
+
+    assert adapter.prompts
+    assert "AGENT: retrieval_context_synthesizer" in adapter.prompts[0]
+    assert "苟在初圣" in adapter.prompts[0]
+    assert result.retrieval_context.startswith("# LLM 检索上下文")
+    assert "## 通用检索上下文" in result.reference_brief
+
+
+def test_research_graph_falls_back_when_llm_summary_fails(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.user_request = "/research 苟在初圣"
+    graph = build_research_graph(MockSearchBackend(), store, adapter=FailingRetrievalSummaryAdapter())
+
+    result = NovelState.from_dict(graph.invoke(state.to_dict()))
+
+    assert result.review_status == "draft"
+    assert "# 检索上下文：苟在初圣" in result.retrieval_context
+    assert "LLM 检索总结失败" in result.retrieval_context
+    assert result.reference_brief

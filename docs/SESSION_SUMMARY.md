@@ -25,7 +25,7 @@
 能力：
 
 - `chat`：唯一推荐主入口，Director Agent 连续对话并调度 research、outline 和写作子工作流。
-- `research`：通过 `MockSearchBackend` 生成参考简报、原作事实、来源列表和不确定点。
+- `research/retrieval`：搜索原始资料，生成通用 `retrieval_context`，并继续生成兼容旧流程的参考简报、原作事实、来源列表和不确定点。
 - `outline`：交互式大纲共创流程，支持方向、生成、审稿、修订、版本比较、查看、锁定和保存。
 - `compose`：一次性完整多 Agent 创作图。
 - 单步 Agent 命令：`worldbuild`、`plan-outline`、`plan-chapters`、`write-chapter`、`review`。
@@ -35,7 +35,7 @@
 ```text
 chat 主入口
   -> 写入 state.user_request + messages
-  -> research 需求: build_research_graph
+  -> research 需求: build_research_graph(search_backend, store, adapter=adapter)
   -> active_workflow == outline: build_outline_collaboration_graph
   -> 其他请求: build_chat_graph
   -> 打印阶段日志、Director 消息和产物正文
@@ -57,6 +57,7 @@ chat 主入口
 detect_research_need
   -> build_research_queries
   -> search_sources
+  -> synthesize_retrieval_context
   -> synthesize_reference_brief
   -> save_research_result
   -> ask_user_confirm
@@ -65,6 +66,9 @@ detect_research_need
 
 输出：
 
+- `retrieval_query`
+- `retrieval_context`
+- `retrieval_sources`
 - `reference_brief`
 - `canon_facts`
 - `research_sources`
@@ -151,6 +155,9 @@ worldbuild
 
 - `active_workflow`
 - `current_stage`
+- `retrieval_query`
+- `retrieval_context`
+- `retrieval_sources`
 - `reference_brief`
 - `canon_facts`
 - `research_sources`
@@ -202,7 +209,7 @@ worldbuild
 .venv/bin/python tests/smoke_phase2_chat.py
 ```
 
-当前验证结果：`43 passed`，`smoke_outline_collaboration.py` 通过，`smoke_phase2_chat.py` 通过。
+当前验证结果：`55 passed`，`smoke_outline_collaboration.py` 通过，`smoke_phase2_chat.py` 通过。
 
 ## 8. 设计决策
 
@@ -210,6 +217,8 @@ worldbuild
 - Director 不直接替代子 Agent，只判断意图、提炼指令、记录约束并调度节点。
 - research 在大纲前执行，避免把已有小说/IP/专有名词当普通题材生成错误同人设定。
 - research 默认使用 mock 搜索；真实联网可通过 `AI_NOVELIST_SEARCH_PROVIDER=serpapi|tavily|exa` 和对应 API Key 启用。
+- SearchBackend 只返回原始搜索结果；LLM 总结由 `retrieval_context_synthesizer.md` 和 research graph 负责，失败时使用规则 fallback。
+- outline 和 writer prompts 都消费已有 `retrieval_context`，但当前不会基于大纲或每个写作任务自动搜索。
 - 大纲共创循环跨多轮用户输入推进，而不是单次 invoke 无限循环。
 - 当前不引入数据库、队列、FastAPI 或飞书依赖。
 
@@ -218,6 +227,7 @@ worldbuild
 - 本地 CLI，不是服务端。
 - 飞书未接入。
 - research 默认不联网；配置 SerpAPI、Tavily 或 Exa 后可使用真实搜索。
+- 通用检索上下文只复用已有 `/research` 结果，不会主动补搜或按任务刷新。
 - 无数据库、队列、权限、多用户隔离或并发锁。
 - 真实模式每个 Agent 单独调用一次模型。
 - `chat` 的 `persist_outputs` 只保存已有产物，不会自动补齐缺失产物。

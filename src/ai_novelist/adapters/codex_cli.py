@@ -104,6 +104,8 @@ class CodexCLIAdapter(AgentAdapter):
     def _mock_response(self, prompt: str) -> str:
         if "AGENT: director" in prompt:
             return self._mock_director(prompt)
+        if "AGENT: retrieval_context_synthesizer" in prompt:
+            return self._mock_retrieval_context()
         if "AGENT: direction_proposer" in prompt:
             return self._mock_directions()
         if "AGENT: outline_reviser" in prompt:
@@ -123,6 +125,18 @@ class CodexCLIAdapter(AgentAdapter):
         if "AGENT: editor" in prompt:
             return self._mock_editor_review(revised="修订次数：0" not in prompt)
         return self._mock_outline(prompt)
+
+
+    def _mock_retrieval_context(self) -> str:
+        return (
+            "# 检索上下文\n\n"
+            "## 查询意图\n- 整理目标作品或题材的可用公开信息。\n\n"
+            "## 可用事实\n- 搜索结果显示该题材包含低调求生、资源积累、身份隐藏等关键词。\n\n"
+            "## 创作相关线索\n- 可用于约束同人创作的基调、冲突来源和读者预期。\n\n"
+            "## 不确定点\n- 角色名、完整世界观和关键剧情节点仍需用户确认。\n\n"
+            "## 来源索引\n- 见 research_sources.json。\n\n"
+            "## 使用边界\n- 不得把搜索摘要直接当作原作正史。"
+        )
 
 
     def _mock_director(self, prompt: str) -> str:

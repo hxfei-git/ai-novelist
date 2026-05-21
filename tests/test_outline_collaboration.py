@@ -1,5 +1,5 @@
 from ai_novelist.adapters.codex_cli import CodexCLIAdapter
-from ai_novelist.graph_outline import append_message, build_outline_collaboration_graph
+from ai_novelist.graph_outline import append_message, build_outline_collaboration_graph, build_outline_prompt
 from ai_novelist.graph_writer import build_chat_graph
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
@@ -96,6 +96,9 @@ def test_old_state_json_missing_new_fields_still_loads():
     assert state.style_preferences == []
     assert state.outline_versions == []
     assert state.selected_outline_version == -1
+    assert state.retrieval_context == ""
+    assert state.retrieval_query == ""
+    assert state.retrieval_sources == []
 
 
 def test_chat_routes_outline_revision_request(tmp_path):
@@ -113,3 +116,17 @@ def test_chat_routes_outline_revision_request(tmp_path):
     assert "强化主角罪感" in result["revision_instruction"]
     assert "修订版总大纲" in result["outline"]
     assert result["editor_decision"] == "pass"
+
+
+def test_outline_prompt_injects_retrieval_context():
+    state = NovelState(project_id="demo", title="Demo")
+    state.idea = "写同人"
+    state.retrieval_query = "苟在初圣"
+    state.retrieval_context = "# 检索上下文\n- 低调求生"
+    state.retrieval_sources = [{"title": "资料", "url": "https://example.test", "source": "test"}]
+
+    prompt = build_outline_prompt(state, "outline_planner")
+
+    assert "检索查询：苟在初圣" in prompt
+    assert "# 检索上下文" in prompt
+    assert "资料 (test): https://example.test" in prompt

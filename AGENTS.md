@@ -24,6 +24,10 @@ Target Python 3.11+ and keep code compatible with the existing Python 3.12 virtu
 
 Use `pytest` for unit coverage. Add tests beside related behavior in `tests/test_*.py`; reserve `smoke_*.py` for end-to-end CLI or workflow checks. Prefer mock mode in tests so Codex CLI is not required. When changing graph routing, persistence, or prompt loading, add or update focused tests and run both `pytest` and the relevant smoke script.
 
+## Documentation Requirements
+
+This is a hard requirement: every code change must update the relevant documentation in `docs/`. Architecture, workflow, state, CLI, adapter, prompt, or persistence changes must update `docs/IMPLEMENTATION_PLAN.md`; implementation notes, test results, and remaining limitations must update `docs/SESSION_SUMMARY.md`. Do not consider a code change complete until the docs are updated in the same change set.
+
 ## Commit & Pull Request Guidelines
 
 This checkout does not include Git history, so follow clear conventional-style commits such as `feat: add chapter planning route` or `fix: preserve state on review failure`. Pull requests should include a short summary, affected commands or workflows, test results, and any generated project artifacts worth reviewing. Link issues when applicable and include screenshots only for future UI-facing changes.

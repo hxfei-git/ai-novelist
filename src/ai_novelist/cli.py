@@ -292,7 +292,7 @@ def run_chat_command(
     print_real_mode_notice(args.mock, adapter, effective_timeout)
     chat_graph = build_chat_graph(adapter, store, progress=print_progress)
     outline_graph = build_outline_collaboration_graph(adapter, store)
-    research_graph = build_research_graph(make_search_backend(args, settings), store, progress=print_progress)
+    research_graph = build_research_graph(make_search_backend(args, settings), store, adapter=adapter, progress=print_progress)
 
     print(f"进入 ai-novelist chat：项目 {state.project_id}。输入 exit/quit/退出 结束。")
     while True:

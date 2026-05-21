@@ -256,7 +256,7 @@ codex doctor
 .venv/bin/python tests/smoke_outline_collaboration.py
 ```
 
-当前已验证：`51 passed`。
+当前已验证：`55 passed`。
 
 ## 当前限制
 

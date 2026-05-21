@@ -376,6 +376,8 @@ def build_outline_director_prompt(state: NovelState) -> str:
         f"锁定约束：{', '.join(state.locked_constraints) or '暂无'}\n"
         f"风格偏好：{', '.join(state.style_preferences) or '暂无'}\n"
         f"参考简报：{'已有' if state.reference_brief else '暂无'}\n"
+        f"检索上下文：{'已有' if state.retrieval_context else '暂无'}\n"
+        f"检索查询：{state.retrieval_query or '暂无'}\n"
         f"原作不确定点：{', '.join(state.research_uncertainties) or '暂无'}\n"
         f"修订要求：{state.revision_instruction or '暂无'}\n"
         f"编辑结论：{state.editor_decision}\n"
@@ -402,12 +404,27 @@ def build_outline_prompt(state: NovelState, prompt_name: str) -> str:
         f"锁定约束：{', '.join(state.locked_constraints) or '暂无'}\n"
         f"风格偏好：{', '.join(state.style_preferences) or '暂无'}\n"
         f"参考简报：\n{state.reference_brief or '暂无'}\n\n"
+        f"检索查询：{state.retrieval_query or '暂无'}\n"
+        f"检索上下文：\n{state.retrieval_context or '暂无'}\n\n"
+        f"检索来源：\n{format_retrieval_sources(state.retrieval_sources)}\n"
         f"原作事实：{', '.join(state.canon_facts) or '暂无'}\n"
         f"原作不确定点：{', '.join(state.research_uncertainties) or '暂无'}\n"
         "如果存在原作不确定点，必须要求用户确认，不得擅自补完原作设定。\n"
         f"编辑意见：\n{state.editor_notes or '暂无'}\n\n"
         f"最近大纲版本：\n{versions or '暂无'}\n"
     )
+
+
+def format_retrieval_sources(sources: list[dict]) -> str:
+    if not sources:
+        return "暂无"
+    lines = []
+    for item in sources[:5]:
+        title = str(item.get("title", "无标题"))
+        url = str(item.get("url", ""))
+        source = str(item.get("source", "search"))
+        lines.append(f"- {title} ({source}): {url}")
+    return "\n".join(lines)
 
 
 def parse_outline_director_output(output: str) -> dict:

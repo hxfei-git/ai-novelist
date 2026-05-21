@@ -42,6 +42,9 @@ class NovelState:
     canon_facts: list[str] = field(default_factory=list)
     research_sources: list[dict] = field(default_factory=list)
     research_uncertainties: list[str] = field(default_factory=list)
+    retrieval_context: str = ""
+    retrieval_query: str = ""
+    retrieval_sources: list[dict] = field(default_factory=list)
     director_intent: str = ""
     user_request: str = ""
     director_action: str = ""
@@ -87,6 +90,9 @@ class NovelState:
             canon_facts=normalize_str_list(data.get("canon_facts", [])),
             research_sources=normalize_dict_list(data.get("research_sources", [])),
             research_uncertainties=normalize_str_list(data.get("research_uncertainties", [])),
+            retrieval_context=str(data.get("retrieval_context", "")),
+            retrieval_query=str(data.get("retrieval_query", "")),
+            retrieval_sources=normalize_dict_list(data.get("retrieval_sources", [])),
             director_intent=str(data.get("director_intent", "")),
             user_request=str(data.get("user_request", "")),
             director_action=str(data.get("director_action", "")),
