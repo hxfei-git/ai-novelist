@@ -121,10 +121,11 @@ class WebSearchBackend:
             self.base_url,
             {
                 "query": normalized,
+                "type": "auto",
                 "numResults": limit,
-                "contents": {"text": {"maxCharacters": 500}},
+                "contents": {"highlights": True},
             },
-            {"Authorization": f"Bearer {self.api_key}"},
+            {"x-api-key": self.api_key},
         )
         return self._parse_exa(payload, limit)
 

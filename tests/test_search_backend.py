@@ -72,23 +72,25 @@ def test_tavily_backend_posts_and_parses_results(monkeypatch):
     assert results[0].snippet == "正文摘要"
 
 
-def test_exa_backend_posts_bearer_token_and_parses_text(monkeypatch):
+def test_exa_backend_posts_x_api_key_and_parses_highlights(monkeypatch):
     captured = {}
 
     def fake_urlopen(request, timeout):
         captured["headers"] = dict(request.header_items())
         captured["payload"] = json.loads(request.data.decode("utf-8"))
-        return FakeResponse({"requestId": "req", "results": [{"title": "资料", "url": "https://example.test/c", "text": "资料正文"}]})
+        return FakeResponse({"requestId": "req", "results": [{"title": "资料", "url": "https://example.test/c", "highlights": ["重点一", "重点二"]}]})
 
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
     backend = WebSearchBackend("exa", "exa-key")
 
     results = backend.search("原作设定", limit=1)
 
-    assert captured["headers"]["Authorization"] == "Bearer exa-key"
+    assert captured["headers"]["X-api-key"] == "exa-key"
+    assert captured["payload"]["type"] == "auto"
     assert captured["payload"]["numResults"] == 1
+    assert captured["payload"]["contents"] == {"highlights": True}
     assert results[0].source == "exa"
-    assert results[0].snippet == "资料正文"
+    assert results[0].snippet == "重点一 重点二"
 
 
 def test_web_search_backend_requires_supported_provider_and_key():
@@ -107,3 +109,4 @@ def test_web_search_backend_raises_on_http_error(monkeypatch):
 
     with pytest.raises(SearchBackendError, match="HTTP 401"):
         backend.search("query")
+
