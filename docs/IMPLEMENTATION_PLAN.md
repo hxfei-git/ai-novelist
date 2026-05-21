@@ -342,6 +342,7 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 - `tests/test_outline_collaboration.py`：大纲 approve、revise、lock、variant、旧 state 兼容、chat 路由到大纲修订。
 - `tests/test_research_workflow.py`：research 触发、mock 搜索、参考简报持久化、research 后进入 outline、本地优先后端配置和回退。
 - `tests/test_search_backend.py`：WebSearchBackend、本地 `.txt/.md` 检索、切片 metadata、关键词排序、本地优先 fallback。
+- `tests/test_research_workflow.py` 覆盖 CLI `--search-provider` 与 provider 专用 API Key 的组合，例如 `--search-provider exa` 读取 `EXA_API_KEY`。
 - `tests/smoke_outline_collaboration.py`：大纲生成、修订、保存 smoke。
 - `tests/smoke_phase2_compose.py`：compose smoke。
 - `tests/smoke_phase2_chat.py`：chat smoke。
@@ -362,7 +363,7 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 ## 10. 当前限制
 
 - 仍是本地 CLI，不是长期运行服务。
-- research 未配置本地语料时默认只有 mock 搜索；真实搜索需要配置 `AI_NOVELIST_SEARCH_PROVIDER` 和 API Key。
+- research 未配置本地语料时默认只有 mock 搜索；真实搜索需要配置搜索 provider 和 API Key。CLI 使用 `--search-provider exa` 时会读取 `EXA_API_KEY`，也可用通用 `AI_NOVELIST_SEARCH_API_KEY`。
 - 本地 RAG 首版是轻量关键词/BM25 近似检索，没有向量检索、索引缓存、文件变更监听或任务级深度检索。
 - 当前不会基于大纲自动搜索，也不会为每个 worldbuild/write/review 任务自动搜索；只消费已有检索上下文。
 - chat/outline 的多轮共创由 CLI 循环驱动，不是后台会话服务。
@@ -471,11 +472,12 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 - 第一版只处理单聊文本消息；非文本消息回复“当前只支持文本消息”。
 - `/project` 查看当前项目，`/project <project_id>` 切换或创建项目；映射保存在 `projects/.feishu_sessions.json`。
 - 普通文本消息复用 `DirectorService`，确认选项渲染为 `1. 确认执行`、`2. 取消`，不接卡片 action。
+- 长连接事件按 `message_id` 做进程内最近消息去重，避免飞书事件重投递导致重复回复。
 - research、outline、writing 等任务同步执行；长任务期间飞书回复会等待结果。
 
 当前边界：
 
-- 未实现群聊 @、飞书交互卡片、Webhook 回调、后台队列、消息去重、并发锁和权限隔离。
+- 未实现群聊 @、飞书交互卡片、Webhook 回调、后台队列、跨进程消息去重、并发锁和权限隔离。
 - `AI_NOVELIST_FEISHU_DOMAIN` 已预留配置字段，当前长连接使用 SDK 默认域。
 - 飞书层不得直接调用 graph；后续优化仍应收敛在 DirectorService 或其下游工作流。
 

@@ -12,6 +12,26 @@ class FeishuConfigError(RuntimeError):
     """Raised when Feishu runtime configuration is incomplete."""
 
 
+class RecentMessageDeduper:
+    def __init__(self, max_size: int = 1000) -> None:
+        self.max_size = max(1, max_size)
+        self._seen: set[str] = set()
+        self._order: list[str] = []
+
+    def first_seen(self, message_id: str) -> bool:
+        normalized = message_id.strip()
+        if not normalized:
+            return True
+        if normalized in self._seen:
+            return False
+        self._seen.add(normalized)
+        self._order.append(normalized)
+        if len(self._order) > self.max_size:
+            removed = self._order.pop(0)
+            self._seen.discard(removed)
+        return True
+
+
 def validate_feishu_settings(settings: Settings) -> None:
     if not settings.feishu_app_id:
         raise FeishuConfigError("缺少 AI_NOVELIST_FEISHU_APP_ID")
@@ -28,6 +48,7 @@ def run_feishu_long_connection(settings: Settings, handle_text: Callable[[str, s
         raise FeishuConfigError('缺少 lark-oapi，请先安装：pip install -e ".[feishu]"') from exc
 
     client = lark.Client.builder().app_id(settings.feishu_app_id).app_secret(settings.feishu_app_secret).build()
+    deduper = RecentMessageDeduper()
 
     def on_message(data: P2ImMessageReceiveV1) -> None:
         event = data.event
@@ -37,6 +58,8 @@ def run_feishu_long_connection(settings: Settings, handle_text: Callable[[str, s
         message_id = getattr(message, "message_id", "") if message else ""
         message_type = getattr(message, "message_type", "") if message else ""
         content = getattr(message, "content", "") if message else ""
+        if not deduper.first_seen(message_id):
+            return
         if message_type != "text":
             reply = "当前只支持文本消息。"
         else:

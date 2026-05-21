@@ -8,7 +8,7 @@ import sys
 from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
 from ai_novelist.adapters.codex_cli import CodexCLIAdapter
 from ai_novelist.adapters.deepseek import DeepSeekAdapter
-from ai_novelist.config import Settings, load_settings
+from ai_novelist.config import Settings, load_settings, search_api_key
 from ai_novelist.director_service import DirectorService
 from ai_novelist.feishu import FeishuBotService, FeishuConfigError, run_feishu_long_connection
 from ai_novelist.graph_minimal import build_minimal_graph
@@ -102,7 +102,7 @@ def build_parser() -> argparse.ArgumentParser:
     chat_parser.add_argument("--mock", action="store_true", help="使用本地 mock 输出，不调用真实模型")
     chat_parser.add_argument("--timeout", type=int, help="真实模型调用超时时间，单位秒")
     chat_parser.add_argument("--provider", choices=("codex", "deepseek"), help="模型提供方，默认读 AI_NOVELIST_MODEL_PROVIDER")
-    chat_parser.add_argument("--model", help="模型名；DeepSeek 默认 deepseek-chat")
+    chat_parser.add_argument("--model", help="模型名；DeepSeek 默认 deepseek-v4-pro")
     chat_parser.add_argument(
         "--local-corpus-dir",
         help="本地 RAG 语料目录，默认读 AI_NOVELIST_LOCAL_CORPUS_DIR；配置后 research 优先检索 .txt/.md",
@@ -117,7 +117,7 @@ def build_parser() -> argparse.ArgumentParser:
     feishu_parser.add_argument("--mock", action="store_true", help="使用本地 mock 输出，不调用真实模型")
     feishu_parser.add_argument("--timeout", type=int, help="真实模型调用超时时间，单位秒")
     feishu_parser.add_argument("--provider", choices=("codex", "deepseek"), help="模型提供方，默认读 AI_NOVELIST_MODEL_PROVIDER")
-    feishu_parser.add_argument("--model", help="模型名；DeepSeek 默认 deepseek-chat")
+    feishu_parser.add_argument("--model", help="模型名；DeepSeek 默认 deepseek-v4-pro")
     feishu_parser.add_argument(
         "--local-corpus-dir",
         help="本地 RAG 语料目录，默认读 AI_NOVELIST_LOCAL_CORPUS_DIR；配置后 research 优先检索 .txt/.md",
@@ -161,7 +161,7 @@ def add_generation_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--auto-approve", action="store_true", help="跳过人工输入并自动确认")
     parser.add_argument("--timeout", type=int, help="真实模型调用超时时间，单位秒")
     parser.add_argument("--provider", choices=("codex", "deepseek"), help="模型提供方，默认读 AI_NOVELIST_MODEL_PROVIDER")
-    parser.add_argument("--model", help="模型名；DeepSeek 默认 deepseek-chat")
+    parser.add_argument("--model", help="模型名；DeepSeek 默认 deepseek-v4-pro")
 
 
 def init_project(args: argparse.Namespace, store: LocalStore) -> int:
@@ -624,7 +624,7 @@ def make_search_backend(args: argparse.Namespace, settings: Settings) -> SearchB
         else:
             fallback_backend = WebSearchBackend(
                 provider=provider,
-                api_key=settings.search_api_key,
+                api_key=search_api_key(provider) or settings.search_api_key,
                 base_url=settings.search_base_url,
                 timeout_seconds=settings.search_timeout_seconds,
             )

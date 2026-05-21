@@ -617,6 +617,13 @@ def show_status_node(data: dict, store: LocalStore) -> dict:
 
 def show_outline_node(data: dict, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
+    if should_show_outline_stage(state):
+        from ai_novelist.graph_outline import show_outline_stage_node
+
+        result = NovelState.from_dict(show_outline_stage_node(state.to_dict(), store))
+        append_message(result, "assistant", result.director_message)
+        store.save_state(result)
+        return result.to_dict()
     if state.outline.strip():
         state.director_message = "当前大纲：\n" + state.outline
     elif state.reference_brief.strip():
@@ -630,6 +637,14 @@ def show_outline_node(data: dict, store: LocalStore) -> dict:
     append_message(state, "assistant", state.director_message)
     store.save_state(state)
     return state.to_dict()
+
+
+def should_show_outline_stage(state: NovelState) -> bool:
+    if state.outline.strip():
+        return False
+    if state.director_task_args.get("stage"):
+        return True
+    return state.active_workflow == "outline" and bool(state.outline_stage.strip())
 
 
 def show_reference_node(data: dict, store: LocalStore) -> dict:

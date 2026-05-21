@@ -394,3 +394,33 @@ Smoke 验证：`.venv/bin/python tests/smoke_phase2_chat.py`，结果 `phase2 ch
 ```
 
 结果：飞书单元测试 `7 passed`；全量 `.venv/bin/python -m pytest` 为 `85 passed`；`smoke_outline_collaboration.py` 与 `smoke_phase2_chat.py` 均通过；两个 help 命令可正常显示，其中 `feishu --help` 首次在默认沙箱触发 bwrap 错误，已用提权重跑通过。
+
+
+## 18. 本轮修复：CLI 搜索提供方 API Key 读取
+
+- 修复 `ai-novelist chat --search-provider exa` 未读取 `EXA_API_KEY` 的问题。
+- `config.search_api_key(provider)` 现在可按显式 provider 读取 `SERPAPI_API_KEY`、`TAVILY_API_KEY` 或 `EXA_API_KEY`，再回退到 `AI_NOVELIST_SEARCH_API_KEY`。
+- `make_search_backend` 在 CLI 显式传入 `--search-provider` 时，会按该 provider 重新解析 API Key，不再只依赖 `AI_NOVELIST_SEARCH_PROVIDER`。
+- README 和 IMPLEMENTATION_PLAN 已补充 `--search-provider exa` 与 `EXA_API_KEY` 的说明。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_research_workflow.py tests/test_search_backend.py
+```
+
+结果：`28 passed`。
+
+
+## 19. 本轮修复：飞书重复回复去重
+
+- 排查当前机器只运行了一个 `ai-novelist feishu` 进程，重复回复更可能来自飞书长连接事件重投递。
+- 新增 `RecentMessageDeduper`，在长连接处理器内按飞书 `message_id` 做进程内最近消息去重。
+- 同一 `message_id` 重复到达时直接忽略，不再再次调用 `DirectorService` 或回复飞书。
+- 当前仍未实现跨进程去重；如果同时启动多个机器人进程，仍可能重复回复。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_feishu_integration.py
+```

@@ -189,6 +189,9 @@ class DirectorService:
         return self._execute_decision(state, decision, channel)
 
     def _decide(self, state: NovelState, channel: Channel) -> DirectorDecision:
+        direct = deterministic_view_decision(state)
+        if direct is not None:
+            return direct
         prompt = build_service_director_prompt(state, self.store, channel)
         try:
             output = self.adapter.complete(prompt, self.store.project_dir(state.project_id))
@@ -281,8 +284,9 @@ def load_or_create_project(store: LocalStore, project_id: str) -> NovelState:
 
 def build_service_director_prompt(state: NovelState, store: LocalStore, channel: Channel) -> str:
     template = load_prompt("director")
-    history = "\n".join(f"{msg['role']}: {msg['content']}" for msg in state.messages[-12:])
+    history = format_recent_dialogue_for_director(state)
     project_context = store.load_project_context(state.project_id)
+    outline_stage_context = current_outline_stage_context(state)
     return (
         f"{template.rstrip()}\n\n"
         "## 输出格式\n"
@@ -307,11 +311,50 @@ def build_service_director_prompt(state: NovelState, store: LocalStore, channel:
         f"编辑意见：{'已有' if state.editor_notes else '暂无'}\n"
         f"待确认决策：{'有' if state.pending_director_decision else '无'}\n"
         f"大纲阶段：{state.outline_stage} / {state.outline_stage_status}\n\n"
+        f"## 当前大纲阶段产物（优先于旧对话）\n{outline_stage_context}\n\n"
         f"## 已获取参考信息摘要\n{build_reference_summary(state, max_chars=1200) if state.reference_brief or state.retrieval_context or state.research_sources else '暂无'}\n\n"
         f"## 最近编辑意见和待确认项\n{state.editor_notes[-1800:] if state.editor_notes.strip() else '暂无'}\n\n"
-        f"## 最近对话\n{history or '暂无'}\n\n"
+        "## 最近对话（仅作口吻和上下文参考；若与当前阶段产物冲突，以当前阶段产物为准）\n"
+        f"{history or '暂无'}\n\n"
         f"最新用户输入：{state.user_request}\n"
     )
+
+
+def current_outline_stage_context(state: NovelState, max_chars: int = 1800) -> str:
+    artifact = state.outline_stage_artifacts.get(state.outline_stage)
+    if not artifact:
+        return "暂无"
+    synthesis = str(artifact.get("synthesis", "")).strip()
+    if not synthesis:
+        return "暂无"
+    label = artifact.get("label") or state.outline_stage
+    content = f"# {label}\n\n{synthesis}"
+    if len(content) > max_chars:
+        return content[:max_chars].rstrip() + "\n..."
+    return content
+
+
+def format_recent_dialogue_for_director(state: NovelState, max_items: int = 8, max_chars_per_message: int = 260) -> str:
+    lines: list[str] = []
+    for msg in state.messages[-max_items:]:
+        role = str(msg.get("role", "")).strip()
+        content = str(msg.get("content", "")).strip()
+        if not role or not content:
+            continue
+        if role == "assistant" and looks_like_stale_stage_summary(content, state):
+            continue
+        if len(content) > max_chars_per_message:
+            content = content[:max_chars_per_message].rstrip() + "..."
+        lines.append(f"{role}: {content}")
+    return "\n".join(lines)
+
+
+def looks_like_stale_stage_summary(content: str, state: NovelState) -> bool:
+    if "之前已确认" in content or "还剩" in content and "尚未" in content:
+        return True
+    artifact = state.outline_stage_artifacts.get(state.outline_stage, {})
+    synthesis = str(artifact.get("synthesis", ""))
+    return bool(synthesis and "待确认" in content and content not in synthesis)
 
 
 def parse_service_director_output(output: str, state: NovelState) -> DirectorDecision:
@@ -432,7 +475,50 @@ def parse_json_object(output: str) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def deterministic_view_decision(state: NovelState) -> DirectorDecision | None:
+    text = state.user_request.strip()
+    lowered = text.lower()
+    wants_view = any(marker in text for marker in ("查看", "展示", "看一下", "看下", "看看", "显示")) or lowered.startswith("show ")
+    stage = detect_outline_stage_request(text)
+    if wants_view and stage:
+        return DirectorDecision(
+            "show_outline",
+            user_message="我会展示当前大纲阶段内容。",
+            confidence=95,
+            task_args={"stage": stage},
+            target="outline",
+            intent="status",
+        )
+    if wants_view and any(marker in text for marker in ("当前阶段", "阶段内容", "阶段产物", "当前产物")):
+        return DirectorDecision(
+            "show_outline",
+            user_message="我会展示当前大纲阶段内容。",
+            confidence=90,
+            target="outline",
+            intent="status",
+        )
+    return None
+
+
+def detect_outline_stage_request(text: str) -> str:
+    stage_markers = {
+        "direction": ("方向定位", "创作方向", "方向阶段"),
+        "worldbuilding": ("世界观设定", "世界观阶段"),
+        "characters": ("人物关系", "人物阶段", "角色关系"),
+        "plot_flow": ("故事流程", "流程阶段", "剧情流程"),
+        "outline_draft": ("总大纲草案", "大纲草案"),
+        "final_review": ("审稿锁定", "终审阶段"),
+    }
+    for stage, markers in stage_markers.items():
+        if any(marker in text for marker in markers):
+            return stage
+    return ""
+
+
 def fallback_decision(state: NovelState) -> DirectorDecision:
+    direct = deterministic_view_decision(state)
+    if direct is not None:
+        return direct
     text = state.user_request
     if any(marker in text for marker in ("查看状态", "项目状态", "显示状态")) or text.lower() in {"status", "show status"}:
         return DirectorDecision("show_status", user_message="我会展示当前项目状态。", confidence=60)
@@ -461,14 +547,17 @@ def hydrate_decision_args(decision: DirectorDecision, state: NovelState) -> None
 def update_project_context(state: NovelState, store: LocalStore, decision: DirectorDecision) -> None:
     facts = "\n".join(f"- {item}" for item in state.canon_facts[:8]) or "- 暂无"
     uncertainties = "\n".join(f"- {item}" for item in state.research_uncertainties[:6]) or "- 暂无"
-    pending = "\n".join(f"- {item}" for item in state.pending_questions[:6]) or "- 暂无"
+    pending = format_pending_context(state)
     next_steps = "\n".join(f"- {item}" for item in decision.next_steps[:6]) or default_next_steps(state)
+    stage_context = format_current_stage_context(state)
     content = (
         f"# Project Context: {state.project_id}\n\n"
         "## 项目目标\n"
         f"- 标题：{state.title}\n"
         f"- 创意：{state.idea or '暂无'}\n"
         f"- 当前章节：{state.current_chapter}\n\n"
+        "## 当前大纲阶段\n"
+        f"{stage_context}\n\n"
         "## 已检索事实\n"
         f"- 最近查询：{state.retrieval_query or '暂无'}\n"
         f"{facts}\n\n"
@@ -489,7 +578,38 @@ def update_project_context(state: NovelState, store: LocalStore, decision: Direc
     store.save_project_context(state.project_id, content)
 
 
+def format_pending_context(state: NovelState) -> str:
+    if state.pending_question.strip():
+        return f"- {state.pending_question.strip()}"
+    items = [item.strip() for item in state.pending_questions if item.strip()]
+    return "\n".join(f"- {item}" for item in items[:6]) or "- 暂无"
+
+
+def format_current_stage_context(state: NovelState, max_chars: int = 700) -> str:
+    stage = state.outline_stage
+    if not stage or stage == "done":
+        return "- 阶段：已锁定最终大纲" if stage == "done" else "- 暂无"
+    artifact = state.outline_stage_artifacts.get(stage, {})
+    label = artifact.get("label") or stage
+    status = artifact.get("status") or state.outline_stage_status or "unknown"
+    synthesis = str(artifact.get("synthesis", "")).strip()
+    lines = [f"- 阶段：{label} ({stage})", f"- 状态：{status}"]
+    if synthesis:
+        excerpt = synthesis[:max_chars].rstrip() + ("\n..." if len(synthesis) > max_chars else "")
+        lines.append("- 当前控制稿/阶段摘要：")
+        lines.append(excerpt)
+    else:
+        lines.append("- 当前控制稿/阶段摘要：暂无")
+    return "\n".join(lines)
+
+
 def default_next_steps(state: NovelState) -> str:
+    if state.active_workflow == "outline" and state.outline_stage and state.outline_stage != "done":
+        label = state.outline_stage_artifacts.get(state.outline_stage, {}).get("label") or state.outline_stage
+        return (
+            f"- 继续提出{label}修改意见，系统会合并成新版阶段产物。\n"
+            "- 如果认可当前阶段，回复“确认进入下一阶段”。"
+        )
     if state.reference_brief.strip() and not state.outline.strip():
         return "- 请用户确认参考事实后生成创作方向或大纲。"
     if state.outline.strip() and not state.chapter_plan.strip():

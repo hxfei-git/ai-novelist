@@ -1,7 +1,7 @@
 import json
 
 from ai_novelist.adapters.codex_cli import CodexCLIAdapter
-from ai_novelist.director_service import DirectorService, parse_service_director_output
+from ai_novelist.director_service import DirectorDecision, DirectorService, build_service_director_prompt, parse_service_director_output, update_project_context
 from ai_novelist.research import MockSearchBackend
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
@@ -147,6 +147,79 @@ def test_director_service_translates_multi_confirmation_feedback(tmp_path):
     pending = store.load_state("demo").pending_director_decision
     assert pending["action"] == "revise_outline"
     assert "沈砚 = 初圣残识宿主" in pending["task_args"]["instruction"]
+
+
+
+def test_update_project_context_syncs_current_outline_stage(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("重生魔门", "demo")
+    state.active_workflow = "outline"
+    state.outline_stage = "direction"
+    state.outline_stage_status = "options_ready"
+    state.pending_question = "方向定位当前是控制稿草案；你可以继续修改，或确认进入下一阶段。"
+    state.pending_questions = ["旧问题不应优先出现", state.pending_question]
+    state.outline_stage_artifacts["direction"] = {
+        "stage": "direction",
+        "label": "方向定位",
+        "status": "options_ready",
+        "synthesis": "## 一句话方向\n\n追查师傅吞噬气运真相。",
+    }
+
+    update_project_context(state, store, DirectorDecision("ask_user"))
+
+    context = store.load_project_context("demo")
+    assert "## 当前大纲阶段" in context
+    assert "方向定位 (direction)" in context
+    assert "追查师傅吞噬气运真相" in context
+    assert state.pending_question in context
+    assert "旧问题不应优先出现" not in context
+    assert "继续提出方向定位修改意见" in context
+
+
+def test_service_director_prompt_prioritizes_stage_artifact_over_stale_dialogue(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("重生魔门", "demo")
+    state.active_workflow = "outline"
+    state.outline_stage = "direction"
+    state.outline_stage_status = "options_ready"
+    state.user_request = "接下来我应该做什么？"
+    state.messages = [
+        {
+            "role": "assistant",
+            "content": "之前已确认：主角利用陨落强者气息伪造假面靠山；还剩必须隐藏的生存刚需尚未选定。",
+        },
+        {"role": "user", "content": "接下来我应该做什么？"},
+    ]
+    state.outline_stage_artifacts["direction"] = {
+        "stage": "direction",
+        "label": "方向定位",
+        "synthesis": "## 一句话方向\n\n追查师傅吞噬气运真相。",
+    }
+    store.save_state(state)
+
+    prompt = build_service_director_prompt(state, store, "feishu")
+
+    assert "当前大纲阶段产物" in prompt
+    assert "追查师傅吞噬气运真相" in prompt
+    assert "陨落强者气息" not in prompt
+    assert "必须隐藏的生存刚需尚未选定" not in prompt
+
+
+def test_director_service_shows_named_outline_stage(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("重生魔门", "重生魔门")
+    state.active_workflow = "outline"
+    state.outline_stage = "direction"
+    store.save_state(state)
+    store.save_outline_stage(state, "direction", "# 方向定位\n\n这是阶段正文。")
+    service = DirectorService(store, CodexCLIAdapter(mock=True), MockSearchBackend())
+
+    result = service.handle_turn("重生魔门", "查看方向定位", channel="cli")
+
+    assert result.state.director_action == "show_outline"
+    assert "# 方向定位" in result.final_message
+    assert "这是阶段正文" in result.final_message
+    assert "项目：重生魔门" not in result.final_message
 
 
 def test_confirmation_accepts_receive_words():

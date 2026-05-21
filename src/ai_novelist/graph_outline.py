@@ -407,7 +407,7 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore)
     state.director_action = "run_outline_stage"
     state.director_message = stage_ready_message(stage)
     state.pending_question = f"请确认是否锁定{STAGE_LABELS[stage]}并进入下一阶段，或继续提出修改。"
-    add_unique_items(state.pending_questions, [state.pending_question])
+    state.pending_questions = [state.pending_question]
     record_stage_history(state, "run", stage, state.user_request)
     store.save_outline_stage(state, stage, format_stage_markdown(artifact))
     store.save_state(state)
@@ -445,6 +445,8 @@ def advance_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalSt
     state.current_stage = next_stage
     state.director_action = "run_outline_stage"
     state.director_message = f"已锁定{STAGE_LABELS[stage]}，进入第 {stage_number(next_stage)} 阶段：{STAGE_LABELS[next_stage]}。"
+    state.pending_question = f"请确认是否锁定{STAGE_LABELS[next_stage]}并进入下一阶段，或继续提出修改。"
+    state.pending_questions = [state.pending_question]
     store.save_state(state)
     return run_outline_stage_node(state.to_dict(), adapter, store)
 
@@ -586,6 +588,25 @@ def build_outline_stage_role_prompt(state: NovelState, stage: str, role: str) ->
 
 def build_outline_stage_synthesizer_prompt(state: NovelState, stage: str, role_reviews: list[dict[str, str]]) -> str:
     reviews = "\n\n".join(f"## {item['role']}\n{item['content']}" for item in role_reviews)
+    if stage == "direction":
+        output_rule = (
+            "方向定位不是评审报告，而是控制文章走向的简明命令稿。"
+            "必须把用户最新输入与当前阶段旧产物整合成一版新的方向控制稿；"
+            "不要追加、罗列或保留历史修改记录，不要把用户意见单独堆成段落。"
+            "若新意见与旧方向重复，合并去重；若冲突，以用户最新输入为准并改写旧方向。"
+            "最终文本必须像一份可执行命令，而不是资料汇编。"
+            "请只输出以下 Markdown 结构：\n"
+            "## 一句话方向\n"
+            "用一句话确定故事类型、主角行动方式、核心冲突和情绪基调。\n"
+            "## 方向命令\n"
+            "输出 4-6 条短句，每条必须能约束后续世界观、人物和剧情，不写机会/风险/建议。\n"
+            "## 不许跑偏\n"
+            "输出 3-5 条禁止项，说明后续不能写成什么。\n"
+            "## 下一阶段输入\n"
+            "只列 2-3 条世界观阶段必须回答的问题。"
+        )
+    else:
+        output_rule = "请综合为用户可读的阶段产物，包含：Director 汇总、候选项或决策、推荐选择、待确认问题。"
     return (
         "AGENT: outline_stage_synthesizer\n"
         f"STAGE: {stage}\n"
@@ -594,7 +615,7 @@ def build_outline_stage_synthesizer_prompt(state: NovelState, stage: str, role_r
         f"用户最新输入：{state.user_request}\n"
         f"已锁定阶段：\n{locked_stage_summary(state)}\n\n"
         f"角色短评：\n{reviews}\n\n"
-        "请综合为用户可读的阶段产物，包含：Director 汇总、候选项或决策、推荐选择、待确认问题。"
+        f"{output_rule}"
     )
 
 
@@ -610,19 +631,28 @@ def locked_stage_summary(state: NovelState) -> str:
 def format_stage_markdown(artifact: dict) -> str:
     if not artifact:
         return ""
-    lines = [f"# {artifact.get('label') or STAGE_LABELS.get(str(artifact.get('stage')), '阶段产物')}", ""]
-    role_reviews = artifact.get("role_reviews") if isinstance(artifact.get("role_reviews"), list) else []
-    if role_reviews:
-        lines.append("## 角色短评")
-        for item in role_reviews:
-            if isinstance(item, dict):
-                lines.append(f"### {item.get('role', 'Agent')}")
-                lines.append(str(item.get("content", "")).strip())
-                lines.append("")
+    stage = str(artifact.get("stage", ""))
+    lines = [f"# {artifact.get('label') or STAGE_LABELS.get(stage, '阶段产物')}", ""]
+    user_feedback = str(artifact.get("user_feedback", "")).strip()
+    if user_feedback and stage != "direction":
+        lines.append("## 用户本轮反馈")
+        lines.append(user_feedback)
+        lines.append("")
     synthesis = str(artifact.get("synthesis", "")).strip()
     if synthesis:
-        lines.append("## Director 汇总")
+        heading = "## 方向控制稿" if stage == "direction" else "## Director 汇总"
+        lines.append(heading)
         lines.append(synthesis)
+    if stage != "direction":
+        role_reviews = artifact.get("role_reviews") if isinstance(artifact.get("role_reviews"), list) else []
+        if role_reviews:
+            lines.append("")
+            lines.append("## 角色短评")
+            for item in role_reviews:
+                if isinstance(item, dict):
+                    lines.append(f"### {item.get('role', 'Agent')}")
+                    lines.append(str(item.get("content", "")).strip())
+                    lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
 

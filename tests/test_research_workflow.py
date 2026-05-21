@@ -167,6 +167,19 @@ def test_make_search_backend_uses_configured_web_provider():
     assert backend.timeout_seconds == 9
 
 
+def test_make_search_backend_reads_cli_provider_specific_key(monkeypatch):
+    monkeypatch.delenv("AI_NOVELIST_SEARCH_PROVIDER", raising=False)
+    monkeypatch.setenv("EXA_API_KEY", "exa-env-key")
+    args = Namespace(mock=False, search_provider="exa", local_corpus_dir=None)
+    settings = Settings(search_provider="mock", search_api_key="")
+
+    backend = make_search_backend(args, settings)
+
+    assert isinstance(backend, WebSearchBackend)
+    assert backend.provider == "exa"
+    assert backend.api_key == "exa-env-key"
+
+
 def test_make_search_backend_wraps_cli_local_corpus_dir(tmp_path):
     args = Namespace(mock=True, search_provider=None, local_corpus_dir=str(tmp_path))
     settings = Settings()

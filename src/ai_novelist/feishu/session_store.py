@@ -22,9 +22,27 @@ class FeishuSessionStore:
         self.set_current_project(open_id, project_id)
         return project_id
 
+    def get_current_project(self, open_id: str) -> str:
+        sessions = self._load()
+        return str(sessions.get(open_id, "")).strip()
+
     def set_current_project(self, open_id: str, project_id: str) -> None:
         sessions = self._load()
         sessions[open_id] = normalize_project_id(project_id)
+        self._save(sessions)
+
+    def needs_new_project_title(self, open_id: str) -> bool:
+        sessions = self._load()
+        return sessions.get(pending_project_key(open_id)) == "1"
+
+    def request_new_project_title(self, open_id: str) -> None:
+        sessions = self._load()
+        sessions[pending_project_key(open_id)] = "1"
+        self._save(sessions)
+
+    def clear_new_project_request(self, open_id: str) -> None:
+        sessions = self._load()
+        sessions.pop(pending_project_key(open_id), None)
         self._save(sessions)
 
     def _load(self) -> dict[str, str]:
@@ -49,6 +67,10 @@ def default_project_id(open_id: str) -> str:
         return f"feishu-{normalized}"
     digest = sha1(open_id.encode("utf-8")).hexdigest()[:12]
     return f"feishu-{digest}"
+
+
+def pending_project_key(open_id: str) -> str:
+    return f"__pending_new_project__:{open_id}"
 
 
 def normalize_project_id(project_id: str) -> str:

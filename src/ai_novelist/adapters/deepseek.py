@@ -18,7 +18,7 @@ class DeepSeekAPIError(AgentAdapterError):
 @dataclass
 class DeepSeekAdapter(AgentAdapter):
     api_key: str = ""
-    model: str = "deepseek-chat"
+    model: str = "deepseek-v4-pro"
     base_url: str = "https://api.deepseek.com"
     timeout_seconds: int = 180
     temperature: float = 0.7

@@ -1,5 +1,5 @@
 from ai_novelist.adapters.codex_cli import CodexCLIAdapter
-from ai_novelist.graph_outline import append_message, build_outline_collaboration_graph, build_outline_prompt
+from ai_novelist.graph_outline import build_outline_stage_synthesizer_prompt, format_stage_markdown, append_message, build_outline_collaboration_graph, build_outline_prompt
 from ai_novelist.graph_writer import build_chat_graph
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
@@ -151,3 +151,47 @@ def test_outline_prompt_injects_retrieval_context():
     assert "检索查询：苟在初圣" in prompt
     assert "# 检索上下文" in prompt
     assert "资料 (test): https://example.test" in prompt
+
+
+def test_direction_stage_markdown_hides_role_reviews():
+    markdown = format_stage_markdown(
+        {
+            "stage": "direction",
+            "label": "方向定位",
+            "user_feedback": "偏悬疑推理线",
+            "synthesis": "## 一句话方向\n\n重生魔门悬疑智斗。",
+            "role_reviews": [{"role": "风险编辑 Agent", "content": "机会、风险、建议"}],
+        }
+    )
+
+    assert "## 方向控制稿" in markdown
+    assert "## 角色短评" not in markdown
+    assert "风险编辑 Agent" not in markdown
+
+
+def test_direction_synthesizer_prompt_demands_control_brief():
+    state = NovelState(project_id="demo", title="Demo", idea="重生魔门")
+
+    prompt = build_outline_stage_synthesizer_prompt(state, "direction", [])
+
+    assert "方向定位不是评审报告" in prompt
+    assert "整合成一版新的方向控制稿" in prompt
+    assert "不要追加、罗列或保留历史修改记录" in prompt
+    assert "## 一句话方向" in prompt
+    assert "## 方向命令" in prompt
+    assert "不写机会/风险/建议" in prompt
+
+
+def test_direction_stage_markdown_integrates_without_feedback_dump():
+    markdown = format_stage_markdown(
+        {
+            "stage": "direction",
+            "label": "方向定位",
+            "user_feedback": "师傅暗中吞噬主角气运",
+            "synthesis": "整理后的方向定位",
+        }
+    )
+
+    assert "## 用户本轮反馈" not in markdown
+    assert "师傅暗中吞噬主角气运" not in markdown
+    assert "整理后的方向定位" in markdown

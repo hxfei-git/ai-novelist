@@ -121,7 +121,8 @@ export SERPAPI_API_KEY="你的 SerpAPI Key"
 相关环境变量：
 
 - `AI_NOVELIST_SEARCH_PROVIDER`：`mock`、`serpapi`、`tavily` 或 `exa`，默认 `mock`。
-- `AI_NOVELIST_SEARCH_API_KEY`：通用搜索 API Key；也可使用 `SERPAPI_API_KEY`、`TAVILY_API_KEY`、`EXA_API_KEY`。
+- `SERPAPI_API_KEY`、`TAVILY_API_KEY`、`EXA_API_KEY`：各搜索提供方的专用 API Key。即使通过 `--search-provider exa` 单次指定 provider，也会读取 `EXA_API_KEY`。
+- `AI_NOVELIST_SEARCH_API_KEY`：通用搜索 API Key；未设置提供方专用 key 时使用。
 - `AI_NOVELIST_SEARCH_BASE_URL`：自定义搜索接口地址，通常不需要设置。
 - `AI_NOVELIST_SEARCH_TIMEOUT`：搜索请求超时秒数，默认 `20`。
 
@@ -262,7 +263,7 @@ export AI_NOVELIST_FEISHU_APP_SECRET="你的 App Secret"
 我想写一个月球城市失忆工程师的悬疑科幻
 ```
 
-`/project` 会查看当前项目；`/project demo-novel` 会切换或创建本地项目 `demo-novel`。会话映射保存在 `projects/.feishu_sessions.json`。同一个 `open_id` 会使用当前项目；没有映射时自动创建 `feishu-<open_id>`。
+`/project` 会查看当前项目；`/project demo-novel` 会切换或创建本地项目 `demo-novel`。会话映射保存在 `projects/.feishu_sessions.json`。没有当前项目时，机器人会先询问小说名，再用小说名创建对应项目目录；发送“换一本”也会进入新项目创建流程。
 
 如果机器人要求确认，会返回纯文本编号：
 
