@@ -2,21 +2,21 @@
 
 ## 1. 当前状态
 
-AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、LangGraph 和 Codex CLI。
+AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、LangGraph、Codex CLI，并支持 DeepSeek API 作为可选模型提供方。
 
 已完成：
 
-- 阶段 1：最小 LangGraph + Codex CLI 大纲生成闭环。
-- 阶段 2：真正的多 Agent 小说创作工作流。
-- 阶段 2 增强：Director Agent 对话模式。
+- 阶段 1：最小 LangGraph + 模型适配器 + 本地存储。
+- 阶段 2：compose 多 Agent 小说创作图。
+- 阶段 2 增强：Director Agent chat 对话模式。
+- 大纲共创增强：outline collaboration graph，支持生成、审稿、用户反馈、修订、版本比较、锁定约束和保存。
 - mock 模式：不依赖外部模型即可端到端验证。
-- 真实模式：通过 `codex exec --json --skip-git-repo-check` 调用 Codex CLI。
+- 真实模式：Codex CLI 或 DeepSeek API。
 
 未完成：
 
 - 阶段 3 飞书机器人入口。
-- 后台任务队列。
-- 数据库、多用户存储、并发锁。
+- 后台任务队列、数据库、多用户存储、并发锁。
 - Claude Code Adapter。
 - 多章节批量自动续写。
 - Web UI。
@@ -29,59 +29,42 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
   v
 本地 CLI: ai-novelist
   |-- init
-  |-- outline
-  |-- compose
-  |-- chat
+  |-- outline: 大纲共创交互循环
+  |-- compose: 一次性多 Agent 创作
+  |-- chat: Director Agent 连续对话
   |-- worldbuild / plan-outline / plan-chapters / write-chapter / review
   `-- show
   |
   v
-配置层
-  |-- config.py
-  |-- AI_NOVELIST_PROJECTS_DIR
-  |-- AI_NOVELIST_CODEX_BIN
-  `-- AI_NOVELIST_CODEX_TIMEOUT
+模型适配层
+  |-- AgentAdapter
+  |-- CodexCLIAdapter
+  `-- DeepSeekAdapter
   |
   v
 LangGraph 编排层
   |-- graph_minimal.py
-  |     `-- generate_outline -> human_review -> persist_outline
+  |     `-- 保留阶段 1 最小图
+  |
+  |-- graph_outline.py
+  |     director
+  |       -> propose_directions / worldbuild / generate_outline / review_outline / revise_outline
+  |       -> compare_versions / persist_outline / show_status / ask_user / END
   |
   `-- graph_writer.py
-        |-- 单 Agent 兼容图
-        |     `-- run_agent -> human_review -> persist -> END
-        |
-        |-- Compose 多 Agent 图
-        |     worldbuild
-        |       -> plan_outline
-        |       -> plan_chapters
-        |       -> write_chapter
-        |       -> editor_review
-        |            |-- pass -> human_review -> persist_outputs -> END
-        |            |-- revise 且 revision_count < max_revisions
-        |            |      -> rewrite_chapter -> editor_review
-        |            `-- stop / revise 超限 -> END
-        |
-        `-- Director Chat 图
-              director
-                |-- ask_user -> END
-                |-- run_selected_agent -> END
-                |-- persist_outputs -> END
-                |-- show_status -> END
-                `-- stop -> END
-  |
-  v
-Agent 执行层
-  |-- AgentAdapter
-  `-- CodexCLIAdapter
-        |-- mock=True: 本地模拟 Director 和子 Agent 输出
-        `-- mock=False: 调用 codex exec
+        |-- build_writer_graph: 单 Agent 兼容图
+        |-- build_composer_graph: 完整 compose 图
+        `-- build_chat_graph: Director 单轮对话图，可调度 outline 共创节点
   |
   v
 Prompt 模板层
   |-- director.md
-  |-- world_builder.md
+  |-- direction_proposer.md
   |-- outline_planner.md
+  |-- outline_editor.md
+  |-- outline_reviser.md
+  |-- version_comparator.md
+  |-- world_builder.md
   |-- chapter_planner.md
   |-- chapter_writer.md
   `-- editor.md
@@ -94,233 +77,170 @@ Prompt 模板层
         |-- outline.md
         |-- chapter_plan.md
         `-- chapters/
-              |-- chapter_001.md
-              `-- chapter_001_review.md
 ```
 
-## 3. 核心模块
+## 3. 大纲共创流程
 
-### `src/ai_novelist/cli.py`
-
-CLI 入口。负责解析命令、加载项目状态、创建 `CodexCLIAdapter`、构建 LangGraph 图并展示结果。
-
-命令：
-
-- `init`：创建项目。
-- `outline`：阶段 1 单步大纲生成。
-- `compose`：阶段 2 一次性多 Agent 创作流程。
-- `chat`：Director Agent 连续对话模式。
-- `worldbuild`、`plan-outline`、`plan-chapters`、`write-chapter`、`review`：兼容单步 Agent 命令。
-- `show`：显示项目状态和产物路径。
-
-### `src/ai_novelist/graph_minimal.py`
-
-阶段 1 最小图：
+`outline` 命令现在优先使用 `build_outline_collaboration_graph`：
 
 ```text
-generate_outline -> human_review -> persist_outline -> END
+START
+  -> director
+  -> route_after_outline_director
+      -> ask_user -> END
+      -> propose_directions -> human_feedback -> END
+      -> worldbuild -> generate_outline -> review_outline -> human_feedback -> END
+      -> generate_outline -> review_outline -> human_feedback -> END
+      -> review_outline -> human_feedback -> END
+      -> revise_outline -> compare_versions -> review_outline -> human_feedback -> END
+      -> persist_outline -> END
+      -> show_status -> END
+      -> stop -> END
 ```
 
-### `src/ai_novelist/graph_writer.py`
+说明：
 
-阶段 2 核心模块。
+- 图内保留 conditional edge，但不会在同一次 invoke 里无限自动修订。
+- “生成 -> 审稿 -> 用户反馈 -> 修订 -> 再审稿 -> 再反馈 -> 保存”的循环由 CLI/chat 的下一轮用户输入驱动。
+- `review_outline` 如果返回 `revise`，只写入 `revision_instruction` 和审稿状态，不会自动保存。
+- `revise_outline` 会写入新大纲版本，并调用 `compare_versions` 帮用户理解差异。
 
-包含：
+支持的用户输入：
 
-- `build_writer_graph`：单 Agent 兼容图。
-- `build_composer_graph`：完整 compose 多 Agent 图。
-- `build_chat_graph`：Director Agent 单轮对话图。
-- `parse_editor_review`：解析 `STATUS` 和 `QUALITY_SCORE`。
-- `parse_director_output`：解析 Director 的 `ACTION/MESSAGE/CHAPTER`。
+- `approve`：确认并保存当前大纲。
+- `revise: ...`：提炼为 `revision_instruction`，进入修订。
+- `variant`：生成 3 个不同创作方向。
+- `review`：调用大纲编辑审查。
+- `lock: ...`：写入 `locked_constraints`。
+- `stop`：结束当前流程但保留 state。
 
-### `src/ai_novelist/state.py`
+## 4. Compose 图
 
-`NovelState` 是所有图共享的状态对象，并保持旧 `state.json` 向后兼容。
+```text
+worldbuild
+  -> plan_outline
+  -> plan_chapters
+  -> write_chapter
+  -> editor_review
+       -> pass: human_review -> persist_outputs -> END
+       -> revise 且 revision_count < max_revisions: rewrite_chapter -> editor_review
+       -> revise 超限或 stop: END
+```
 
-核心创作字段：
+compose 仍保留一次性自动推进能力，适合快速从创意生成到章节草稿和编辑意见。
 
-- `project_id`
-- `title`
-- `idea`
-- `worldbuilding`
-- `outline`
-- `chapter_plan`
-- `current_chapter`
-- `chapter_draft`
-- `editor_notes`
+## 5. Director Chat 图
 
-流程控制字段：
+```text
+director
+  |-- ask_user -> END
+  |-- worldbuild / plan_chapters / write_chapter / review / revise_chapter
+  |      -> run_selected_agent -> END
+  |-- propose_directions / generate_outline / review_outline / revise_outline / compare_versions
+  |      -> run_selected_outline_agent -> END
+  |-- persist_outputs -> END
+  |-- show_status -> END
+  `-- stop -> END
+```
 
-- `review_status`
-- `editor_decision`
-- `revision_count`
-- `max_revisions`
-- `quality_score`
-- `next_action`
-- `error`
+Director 输出结构：
 
-Director 对话字段：
+```text
+ACTION: ask_user|propose_directions|worldbuild|generate_outline|review_outline|revise_outline|compare_versions|plan_chapters|write_chapter|review|revise_chapter|persist_outputs|show_status|stop
+TARGET: outline|worldbuilding|chapter|character|style|project|unknown
+INTENT: create|revise|review|approve|reject|lock|variant|save|status|stop|answer
+MESSAGE: 给用户看的简短回复
+INSTRUCTION: 提炼后的用户要求
+LOCKED_CONSTRAINTS: 可选，逗号分隔
+STYLE_PREFERENCES: 可选，逗号分隔
+CHAPTER: 可选章节编号
+```
 
-- `messages: list[dict[str, str]]`
-- `user_request: str`
-- `director_action: str`
-- `director_message: str`
-- `pending_question: str`
-- `active_task: str`
+## 6. 状态字段
 
-### `src/ai_novelist/adapters/codex_cli.py`
+`NovelState.from_dict/to_dict` 保持旧 `state.json` 向后兼容。新增大纲共创字段：
 
-Codex CLI 适配器。
+- `revision_instruction`
+- `locked_constraints`
+- `style_preferences`
+- `outline_versions`
+- `selected_outline_version`
+- `pending_questions`
+- `open_decisions`
+- `last_user_feedback`
+- `active_artifact`
+- `director_intent`
 
-真实命令形态：
+既有 chat 字段仍保留：`messages`、`user_request`、`director_action`、`director_message`、`pending_question`、`active_task`。
+
+## 7. 使用方式
+
+大纲共创 mock：
 
 ```bash
-codex exec --json --skip-git-repo-check -C <workspace> <prompt>
+.venv/bin/ai-novelist outline   --project demo-outline   --idea "一个失忆工程师在月球城市追查自己的小说手稿"   --mock
 ```
 
-关键点：
+大纲共创自动保存当前草案：
 
-- `subprocess.run(..., input="")` 关闭 stdin，避免非 TTY 环境卡住。
-- 解析 Codex JSONL 的 `item.text`。
-- mock 根据 prompt 中的 `AGENT:` 返回不同 Agent 输出。
-- Director mock 根据用户关键词路由动作。
-- Compose mock 模拟一次编辑退回和重写通过。
+```bash
+.venv/bin/ai-novelist outline   --project demo-outline   --idea "一个失忆工程师在月球城市追查自己的小说手稿"   --mock   --auto-approve
+```
 
-### `src/ai_novelist/storage/local_store.py`
-
-本地文件存储，负责 `state.json` 和各类 Markdown 产物读写。
-
-## 4. Director Chat 使用方式
+Director chat：
 
 ```bash
 .venv/bin/ai-novelist chat --project demo-chat --mock
 ```
 
-示例输入：
-
-```text
-我想写一个月球城市失忆工程师的悬疑科幻
-帮我先设计世界观
-大纲太普通，增强主角罪感
-写第 1 章
-让编辑审稿
-保存当前结果
-显示当前状态
-退出
-```
-
-Chat 图是单轮图，由 CLI 循环驱动：
-
-```text
-director
-  |-- ask_user -> END
-  |-- worldbuild / plan_outline / plan_chapters / write_chapter / review / revise_chapter
-  |      -> run_selected_agent -> END
-  |-- persist_outputs -> persist_available_outputs -> END
-  |-- show_status -> show_status_node -> END
-  `-- stop -> END
-```
-
-Director 输出格式：
-
-```text
-ACTION: ask_user|worldbuild|plan_outline|plan_chapters|write_chapter|review|revise_chapter|persist_outputs|show_status|stop
-MESSAGE: 给用户看的简短回复
-CHAPTER: 可选章节编号
-```
-
-## 5. Compose 使用方式
+Compose：
 
 ```bash
-.venv/bin/ai-novelist compose \
-  --project demo-compose \
-  --idea "一个失忆工程师在月球城市追查自己的小说手稿" \
-  --chapter 1 \
-  --mock \
-  --auto-approve
+.venv/bin/ai-novelist compose   --project demo-compose   --idea "一个失忆工程师在月球城市追查自己的小说手稿"   --chapter 1   --mock   --auto-approve
 ```
-
-真实模式：
-
-```bash
-.venv/bin/ai-novelist compose \
-  --project real-compose \
-  --idea "一个失忆工程师在月球城市追查自己的小说手稿" \
-  --chapter 1 \
-  --timeout 180
-```
-
-## 6. 单步命令
-
-```bash
-.venv/bin/ai-novelist init --title demo
-.venv/bin/ai-novelist outline --project demo --idea "小说创意" --mock --auto-approve
-.venv/bin/ai-novelist worldbuild --project demo --mock --auto-approve
-.venv/bin/ai-novelist plan-outline --project demo --mock --auto-approve
-.venv/bin/ai-novelist plan-chapters --project demo --mock --auto-approve
-.venv/bin/ai-novelist write-chapter --project demo --chapter 1 --mock --auto-approve
-.venv/bin/ai-novelist review --project demo --chapter 1 --mock --auto-approve
-.venv/bin/ai-novelist show --project demo
-```
-
-这些命令仍走单 Agent 兼容图，不等同于完整 compose 协作图。
-
-## 7. 验收命令
-
-```bash
-.venv/bin/python -m pytest
-.venv/bin/python tests/smoke_phase2.py
-.venv/bin/python tests/smoke_phase2_compose.py
-.venv/bin/python tests/smoke_phase2_chat.py
-.venv/bin/ai-novelist compose --project demo-compose --idea "一个失忆工程师在月球城市追查自己的小说手稿" --chapter 1 --mock --auto-approve
-.venv/bin/ai-novelist show --project demo-compose
-```
-
-当前已验证：`18 passed`。
 
 ## 8. 测试覆盖
 
-- `tests/test_codex_adapter.py`：Codex mock、JSONL 解析、错误处理。
 - `tests/test_graph_minimal.py`：阶段 1 最小图。
-- `tests/test_graph_writer.py`：单 Agent 图、compose 图、chat 图、编辑路由、Director 路由。
-- `tests/test_local_store.py`：本地存储。
-- `tests/test_prompt_loader.py`：prompt 加载。
-- `tests/test_state.py`：状态序列化兼容。
-- `tests/smoke_phase1.py`：阶段 1 smoke。
-- `tests/smoke_phase2.py`：阶段 2 单 Agent smoke。
+- `tests/test_graph_writer.py`：单 Agent、compose、chat、Director 路由。
+- `tests/test_outline_collaboration.py`：大纲 approve、revise、lock、variant、旧 state 兼容、chat 路由到大纲修订。
+- `tests/smoke_outline_collaboration.py`：大纲生成、修订、保存 smoke。
 - `tests/smoke_phase2_compose.py`：compose smoke。
-- `tests/smoke_phase2_chat.py`：Director chat smoke。
+- `tests/smoke_phase2_chat.py`：chat smoke。
+
+验收命令：
+
+```bash
+.venv/bin/python -m pytest
+.venv/bin/python tests/smoke_outline_collaboration.py
+.venv/bin/python tests/smoke_phase2.py
+.venv/bin/python tests/smoke_phase2_compose.py
+.venv/bin/python tests/smoke_phase2_chat.py
+.venv/bin/ai-novelist outline --project demo-outline-collab --idea "一个失忆工程师在月球城市追查自己的小说手稿" --mock --auto-approve
+.venv/bin/ai-novelist show --project demo-outline-collab
+```
+
+当前已验证：`30 passed`，并通过 `smoke_outline_collaboration.py`、`smoke_phase2_chat.py`、`outline --mock --auto-approve`。
 
 ## 9. 当前限制
 
-- 本项目仍是本地 CLI，不是长期运行服务。
-- 真实模式每个 Agent 独立调用一次 `codex exec`，没有流式 token 展示。
-- `chat` 是 CLI 循环驱动的单轮图，不是后台会话服务。
-- `persist_outputs` 只保存当前已有产物，不会强制补齐缺失产物。
+- 仍是本地 CLI，不是长期运行服务。
+- outline/chat 的多轮共创由 CLI 循环驱动，不是后台会话服务。
+- 真实模式每个 Agent 独立调用一次模型，没有流式 token 展示。
+- `persist_outputs` 只保存当前已有产物，不会自动补齐缺失产物。
 - `compose` 只围绕指定章节运行，不批量生成多章。
 - 本地文件存储没有并发锁。
-- 没有数据库、队列、飞书、Web UI 或多租户权限。
-- Claude Code Adapter 未实现。
+- 没有飞书、数据库、队列、Web UI、多租户权限或 Claude Code Adapter。
 
 ## 10. 阶段 3 后续计划
-
-阶段 3 接入飞书：
 
 ```text
 飞书用户
   -> 飞书机器人 / Webhook
-  -> 命令解析
-  -> 调用现有 chat / compose / 单步能力
-  -> 后台任务执行
+  -> 会话映射与消息去重
+  -> 调用现有 chat / outline / compose 能力
+  -> 后台执行长任务
   -> 飞书消息回复摘要和审核入口
 ```
 
-待实现：
-
-- FastAPI webhook。
-- 飞书 challenge 和签名校验。
-- 消息去重。
-- 用户 ID 到项目 ID 的会话映射。
-- 后台任务执行，避免 webhook 超时。
-- 飞书中的 `确认/修改/停止/继续` 审核命令。
-- 项目级文件锁。
+下一步应先抽出 service 层，把 CLI 循环中对 `LocalStore`、graph invoke 和用户输入归一化的逻辑复用给飞书入口。

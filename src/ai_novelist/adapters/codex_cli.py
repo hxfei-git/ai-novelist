@@ -104,6 +104,14 @@ class CodexCLIAdapter(AgentAdapter):
     def _mock_response(self, prompt: str) -> str:
         if "AGENT: director" in prompt:
             return self._mock_director(prompt)
+        if "AGENT: direction_proposer" in prompt:
+            return self._mock_directions()
+        if "AGENT: outline_reviser" in prompt:
+            return self._mock_outline_revised()
+        if "AGENT: outline_editor" in prompt:
+            return self._mock_outline_editor(revised="修订要求：暂无" not in prompt)
+        if "AGENT: version_comparator" in prompt:
+            return self._mock_version_comparison()
         if "AGENT: world_builder" in prompt:
             return self._mock_worldbuilding()
         if "AGENT: outline_planner" in prompt:
@@ -120,27 +128,58 @@ class CodexCLIAdapter(AgentAdapter):
     def _mock_director(self, prompt: str) -> str:
         request = self._extract_director_request(prompt).lower()
         chapter = self._extract_chapter(request)
-        if any(word in request for word in ("退出", "结束", "quit", "exit")):
-            return "ACTION: stop\nMESSAGE: 已结束本次创作对话。\nCHAPTER:"
+
+        def response(action: str, target: str, intent: str, message: str, instruction: str = "", locks: str = "", styles: str = "", chapter_value: str = "") -> str:
+            return (
+                f"ACTION: {action}\n"
+                f"TARGET: {target}\n"
+                f"INTENT: {intent}\n"
+                f"MESSAGE: {message}\n"
+                f"INSTRUCTION: {instruction}\n"
+                f"LOCKED_CONSTRAINTS: {locks}\n"
+                f"STYLE_PREFERENCES: {styles}\n"
+                f"CHAPTER: {chapter_value}"
+            )
+
+        if any(word in request for word in ("退出", "结束", "quit", "exit", "stop")):
+            return response("stop", "project", "stop", "已结束本次创作对话。")
+        if any(word in request for word in ("保存大纲", "确认大纲", "approve")):
+            return response("persist_outline", "outline", "approve", "我会保存当前大纲。")
         if any(word in request for word in ("保存", "落盘", "写入文件")):
-            return "ACTION: persist_outputs\nMESSAGE: 我会保存当前已经生成的世界观、大纲、细纲、章节和审稿意见。\nCHAPTER:"
+            return response("persist_outputs", "project", "save", "我会保存当前已经生成的产物。")
         if any(word in request for word in ("状态", "进度", "show", "哪里", "在哪", "路径", "位置")):
-            return "ACTION: show_status\nMESSAGE: 我会展示当前项目状态和已有产物。\nCHAPTER:"
+            return response("show_status", "project", "status", "我会展示当前项目状态和已有产物。")
+        if any(word in request for word in ("多个方向", "三个方向", "不同方向", "variant", "备选")):
+            return response("propose_directions", "outline", "variant", "我会给出三个不同的创作方向供你选择。")
+        if any(word in request for word in ("这个设定别改", "别改", "不要改", "保留")):
+            return response("show_status", "outline", "lock", "我已记录锁定约束，后续修订会遵守。", request, request)
+        if any(word in request for word in ("审查大纲", "审稿大纲", "review outline", "看看大纲问题")):
+            return response("review_outline", "outline", "review", "我会调用大纲编辑审查当前大纲。")
+        if any(word in request for word in ("大纲", "主线", "罪感", "人物弧光", "更黑暗", "偏悬疑", "少点设定解释", "太普通")):
+            styles = []
+            if "黑暗" in request:
+                styles.append("更黑暗")
+            if "悬疑" in request:
+                styles.append("偏悬疑")
+            if "少点设定" in request:
+                styles.append("少设定解释")
+            action = "revise_outline" if any(word in request for word in ("太", "强化", "增强", "更", "修改", "调整", "少点")) else "generate_outline"
+            intent = "revise" if action == "revise_outline" else "create"
+            instruction = request if intent == "revise" else ""
+            return response(action, "outline", intent, "我会处理大纲，并把你的要求转成可执行修订。", instruction, styles="，".join(styles))
         if any(word in request for word in ("世界观", "设定", "背景")):
-            return "ACTION: worldbuild\nMESSAGE: 我会先调度世界观 Agent，建立可持续写作的规则、冲突和素材。\nCHAPTER:"
-        if any(word in request for word in ("大纲", "主线", "罪感", "人物弧光")):
-            return "ACTION: plan_outline\nMESSAGE: 我会调度大纲 Agent，强化主线、人物弧光和伏笔回收。\nCHAPTER:"
+            return response("worldbuild", "worldbuilding", "create", "我会先调度世界观 Agent，建立可持续写作的规则、冲突和素材。")
         if any(word in request for word in ("细纲", "章节规划", "章节计划")):
-            return "ACTION: plan_chapters\nMESSAGE: 我会调度章节细纲 Agent，把大纲拆成可执行章节。\nCHAPTER:"
+            return response("plan_chapters", "outline", "create", "我会调度章节细纲 Agent，把大纲拆成可执行章节。")
         if any(word in request for word in ("审稿", "编辑", "检查")):
-            return f"ACTION: review\nMESSAGE: 我会调度编辑 Agent 检查当前章节。\nCHAPTER: {chapter or ''}"
-        if any(word in request for word in ("重写", "修改章节", "改写", "修订")):
-            return f"ACTION: revise_chapter\nMESSAGE: 我会根据编辑意见调度章节写手重写当前章节。\nCHAPTER: {chapter or ''}"
+            return response("review", "chapter", "review", "我会调度编辑 Agent 检查当前章节。", chapter_value=chapter)
+        if any(word in request for word in ("重写", "修改章节", "改写", "修订章节")):
+            return response("revise_chapter", "chapter", "revise", "我会根据编辑意见调度章节写手重写当前章节。", request, chapter_value=chapter)
         if "写" in request and "章" in request:
-            return f"ACTION: write_chapter\nMESSAGE: 我会调度章节写手生成第 {chapter or 1} 章。\nCHAPTER: {chapter or 1}"
+            return response("write_chapter", "chapter", "create", f"我会调度章节写手生成第 {chapter or 1} 章。", chapter_value=chapter or "1")
         if any(word in request for word in ("想写", "创意", "小说", "故事")):
-            return "ACTION: worldbuild\nMESSAGE: 我先把这个创意沉淀成世界观，再继续推进大纲和章节。\nCHAPTER:"
-        return "ACTION: ask_user\nMESSAGE: 你想让我下一步做什么？可以说：设计世界观、写大纲、写第 1 章、让编辑审稿或保存当前结果。\nCHAPTER:"
+            return response("worldbuild", "worldbuilding", "create", "我先把这个创意沉淀成世界观，再继续推进大纲和章节。")
+        return response("ask_user", "unknown", "answer", "你想让我下一步做什么？可以说：生成大纲、给三个方向、修改大纲、审查大纲或保存。")
 
     def _extract_director_request(self, prompt: str) -> str:
         for line in reversed(prompt.splitlines()):
@@ -158,6 +197,61 @@ class CodexCLIAdapter(AgentAdapter):
         if match:
             return match.group(1)
         return ""
+
+    def _mock_directions(self) -> str:
+        return (
+            "# 创作方向提案\n\n"
+            "## 方向 1：记忆罪案\n- 核心概念：主角追查手稿预言案件，逐步发现自己曾是记忆篡改执行者。\n- 主角压力：真相越清晰，罪感越强。\n- 主要冲突：自我救赎与城市稳定。\n- 风格气质：黑暗悬疑。\n- 优点：人物弧光强。\n- 风险：需要控制信息密度。\n\n"
+            "## 方向 2：月背冷库\n- 核心概念：手稿来自保存删除记忆的月背冷库。\n- 主角压力：找回记忆会伤害盟友。\n- 主要冲突：私人真相与公共秩序。\n- 风格气质：科幻调查。\n- 优点：世界观纵深强。\n- 风险：设定解释可能过多。\n\n"
+            "## 方向 3：纸上叛乱\n- 核心概念：地下写作者用纸质小说绕过预测系统发动叛乱。\n- 主角压力：必须决定是否公开自己的罪证。\n- 主要冲突：叙事自由与安全系统。\n- 风格气质：群像悬疑。\n- 优点：适合长篇扩展。\n- 风险：主线可能分散。\n\n"
+            "## 建议选择\n建议选择方向 1，因为它最能强化主角罪感和悬疑推进。"
+        )
+
+    def _mock_outline_revised(self) -> str:
+        return (
+            "# 修订版总大纲\n\n"
+            "## 修订摘要\n强化主角罪感，将第三幕改为更黑暗的公开自证：林澈必须承认自己曾参与删除灰籍居民记忆。\n\n"
+            "## 核心卖点\n失忆工程师追查预言手稿，却发现每个案件都在逼他面对自己的旧罪。\n\n"
+            "## 主线目标\n阻止穹顶事故，同时找回被删除的记忆审计链。\n\n"
+            "## 人物弧光\n林澈从自我辩解，到承认罪责，再到用公开罪证换取灰籍居民的身份恢复。\n\n"
+            "## 三幕结构\n1. 手稿预言事故，林澈发现自己的审计编号不存在。\n2. 他追查月背冷库，确认自己曾执行记忆删除。\n3. 他公开旧罪，摧毁记忆公司的合法性，但也失去城市身份。\n\n"
+            "## 关键冲突升级\n每次接近真相，都会牵连一个被他伤害过的人。\n\n"
+            "## 伏笔与回收\n失效审计编号、月尘、纸质手稿、许岚拒绝备份、沈博士旧签名都会在终局回收。\n\n"
+            "## 锁定约束遵守情况\n保留月球城市、失忆工程师、手稿预言和记忆审计规则。\n\n"
+            "## 待用户确认的问题\n是否接受林澈在结局失去合法身份的黑暗代价？"
+        )
+
+    def _mock_outline_editor(self, revised: bool) -> str:
+        if revised:
+            return (
+                "STATUS: pass\nQUALITY_SCORE: 86\n\n"
+                "## 总体判断\n修订版主角罪感更强，第三幕代价明确，可以进入保存或章节细纲。\n\n"
+                "## 主要问题\n中段盟友许岚的主动性还可以继续增强。\n\n"
+                "## 修改建议\n章节细纲阶段为许岚增加一次反向选择。\n\n"
+                "## 锁定约束检查\n未破坏月球城市和记忆规则。\n\n"
+                "## 风格匹配度\n悬疑和黑暗感匹配。\n\n"
+                "## 下一步建议\n保存当前大纲，进入章节细纲。"
+            )
+        return (
+            "STATUS: revise\nQUALITY_SCORE: 74\n\n"
+            "## 总体判断\n大纲成立，但主角罪感不足，第三幕代价偏轻。\n\n"
+            "## 主要问题\n林澈与旧罪的关系不够直接；反派压力强于内心压力。\n\n"
+            "## 修改建议\n让林澈曾亲手执行一次记忆删除，并让终局必须公开自证。\n\n"
+            "## 锁定约束检查\n当前未违反锁定设定。\n\n"
+            "## 风格匹配度\n悬疑足够，黑暗感不足。\n\n"
+            "## 下一步建议\n按编辑意见修订大纲。"
+        )
+
+    def _mock_version_comparison(self) -> str:
+        return (
+            "# 大纲版本比较\n\n"
+            "## 核心变化\n新版把主角从被动追查者改为旧罪承担者。\n\n"
+            "## 人物变化\n林澈的罪感和自我牺牲更强。\n\n"
+            "## 冲突变化\n冲突从外部阴谋升级为自我审判。\n\n"
+            "## 风格变化\n新版更黑暗、更悬疑。\n\n"
+            "## 风险变化\n读者可能需要更早看到林澈的善意行为以避免反感。\n\n"
+            "## 是否建议采用新版\n建议采用新版。"
+        )
 
     def _mock_worldbuilding(self) -> str:
         return (

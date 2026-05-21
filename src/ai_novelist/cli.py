@@ -10,6 +10,7 @@ from ai_novelist.adapters.codex_cli import CodexCLIAdapter
 from ai_novelist.adapters.deepseek import DeepSeekAdapter
 from ai_novelist.config import Settings, load_settings
 from ai_novelist.graph_minimal import build_minimal_graph
+from ai_novelist.graph_outline import build_outline_collaboration_graph
 from ai_novelist.graph_writer import (
     AgentTask,
     append_message,
@@ -135,25 +136,97 @@ def generate_project_outline(
     store: LocalStore,
     settings: Settings,
 ) -> int:
-    state = store.load_state(args.project)
+    try:
+        state = store.load_state(args.project)
+    except LocalStoreError:
+        state = store.create_project(args.project, args.project)
     state.idea = args.idea
+    state.user_request = "请基于这个创意生成大纲"
+    state.last_user_feedback = state.user_request
     state.review_status = "draft"
     state.error = ""
+    append_message(state, "user", state.user_request)
     store.save_state(state)
 
     effective_timeout = args.timeout or settings.codex_timeout_seconds
     adapter = make_agent_adapter(args, settings, effective_timeout)
     print_real_mode_notice(args.mock, adapter, effective_timeout)
-    graph = build_minimal_graph(adapter, store, review_func=make_outline_review_func(args.auto_approve))
+    graph = build_outline_collaboration_graph(adapter, store)
     result = NovelState.from_dict(graph.invoke(state.to_dict()))
+    print_outline_turn_result(result, store)
 
     if result.error:
         print(f"错误：{result.error}", file=sys.stderr)
-    print(f"审核状态：{result.review_status}")
-    if result.review_status == "approved":
-        print(f"大纲已保存：{store.outline_path(result.project_id)}")
-        return 0
-    return 1 if result.review_status == "error" else 0
+        return 1
+
+    if args.auto_approve:
+        result.user_request = "保存大纲"
+        result.last_user_feedback = result.user_request
+        append_message(result, "user", result.user_request)
+        store.save_state(result)
+        result = NovelState.from_dict(graph.invoke(result.to_dict()))
+        print_outline_turn_result(result, store)
+        return 0 if result.review_status == "approved" else 1
+
+    print("\n进入大纲共创模式。可输入 approve / revise: ... / variant / review / lock: ... / stop。")
+    while True:
+        try:
+            user_input = input("outline> ").strip()
+        except EOFError:
+            print()
+            break
+        if not user_input:
+            continue
+        normalized = normalize_outline_feedback(user_input)
+        result.user_request = normalized
+        result.last_user_feedback = normalized
+        append_message(result, "user", normalized)
+        store.save_state(result)
+        result = NovelState.from_dict(graph.invoke(result.to_dict()))
+        print_outline_turn_result(result, store)
+        if result.error:
+            print(f"错误：{result.error}", file=sys.stderr)
+            return 1
+        if result.review_status == "approved" or result.director_action == "stop" or normalized in {"stop", "退出", "结束"}:
+            break
+    return 0
+
+
+def normalize_outline_feedback(text: str) -> str:
+    lowered = text.strip().lower()
+    if lowered in {"approve", "approved", "yes", "y", "确认", "通过"}:
+        return "保存大纲"
+    if lowered in {"variant", "variants", "方向", "备选"}:
+        return "给我三个不同方向"
+    if lowered in {"review", "审查", "审稿"}:
+        return "审查大纲"
+    if lowered in {"stop", "exit", "quit", "退出", "结束"}:
+        return "stop"
+    if lowered.startswith("revise:") or lowered.startswith("revise："):
+        return "修改大纲：" + text.split(":", 1)[-1].split("：", 1)[-1].strip()
+    if lowered.startswith("lock:") or lowered.startswith("lock："):
+        return "这个设定别改：" + text.split(":", 1)[-1].split("：", 1)[-1].strip()
+    return text
+
+
+def print_outline_turn_result(state: NovelState, store: LocalStore) -> None:
+    if state.director_message:
+        print(f"Director> {state.director_message}")
+    print(f"审核状态：{state.review_status}")
+    if state.editor_decision != "unknown":
+        print(f"大纲编辑结论：{state.editor_decision}，质量分：{state.quality_score}")
+    if state.outline:
+        print("\n当前大纲：")
+        print(state.outline)
+    if state.editor_notes:
+        print("\n最近编辑意见：")
+        print(state.editor_notes)
+    if state.locked_constraints:
+        print("锁定约束：" + "，".join(state.locked_constraints))
+    if state.style_preferences:
+        print("风格偏好：" + "，".join(state.style_preferences))
+    if state.review_status == "approved":
+        print(f"大纲已保存：{store.outline_path(state.project_id)}")
 
 
 def run_compose_command(
@@ -384,6 +457,13 @@ def show_project(args: argparse.Namespace, store: LocalStore) -> int:
     print(f"编辑结论：{state.editor_decision}")
     print(f"质量分：{state.quality_score}")
     print(f"修订次数：{state.revision_count}/{state.max_revisions}")
+    print(f"大纲版本数：{len(state.outline_versions)}")
+    if state.locked_constraints:
+        print("锁定约束：" + "，".join(state.locked_constraints))
+    if state.style_preferences:
+        print("风格偏好：" + "，".join(state.style_preferences))
+    if state.revision_instruction:
+        print(f"最近修订要求：{state.revision_instruction}")
     print(artifact_status("世界观", state.worldbuilding, store.worldbuilding_path(state.project_id)))
     print(artifact_status("总大纲", state.outline, store.outline_path(state.project_id)))
     print(artifact_status("章节细纲", state.chapter_plan, store.chapter_plan_path(state.project_id)))

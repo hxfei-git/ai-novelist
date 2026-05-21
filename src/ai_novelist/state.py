@@ -27,6 +27,16 @@ class NovelState:
     quality_score: int = 0
     next_action: NextAction = "continue"
     messages: list[dict[str, str]] = field(default_factory=list)
+    revision_instruction: str = ""
+    locked_constraints: list[str] = field(default_factory=list)
+    style_preferences: list[str] = field(default_factory=list)
+    outline_versions: list[dict] = field(default_factory=list)
+    selected_outline_version: int = -1
+    pending_questions: list[str] = field(default_factory=list)
+    open_decisions: list[str] = field(default_factory=list)
+    last_user_feedback: str = ""
+    active_artifact: str = ""
+    director_intent: str = ""
     user_request: str = ""
     director_action: str = ""
     director_message: str = ""
@@ -56,6 +66,16 @@ class NovelState:
             quality_score=int(data.get("quality_score", 0)),
             next_action=data.get("next_action", "continue"),
             messages=normalize_messages(data.get("messages", [])),
+            revision_instruction=str(data.get("revision_instruction", "")),
+            locked_constraints=normalize_str_list(data.get("locked_constraints", [])),
+            style_preferences=normalize_str_list(data.get("style_preferences", [])),
+            outline_versions=normalize_outline_versions(data.get("outline_versions", [])),
+            selected_outline_version=int(data.get("selected_outline_version", -1)),
+            pending_questions=normalize_str_list(data.get("pending_questions", [])),
+            open_decisions=normalize_str_list(data.get("open_decisions", [])),
+            last_user_feedback=str(data.get("last_user_feedback", "")),
+            active_artifact=str(data.get("active_artifact", "")),
+            director_intent=str(data.get("director_intent", "")),
             user_request=str(data.get("user_request", "")),
             director_action=str(data.get("director_action", "")),
             director_message=str(data.get("director_message", "")),
@@ -78,3 +98,21 @@ def normalize_messages(value: Any) -> list[dict[str, str]]:
         if role and content:
             messages.append({"role": role, "content": content})
     return messages
+
+
+def normalize_str_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value] if value else []
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def normalize_outline_versions(value: Any) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    versions: list[dict] = []
+    for item in value:
+        if isinstance(item, dict):
+            versions.append(dict(item))
+    return versions

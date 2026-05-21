@@ -29,7 +29,7 @@ def main() -> int:
 
         state = store.load_state("demo")
         outline = run_turn(graph, store, state, "大纲太普通，增强主角罪感")
-        assert outline["director_action"] == "plan_outline"
+        assert outline["director_action"] == "revise_outline"
         assert outline["outline"]
 
         state = store.load_state("demo")

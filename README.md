@@ -81,7 +81,7 @@ Director 可路由动作：
 
 - `ask_user`：追问缺失信息。
 - `worldbuild`：调度世界观 Agent。
-- `plan_outline`：调度大纲 Agent。
+- `generate_outline` / `revise_outline` / `review_outline`：调度交互式大纲共创节点。
 - `plan_chapters`：调度章节细纲 Agent。
 - `write_chapter`：调度章节写手 Agent。
 - `review`：调度编辑 Agent。
@@ -89,6 +89,38 @@ Director 可路由动作：
 - `persist_outputs`：保存当前已有产物。
 - `show_status`：展示当前项目状态。
 - `stop`：结束对话。
+
+## 交互式大纲共创
+
+`outline` 现在使用 outline collaboration graph，不再只是一次性生成后 approve/reject。它会先生成大纲并调用大纲编辑审查，然后进入小型交互循环。
+
+```bash
+.venv/bin/ai-novelist outline \
+  --project demo-outline \
+  --idea "一个失忆工程师在月球城市追查自己的小说手稿" \
+  --mock
+```
+
+可输入：
+
+- `approve`：保存当前大纲到 `outline.md`。
+- `revise: 强化主角罪感，第三幕更黑暗`：修订当前大纲、比较版本并再次审稿。
+- `variant`：生成 3 个不同创作方向。
+- `review`：只调用大纲编辑审查当前版本。
+- `lock: 世界观规则不要改`：写入锁定约束，后续修订会保留。
+- `stop`：结束本轮共创，保留 `state.json`。
+
+跳过交互并直接保存当前草案：
+
+```bash
+.venv/bin/ai-novelist outline \
+  --project demo-outline \
+  --idea "一个失忆工程师在月球城市追查自己的小说手稿" \
+  --mock \
+  --auto-approve
+```
+
+真实模式同样可用，去掉 `--mock` 并按需设置 `--timeout`、`--provider`、`--model`。
 
 ## 一次性 Compose 工作流
 
@@ -177,14 +209,16 @@ codex doctor
 .venv/bin/python tests/smoke_phase2.py
 .venv/bin/python tests/smoke_phase2_compose.py
 .venv/bin/python tests/smoke_phase2_chat.py
+.venv/bin/python tests/smoke_outline_collaboration.py
 ```
 
-当前已验证：`18 passed`。
+当前已验证：`30 passed`。
 
 ## 当前限制
 
 - 当前是本地 CLI，不是飞书或 Web 服务。
 - 真实模式每个 Agent 独立调用一次 Codex CLI，没有流式 token 展示。
 - `compose` 只处理指定章节，不批量生成多章。
+- `outline` 的共创循环由 CLI 或 chat 的下一轮用户输入驱动，不是后台常驻会话。
 - `chat` 是单轮图循环驱动，保存时只保存当前已有产物，不会强制补齐缺失产物。
 - 没有数据库、队列、多用户权限、并发锁或 Claude Code Adapter。

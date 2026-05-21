@@ -324,6 +324,11 @@ def task_display_name(task: AgentTask) -> str:
 DIRECTOR_ACTIONS = {
     "ask_user",
     "worldbuild",
+    "propose_directions",
+    "generate_outline",
+    "review_outline",
+    "revise_outline",
+    "compare_versions",
     "plan_outline",
     "plan_chapters",
     "write_chapter",
@@ -400,13 +405,23 @@ def director_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
         store.save_state(state)
         return state.to_dict()
 
-    action, message, chapter = parse_director_output(output)
+    decision = parse_director_decision(output)
+    action = decision["action"]
+    message = decision["message"]
     state.director_action = action
+    state.director_intent = decision["intent"]
+    state.active_artifact = decision["target"]
     state.director_message = message
     state.pending_question = message if action == "ask_user" else ""
     state.active_task = action
-    if chapter:
-        state.current_chapter = chapter
+    if decision["instruction"]:
+        state.revision_instruction = decision["instruction"]
+    elif state.director_intent in {"revise", "lock"}:
+        state.revision_instruction = state.user_request
+    add_unique_texts(state.locked_constraints, decision["locked_constraints"])
+    add_unique_texts(state.style_preferences, decision["style_preferences"])
+    if decision["chapter"]:
+        state.current_chapter = decision["chapter"]
     if action == "stop":
         state.next_action = "stop"
         state.review_status = "stopped"
@@ -421,7 +436,7 @@ def director_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
 
 def route_after_director(data: dict) -> str:
     action = data.get("director_action", "")
-    if action in AGENT_ACTION_TO_TASK or action == "revise_chapter":
+    if action in AGENT_ACTION_TO_TASK or action in {"revise_chapter", "propose_directions", "generate_outline", "review_outline", "revise_outline", "compare_versions"}:
         return "run_selected_agent"
     if action == "persist_outputs":
         return "persist_outputs"
@@ -433,6 +448,8 @@ def route_after_director(data: dict) -> str:
 def run_selected_agent(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
     action = state.director_action
+    if action in {"propose_directions", "generate_outline", "review_outline", "revise_outline", "compare_versions"}:
+        return run_selected_outline_agent(state, adapter, store, action)
     if action == "revise_chapter":
         state.revision_count += 1
         state.active_task = "write_chapter"
@@ -462,6 +479,44 @@ def run_selected_agent(data: dict, adapter: AgentAdapter, store: LocalStore) -> 
         else:
             state.director_message = summarize_agent_result(state, task)
 
+    append_message(state, "assistant", state.director_message)
+    store.save_state(state)
+    return state.to_dict()
+
+
+def run_selected_outline_agent(state: NovelState, adapter: AgentAdapter, store: LocalStore, action: str) -> dict:
+    from ai_novelist.graph_outline import (
+        compare_outline_versions_node,
+        generate_outline_node,
+        propose_directions_node,
+        review_outline_node,
+        revise_outline_node,
+    )
+
+    current = state.to_dict()
+    if action == "propose_directions":
+        current = propose_directions_node(current, adapter, store)
+        state = NovelState.from_dict(current)
+        state.director_message = "已生成三个大纲/创意方向，请选择一个或继续提出修改。"
+    elif action == "generate_outline":
+        current = generate_outline_node(current, adapter, store)
+        current = review_outline_node(current, adapter, store)
+        state = NovelState.from_dict(current)
+        state.director_message = f"已生成并审查大纲：{state.editor_decision}，质量分 {state.quality_score}。"
+    elif action == "review_outline":
+        current = review_outline_node(current, adapter, store)
+        state = NovelState.from_dict(current)
+        state.director_message = f"大纲审查完成：{state.editor_decision}，质量分 {state.quality_score}。"
+    elif action == "revise_outline":
+        current = revise_outline_node(current, adapter, store)
+        current = compare_outline_versions_node(current, adapter, store)
+        current = review_outline_node(current, adapter, store)
+        state = NovelState.from_dict(current)
+        state.director_message = f"已按反馈修订大纲并复审：{state.editor_decision}，质量分 {state.quality_score}。"
+    elif action == "compare_versions":
+        current = compare_outline_versions_node(current, adapter, store)
+        state = NovelState.from_dict(current)
+        state.director_message = "已比较最近的大纲版本，差异摘要已写入编辑意见。"
     append_message(state, "assistant", state.director_message)
     store.save_state(state)
     return state.to_dict()
@@ -541,7 +596,16 @@ def build_director_prompt(state: NovelState) -> str:
 
 
 def parse_director_output(output: str) -> tuple[str, str, int | None]:
+    decision = parse_director_decision(output)
+    return decision["action"], decision["message"], decision["chapter"]
+
+
+def parse_director_decision(output: str) -> dict:
     action = extract_director_field(output, "ACTION").strip().lower()
+    if action == "persist_outline":
+        action = "persist_outputs"
+    if action == "plan_outline":
+        action = "generate_outline"
     message = extract_director_field(output, "MESSAGE").strip()
     chapter_text = extract_director_field(output, "CHAPTER").strip()
     if action not in DIRECTOR_ACTIONS:
@@ -553,11 +617,30 @@ def parse_director_output(output: str) -> tuple[str, str, int | None]:
         match = re.search(r"\d+", chapter_text)
         if match:
             chapter = max(1, int(match.group(0)))
-    return action, message, chapter
+    return {
+        "action": action,
+        "target": extract_director_field(output, "TARGET").strip().lower() or "unknown",
+        "intent": extract_director_field(output, "INTENT").strip().lower() or "answer",
+        "message": message,
+        "instruction": extract_director_field(output, "INSTRUCTION").strip(),
+        "locked_constraints": split_director_list(extract_director_field(output, "LOCKED_CONSTRAINTS")),
+        "style_preferences": split_director_list(extract_director_field(output, "STYLE_PREFERENCES")),
+        "chapter": chapter,
+    }
+
+
+def split_director_list(value: str) -> list[str]:
+    return [item.strip() for item in re.split(r"[,，]", value) if item.strip()]
+
+
+def add_unique_texts(target: list[str], values: list[str]) -> None:
+    for value in values:
+        if value and value not in target:
+            target.append(value)
 
 
 def extract_director_field(output: str, field: str) -> str:
-    pattern = rf"^{field}:\s*(.*)$"
+    pattern = rf"^{field}:[ \t]*(.*)$"
     match = re.search(pattern, output, re.IGNORECASE | re.MULTILINE)
     return match.group(1) if match else ""
 
