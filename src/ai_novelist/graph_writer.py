@@ -14,6 +14,11 @@ from ai_novelist.storage.local_store import LocalStore
 AgentTask = Literal["worldbuild", "plan_outline", "plan_chapters", "write_chapter", "review"]
 ReviewFunc = Callable[[NovelState, AgentTask], str]
 ComposerReviewFunc = Callable[[NovelState], str]
+ProgressFunc = Callable[[str, str], None]
+
+
+def noop_progress(_stage: str, _message: str) -> None:
+    return
 
 
 class CompiledGraph(Protocol):
@@ -336,6 +341,7 @@ DIRECTOR_ACTIONS = {
     "revise_chapter",
     "persist_outputs",
     "show_status",
+    "show_outline",
     "stop",
 }
 
@@ -347,36 +353,50 @@ AGENT_ACTION_TO_TASK: dict[str, AgentTask] = {
     "review": "review",
 }
 
+OUTLINE_WORKFLOW_ACTIONS = {
+    "propose_directions",
+    "generate_outline",
+    "review_outline",
+    "revise_outline",
+    "compare_versions",
+    "show_outline",
+}
+
 
 class ChatSequentialGraph:
-    def __init__(self, adapter: AgentAdapter, store: LocalStore) -> None:
+    def __init__(self, adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc | None = None) -> None:
         self.adapter = adapter
         self.store = store
+        self.progress = progress or noop_progress
 
     def invoke(self, state: dict) -> dict:
-        current = director_node(state, self.adapter, self.store)
+        current = director_node(state, self.adapter, self.store, self.progress)
         route = route_after_director(current)
         if route == "run_selected_agent":
-            current.update(run_selected_agent(current, self.adapter, self.store))
+            current.update(run_selected_agent(current, self.adapter, self.store, self.progress))
         elif route == "persist_outputs":
             current.update(persist_available_outputs(current, self.store))
         elif route == "show_status":
             current.update(show_status_node(current, self.store))
+        elif route == "show_outline":
+            current.update(show_outline_node(current, self.store))
         return current
 
 
-def build_chat_graph(adapter: AgentAdapter, store: LocalStore) -> CompiledGraph:
+def build_chat_graph(adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc | None = None) -> CompiledGraph:
     """Build a one-turn Director Agent chat workflow."""
     try:
         from langgraph.graph import END, StateGraph
     except ModuleNotFoundError:
-        return ChatSequentialGraph(adapter, store)
+        return ChatSequentialGraph(adapter, store, progress)
 
+    progress_func = progress or noop_progress
     graph = StateGraph(dict)
-    graph.add_node("director", lambda data: director_node(data, adapter, store))
-    graph.add_node("run_selected_agent", lambda data: run_selected_agent(data, adapter, store))
+    graph.add_node("director", lambda data: director_node(data, adapter, store, progress_func))
+    graph.add_node("run_selected_agent", lambda data: run_selected_agent(data, adapter, store, progress_func))
     graph.add_node("persist_outputs", lambda data: persist_available_outputs(data, store))
     graph.add_node("show_status", lambda data: show_status_node(data, store))
+    graph.add_node("show_outline", lambda data: show_outline_node(data, store))
     graph.set_entry_point("director")
     graph.add_conditional_edges(
         "director",
@@ -385,18 +405,21 @@ def build_chat_graph(adapter: AgentAdapter, store: LocalStore) -> CompiledGraph:
             "run_selected_agent": "run_selected_agent",
             "persist_outputs": "persist_outputs",
             "show_status": "show_status",
+            "show_outline": "show_outline",
             "end": END,
         },
     )
     graph.add_edge("run_selected_agent", END)
     graph.add_edge("persist_outputs", END)
     graph.add_edge("show_status", END)
+    graph.add_edge("show_outline", END)
     return graph.compile()
 
 
-def director_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
+def director_node(data: dict, adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc = noop_progress) -> dict:
     state = NovelState.from_dict(data)
     prompt = build_director_prompt(state)
+    progress("Director", "正在理解你的需求...")
     try:
         output = adapter.complete(prompt, store.project_dir(state.project_id))
     except AgentAdapterError as exc:
@@ -414,6 +437,9 @@ def director_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
     state.director_message = message
     state.pending_question = message if action == "ask_user" else ""
     state.active_task = action
+    if action in OUTLINE_WORKFLOW_ACTIONS:
+        state.active_workflow = "outline"
+        state.current_stage = action
     if decision["instruction"]:
         state.revision_instruction = decision["instruction"]
     elif state.director_intent in {"revise", "lock"}:
@@ -436,24 +462,27 @@ def director_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
 
 def route_after_director(data: dict) -> str:
     action = data.get("director_action", "")
-    if action in AGENT_ACTION_TO_TASK or action in {"revise_chapter", "propose_directions", "generate_outline", "review_outline", "revise_outline", "compare_versions"}:
+    if action in AGENT_ACTION_TO_TASK or action == "revise_chapter" or action in (OUTLINE_WORKFLOW_ACTIONS - {"show_outline"}):
         return "run_selected_agent"
     if action == "persist_outputs":
         return "persist_outputs"
     if action == "show_status":
         return "show_status"
+    if action == "show_outline":
+        return "show_outline"
     return "end"
 
 
-def run_selected_agent(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
+def run_selected_agent(data: dict, adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc = noop_progress) -> dict:
     state = NovelState.from_dict(data)
     action = state.director_action
-    if action in {"propose_directions", "generate_outline", "review_outline", "revise_outline", "compare_versions"}:
-        return run_selected_outline_agent(state, adapter, store, action)
+    if action in (OUTLINE_WORKFLOW_ACTIONS - {"show_outline"}):
+        return run_selected_outline_agent(state, adapter, store, action, progress)
     if action == "revise_chapter":
         state.revision_count += 1
         state.active_task = "write_chapter"
         store.save_state(state)
+        progress("ChapterWriter", "正在按反馈修订章节...")
         result = run_agent_task(state.to_dict(), adapter, store, "write_chapter")
         state = NovelState.from_dict(result)
         if state.error:
@@ -467,6 +496,7 @@ def run_selected_agent(data: dict, adapter: AgentAdapter, store: LocalStore) -> 
             store.save_state(state)
             return state.to_dict()
         state.active_task = task
+        progress(*task_progress_message(task))
         result = run_agent_task(state.to_dict(), adapter, store, task)
         state = NovelState.from_dict(result)
         if state.error:
@@ -479,12 +509,13 @@ def run_selected_agent(data: dict, adapter: AgentAdapter, store: LocalStore) -> 
         else:
             state.director_message = summarize_agent_result(state, task)
 
+    progress("Done", outline_done_message(action))
     append_message(state, "assistant", state.director_message)
     store.save_state(state)
     return state.to_dict()
 
 
-def run_selected_outline_agent(state: NovelState, adapter: AgentAdapter, store: LocalStore, action: str) -> dict:
+def run_selected_outline_agent(state: NovelState, adapter: AgentAdapter, store: LocalStore, action: str, progress: ProgressFunc = noop_progress) -> dict:
     from ai_novelist.graph_outline import (
         compare_outline_versions_node,
         generate_outline_node,
@@ -495,28 +526,37 @@ def run_selected_outline_agent(state: NovelState, adapter: AgentAdapter, store: 
 
     current = state.to_dict()
     if action == "propose_directions":
+        progress("DirectionProposer", "正在生成多个创作方向...")
         current = propose_directions_node(current, adapter, store)
         state = NovelState.from_dict(current)
         state.director_message = "已生成三个大纲/创意方向，请选择一个或继续提出修改。"
     elif action == "generate_outline":
+        progress("OutlinePlanner", "正在生成大纲草案...")
         current = generate_outline_node(current, adapter, store)
+        progress("OutlineEditor", "正在审查大纲...")
         current = review_outline_node(current, adapter, store)
         state = NovelState.from_dict(current)
         state.director_message = f"已生成并审查大纲：{state.editor_decision}，质量分 {state.quality_score}。"
     elif action == "review_outline":
+        progress("OutlineEditor", "正在审查大纲...")
         current = review_outline_node(current, adapter, store)
         state = NovelState.from_dict(current)
         state.director_message = f"大纲审查完成：{state.editor_decision}，质量分 {state.quality_score}。"
     elif action == "revise_outline":
+        progress("OutlineReviser", "正在按反馈修订大纲...")
         current = revise_outline_node(current, adapter, store)
+        progress("VersionComparator", "正在比较大纲版本...")
         current = compare_outline_versions_node(current, adapter, store)
+        progress("OutlineEditor", "正在审查大纲...")
         current = review_outline_node(current, adapter, store)
         state = NovelState.from_dict(current)
         state.director_message = f"已按反馈修订大纲并复审：{state.editor_decision}，质量分 {state.quality_score}。"
     elif action == "compare_versions":
+        progress("VersionComparator", "正在比较大纲版本...")
         current = compare_outline_versions_node(current, adapter, store)
         state = NovelState.from_dict(current)
         state.director_message = "已比较最近的大纲版本，差异摘要已写入编辑意见。"
+    progress("Done", outline_done_message(action))
     append_message(state, "assistant", state.director_message)
     store.save_state(state)
     return state.to_dict()
@@ -554,6 +594,7 @@ def show_status_node(data: dict, store: LocalStore) -> dict:
         f"质量分：{state.quality_score}",
         f"修订次数：{state.revision_count}/{state.max_revisions}",
         artifact_status("世界观", state.worldbuilding, store.worldbuilding_path(state.project_id)),
+        artifact_status("参考简报", state.reference_brief, store.reference_brief_path(state.project_id)),
         artifact_status("总大纲", state.outline, store.outline_path(state.project_id)),
         artifact_status("章节细纲", state.chapter_plan, store.chapter_plan_path(state.project_id)),
         artifact_status("章节正文", state.chapter_draft, store.chapter_path(state.project_id, state.current_chapter)),
@@ -565,12 +606,53 @@ def show_status_node(data: dict, store: LocalStore) -> dict:
     return state.to_dict()
 
 
+def show_outline_node(data: dict, store: LocalStore) -> dict:
+    state = NovelState.from_dict(data)
+    if state.outline.strip():
+        state.director_message = "当前大纲：\n" + state.outline
+    else:
+        state.director_message = "当前还没有大纲草案。你可以先说：生成大纲。"
+    append_message(state, "assistant", state.director_message)
+    store.save_state(state)
+    return state.to_dict()
+
+
+def task_progress_message(task: AgentTask) -> tuple[str, str]:
+    if task == "worldbuild":
+        return "WorldBuilder", "正在设计世界观..."
+    if task == "plan_outline":
+        return "OutlinePlanner", "正在生成大纲草案..."
+    if task == "plan_chapters":
+        return "ChapterPlanner", "正在生成章节细纲..."
+    if task == "write_chapter":
+        return "ChapterWriter", "正在生成章节正文..."
+    if task == "review":
+        return "Editor", "正在审查章节..."
+    return "Agent", "正在执行任务..."
+
+
+def outline_done_message(action: str) -> str:
+    if action in {"generate_outline", "plan_outline"}:
+        return "大纲草案已生成，等待你查看、修改或保存。"
+    if action == "revise_outline":
+        return "大纲已修订并复审，等待你查看、继续修改或保存。"
+    if action == "review_outline":
+        return "大纲审查已完成。"
+    if action == "propose_directions":
+        return "创作方向已生成，等待你选择或继续修改。"
+    if action == "compare_versions":
+        return "大纲版本比较已完成。"
+    return "当前任务已完成。"
+
+
 def artifact_status(label: str, content: str, path) -> str:
     if not content.strip():
         return f"{label}：暂无"
     if path.exists():
         return f"{label}：已保存 -> {path}"
-    return f"{label}：已生成但未保存 -> {path}"
+    if label == "总大纲":
+        return f"{label}：草案已生成，尚未确认保存。输入‘查看大纲’查看正文，输入‘保存大纲’写入 {path}"
+    return f"{label}：草案已生成，尚未确认保存。保存后写入 {path}"
 
 
 def build_director_prompt(state: NovelState) -> str:

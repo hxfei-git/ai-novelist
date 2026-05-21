@@ -147,9 +147,11 @@ class CodexCLIAdapter(AgentAdapter):
             return response("persist_outline", "outline", "approve", "我会保存当前大纲。")
         if any(word in request for word in ("保存", "落盘", "写入文件")):
             return response("persist_outputs", "project", "save", "我会保存当前已经生成的产物。")
-        if any(word in request for word in ("状态", "进度", "show", "哪里", "在哪", "路径", "位置")):
+        if any(word in request for word in ("查看大纲", "当前大纲", "看一下大纲", "展示大纲", "show outline")):
+            return response("show_outline", "outline", "status", "我会展示当前大纲正文。")
+        if any(word in request for word in ("查看状态", "项目状态", "状态", "进度", "status", "哪里", "在哪", "路径", "位置")):
             return response("show_status", "project", "status", "我会展示当前项目状态和已有产物。")
-        if any(word in request for word in ("多个方向", "三个方向", "不同方向", "variant", "备选")):
+        if any(word in request for word in ("多个方向", "三个方向", "不同方向", "variant", "备选", "讨论大纲", "敲定大纲", "聊大纲")):
             return response("propose_directions", "outline", "variant", "我会给出三个不同的创作方向供你选择。")
         if any(word in request for word in ("这个设定别改", "别改", "不要改", "保留")):
             return response("show_status", "outline", "lock", "我已记录锁定约束，后续修订会遵守。", request, request)
@@ -178,7 +180,7 @@ class CodexCLIAdapter(AgentAdapter):
         if "写" in request and "章" in request:
             return response("write_chapter", "chapter", "create", f"我会调度章节写手生成第 {chapter or 1} 章。", chapter_value=chapter or "1")
         if any(word in request for word in ("想写", "创意", "小说", "故事")):
-            return response("worldbuild", "worldbuilding", "create", "我先把这个创意沉淀成世界观，再继续推进大纲和章节。")
+            return response("propose_directions", "outline", "variant", "我先把这个创意拆成几个可选方向，再由你决定大纲路线。")
         return response("ask_user", "unknown", "answer", "你想让我下一步做什么？可以说：生成大纲、给三个方向、修改大纲、审查大纲或保存。")
 
     def _extract_director_request(self, prompt: str) -> str:

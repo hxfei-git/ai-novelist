@@ -36,6 +36,12 @@ class NovelState:
     open_decisions: list[str] = field(default_factory=list)
     last_user_feedback: str = ""
     active_artifact: str = ""
+    active_workflow: str = ""
+    current_stage: str = ""
+    reference_brief: str = ""
+    canon_facts: list[str] = field(default_factory=list)
+    research_sources: list[dict] = field(default_factory=list)
+    research_uncertainties: list[str] = field(default_factory=list)
     director_intent: str = ""
     user_request: str = ""
     director_action: str = ""
@@ -75,6 +81,12 @@ class NovelState:
             open_decisions=normalize_str_list(data.get("open_decisions", [])),
             last_user_feedback=str(data.get("last_user_feedback", "")),
             active_artifact=str(data.get("active_artifact", "")),
+            active_workflow=str(data.get("active_workflow", "")),
+            current_stage=str(data.get("current_stage", "")),
+            reference_brief=str(data.get("reference_brief", "")),
+            canon_facts=normalize_str_list(data.get("canon_facts", [])),
+            research_sources=normalize_dict_list(data.get("research_sources", [])),
+            research_uncertainties=normalize_str_list(data.get("research_uncertainties", [])),
             director_intent=str(data.get("director_intent", "")),
             user_request=str(data.get("user_request", "")),
             director_action=str(data.get("director_action", "")),
@@ -116,3 +128,9 @@ def normalize_outline_versions(value: Any) -> list[dict]:
         if isinstance(item, dict):
             versions.append(dict(item))
     return versions
+
+
+def normalize_dict_list(value: Any) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, dict)]

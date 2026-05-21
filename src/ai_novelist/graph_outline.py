@@ -27,6 +27,7 @@ OUTLINE_ACTIONS = {
     "compare_versions",
     "persist_outline",
     "show_status",
+    "show_outline",
     "stop",
 }
 
@@ -49,6 +50,7 @@ def build_outline_collaboration_graph(adapter: AgentAdapter, store: LocalStore) 
     graph.add_node("human_feedback", lambda data: human_feedback_node(data, store))
     graph.add_node("persist_outline", lambda data: persist_outline_node(data, store))
     graph.add_node("show_status", lambda data: outline_show_status_node(data, store))
+    graph.add_node("show_outline", lambda data: outline_show_outline_node(data, store))
 
     graph.set_entry_point("director")
     graph.add_conditional_edges(
@@ -64,6 +66,7 @@ def build_outline_collaboration_graph(adapter: AgentAdapter, store: LocalStore) 
             "compare_versions": "compare_versions",
             "persist_outline": "persist_outline",
             "show_status": "show_status",
+            "show_outline": "show_outline",
             "end": END,
         },
     )
@@ -87,6 +90,7 @@ def build_outline_collaboration_graph(adapter: AgentAdapter, store: LocalStore) 
     )
     graph.add_edge("persist_outline", END)
     graph.add_edge("show_status", END)
+    graph.add_edge("show_outline", END)
     return graph.compile()
 
 
@@ -126,6 +130,8 @@ class OutlineSequentialGraph:
             return persist_outline_node(current, self.store)
         if route == "show_status":
             return outline_show_status_node(current, self.store)
+        if route == "show_outline":
+            return outline_show_outline_node(current, self.store)
         return current
 
 
@@ -146,6 +152,8 @@ def outline_director_node(data: dict, adapter: AgentAdapter, store: LocalStore) 
     state.revision_instruction = decision["instruction"] or infer_revision_instruction(state.user_request, state.director_intent)
     state.last_user_feedback = state.user_request
     state.active_artifact = decision["target"]
+    state.active_workflow = "outline"
+    state.current_stage = state.director_action
     state.pending_question = decision["message"] if decision["action"] == "ask_user" else ""
     add_unique_items(state.locked_constraints, decision["locked_constraints"])
     add_unique_items(state.style_preferences, decision["style_preferences"])
@@ -154,6 +162,8 @@ def outline_director_node(data: dict, adapter: AgentAdapter, store: LocalStore) 
     if state.director_action == "stop":
         state.review_status = "stopped"
         state.next_action = "stop"
+        state.active_workflow = ""
+        state.current_stage = ""
     else:
         state.next_action = state.director_action
     append_message(state, "assistant", state.director_message)
@@ -302,9 +312,21 @@ def persist_outline_node(data: dict, store: LocalStore) -> dict:
     if state.outline.strip():
         store.save_outline(state)
         state.review_status = "approved"
+        state.active_workflow = ""
+        state.current_stage = "chapter_plan"
         state.director_message = f"当前大纲已保存：{store.outline_path(state.project_id)}"
     else:
         state.director_message = "当前没有可保存的大纲。"
+    store.save_state(state)
+    return state.to_dict()
+
+
+def outline_show_outline_node(data: dict, store: LocalStore) -> dict:
+    state = NovelState.from_dict(data)
+    if state.outline.strip():
+        state.director_message = "当前大纲：\n" + state.outline
+    else:
+        state.director_message = "当前还没有大纲草案。你可以先说：给我几个方向，或生成大纲。"
     store.save_state(state)
     return state.to_dict()
 
@@ -353,6 +375,8 @@ def build_outline_director_prompt(state: NovelState) -> str:
         f"大纲版本数：{len(state.outline_versions)}\n"
         f"锁定约束：{', '.join(state.locked_constraints) or '暂无'}\n"
         f"风格偏好：{', '.join(state.style_preferences) or '暂无'}\n"
+        f"参考简报：{'已有' if state.reference_brief else '暂无'}\n"
+        f"原作不确定点：{', '.join(state.research_uncertainties) or '暂无'}\n"
         f"修订要求：{state.revision_instruction or '暂无'}\n"
         f"编辑结论：{state.editor_decision}\n"
         f"质量分：{state.quality_score}\n\n"
@@ -377,6 +401,10 @@ def build_outline_prompt(state: NovelState, prompt_name: str) -> str:
         f"修订要求：{state.revision_instruction or '暂无'}\n"
         f"锁定约束：{', '.join(state.locked_constraints) or '暂无'}\n"
         f"风格偏好：{', '.join(state.style_preferences) or '暂无'}\n"
+        f"参考简报：\n{state.reference_brief or '暂无'}\n\n"
+        f"原作事实：{', '.join(state.canon_facts) or '暂无'}\n"
+        f"原作不确定点：{', '.join(state.research_uncertainties) or '暂无'}\n"
+        "如果存在原作不确定点，必须要求用户确认，不得擅自补完原作设定。\n"
         f"编辑意见：\n{state.editor_notes or '暂无'}\n\n"
         f"最近大纲版本：\n{versions or '暂无'}\n"
     )

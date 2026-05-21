@@ -23,7 +23,7 @@ def main() -> int:
         state = store.create_project("Demo", "demo")
         graph = build_chat_graph(CodexCLIAdapter(mock=True), store)
 
-        world = run_turn(graph, store, state, "我想写一个月球城市失忆工程师的悬疑科幻")
+        world = run_turn(graph, store, state, "帮我先设计世界观：月球城市失忆工程师的悬疑科幻")
         assert world["director_action"] == "worldbuild"
         assert world["worldbuilding"]
 

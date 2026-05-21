@@ -16,6 +16,10 @@ class Settings:
     deepseek_api_key: str = ""
     deepseek_model: str = "deepseek-chat"
     deepseek_base_url: str = "https://api.deepseek.com"
+    search_provider: str = "mock"
+    search_api_key: str = ""
+    search_base_url: str = ""
+    search_timeout_seconds: int = 20
 
 
 def load_settings() -> Settings:
@@ -27,4 +31,19 @@ def load_settings() -> Settings:
         deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
         deepseek_model=os.getenv("AI_NOVELIST_DEEPSEEK_MODEL", "deepseek-chat"),
         deepseek_base_url=os.getenv("AI_NOVELIST_DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+        search_provider=os.getenv("AI_NOVELIST_SEARCH_PROVIDER", "mock").strip().lower(),
+        search_api_key=search_api_key(),
+        search_base_url=os.getenv("AI_NOVELIST_SEARCH_BASE_URL", "").strip(),
+        search_timeout_seconds=int(os.getenv("AI_NOVELIST_SEARCH_TIMEOUT", "20")),
     )
+
+
+def search_api_key() -> str:
+    provider = os.getenv("AI_NOVELIST_SEARCH_PROVIDER", "mock").strip().lower()
+    if provider == "serpapi":
+        return os.getenv("SERPAPI_API_KEY", "") or os.getenv("AI_NOVELIST_SEARCH_API_KEY", "")
+    if provider == "tavily":
+        return os.getenv("TAVILY_API_KEY", "") or os.getenv("AI_NOVELIST_SEARCH_API_KEY", "")
+    if provider == "exa":
+        return os.getenv("EXA_API_KEY", "") or os.getenv("AI_NOVELIST_SEARCH_API_KEY", "")
+    return os.getenv("AI_NOVELIST_SEARCH_API_KEY", "")

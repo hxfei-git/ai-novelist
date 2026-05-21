@@ -52,6 +52,12 @@ class LocalStore:
     def chapter_plan_path(self, project_id: str) -> Path:
         return self.project_dir(project_id) / "chapter_plan.md"
 
+    def reference_brief_path(self, project_id: str) -> Path:
+        return self.project_dir(project_id) / "reference_brief.md"
+
+    def research_sources_path(self, project_id: str) -> Path:
+        return self.project_dir(project_id) / "research_sources.json"
+
     def chapter_path(self, project_id: str, chapter: int) -> Path:
         return self.chapters_dir(project_id) / f"chapter_{chapter:03d}.md"
 
@@ -81,6 +87,17 @@ class LocalStore:
 
     def save_chapter_plan(self, state: NovelState) -> Path:
         return self._write_required(self.chapter_plan_path(state.project_id), state.chapter_plan, "chapter plan")
+
+    def save_reference_brief(self, state: NovelState) -> Path:
+        return self._write_required(self.reference_brief_path(state.project_id), state.reference_brief, "reference brief")
+
+    def save_research_sources(self, state: NovelState) -> Path:
+        path = self.research_sources_path(state.project_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as file:
+            json.dump(state.research_sources, file, ensure_ascii=False, indent=2)
+            file.write("\n")
+        return path
 
     def save_chapter(self, state: NovelState) -> Path:
         return self._write_required(

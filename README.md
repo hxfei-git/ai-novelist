@@ -48,9 +48,9 @@ export AI_NOVELIST_DEEPSEEK_MODEL=deepseek-chat
 - `AI_NOVELIST_DEEPSEEK_BASE_URL`：默认 `https://api.deepseek.com`。
 - `AI_NOVELIST_CODEX_BIN`、`AI_NOVELIST_CODEX_TIMEOUT`：Codex CLI 路径与超时。
 
-## 推荐入口：Director Chat
+## 唯一推荐入口：Director Chat
 
-`chat` 是交互式主编 Agent 模式。用户连续输入自然语言，Director Agent 判断意图，并调度世界观、大纲、章节写手、编辑等子 Agent。
+`chat` 是当前主入口。Director Agent 作为主脑管理项目上下文，并会在同一个项目状态里调度 outline collaboration graph、世界观、章节写手、编辑等子工作流。用户不需要单独运行 `outline` 命令来进入大纲共创。
 
 启动 mock 对话：
 
@@ -62,12 +62,14 @@ export AI_NOVELIST_DEEPSEEK_MODEL=deepseek-chat
 
 ```text
 我想写一个月球城市失忆工程师的悬疑科幻
-帮我先设计世界观
-大纲太普通，增强主角罪感
+给我三个不同方向
+选择方向 1，强化主角罪感
+查看大纲
+保存大纲
 写第 1 章
 让编辑审稿
 保存当前结果
-显示当前状态
+查看状态
 退出
 ```
 
@@ -90,9 +92,29 @@ Director 可路由动作：
 - `show_status`：展示当前项目状态。
 - `stop`：结束对话。
 
+
+## Research 参考调研
+
+`chat` 会在用户显式输入 `/research xxx`，或提出同人/原作/调研类需求时，先进入 research 工作流，生成参考简报后再进入大纲共创。当前实现使用 `MockSearchBackend`，预留了 WebSearchBackend/SerpAPI/Tavily/Exa 的接入位置。
+
+```text
+/research 苟在初圣
+写苟在初圣同人
+查一下原作设定再写大纲
+```
+
+产物：
+
+```text
+projects/<project>/reference_brief.md
+projects/<project>/research_sources.json
+```
+
+已有 `reference_brief` 时，chat 不会重复强制调研；后续 outline prompt 会带上参考简报、原作事实和不确定点。
+
 ## 交互式大纲共创
 
-`outline` 现在使用 outline collaboration graph，不再只是一次性生成后 approve/reject。它会先生成大纲并调用大纲编辑审查，然后进入小型交互循环。
+大纲共创现在优先从 `chat` 进入。`outline` 命令仍保留，用于调试或单独验证 outline collaboration graph；它与 chat 共享同一个 `projects/<project>/state.json`。
 
 ```bash
 .venv/bin/ai-novelist outline \
@@ -212,7 +234,7 @@ codex doctor
 .venv/bin/python tests/smoke_outline_collaboration.py
 ```
 
-当前已验证：`30 passed`。
+当前已验证：`43 passed`。
 
 ## 当前限制
 

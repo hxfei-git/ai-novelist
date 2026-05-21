@@ -11,6 +11,8 @@ from ai_novelist.adapters.deepseek import DeepSeekAdapter
 from ai_novelist.config import Settings, load_settings
 from ai_novelist.graph_minimal import build_minimal_graph
 from ai_novelist.graph_outline import build_outline_collaboration_graph
+from ai_novelist.graph_research import build_research_graph, detect_research_need_text
+from ai_novelist.research import MockSearchBackend
 from ai_novelist.graph_writer import (
     AgentTask,
     append_message,
@@ -215,12 +217,7 @@ def print_outline_turn_result(state: NovelState, store: LocalStore) -> None:
     print(f"审核状态：{state.review_status}")
     if state.editor_decision != "unknown":
         print(f"大纲编辑结论：{state.editor_decision}，质量分：{state.quality_score}")
-    if state.outline:
-        print("\n当前大纲：")
-        print(state.outline)
-    if state.editor_notes:
-        print("\n最近编辑意见：")
-        print(state.editor_notes)
+    print_outline_artifacts(state)
     if state.locked_constraints:
         print("锁定约束：" + "，".join(state.locked_constraints))
     if state.style_preferences:
@@ -288,7 +285,9 @@ def run_chat_command(
     effective_timeout = args.timeout or settings.codex_timeout_seconds
     adapter = make_agent_adapter(args, settings, effective_timeout)
     print_real_mode_notice(args.mock, adapter, effective_timeout)
-    graph = build_chat_graph(adapter, store)
+    chat_graph = build_chat_graph(adapter, store, progress=print_progress)
+    outline_graph = build_outline_collaboration_graph(adapter, store)
+    research_graph = build_research_graph(MockSearchBackend(), store, progress=print_progress)
 
     print(f"进入 ai-novelist chat：项目 {state.project_id}。输入 exit/quit/退出 结束。")
     while True:
@@ -299,25 +298,117 @@ def run_chat_command(
             break
         if not user_input:
             continue
+        current_state = store.load_state(args.project)
         if user_input.lower() in {"exit", "quit"} or user_input in {"退出", "结束"}:
             print("Director> 已结束本次创作对话。")
             break
 
-        state = store.load_state(args.project)
+        state = current_state
         state.user_request = user_input
         append_message(state, "user", user_input)
         if not state.idea and looks_like_story_idea(user_input):
             state.idea = user_input
         store.save_state(state)
 
+        graph = select_chat_graph(state, user_input, research_graph, outline_graph, chat_graph)
         result = NovelState.from_dict(graph.invoke(state.to_dict()))
-        print(f"Director> {result.director_message}")
+        print_chat_turn_result(result, store)
         if result.error:
             print(f"错误：{result.error}", file=sys.stderr)
             return 1
         if result.director_action == "stop":
             break
     return 0
+
+
+def select_chat_graph(state: NovelState, user_input: str, research_graph, outline_graph, chat_graph):
+    if should_use_research_graph(state, user_input):
+        return research_graph
+    if should_use_outline_graph(state, user_input):
+        return outline_graph
+    return chat_graph
+
+
+def should_use_research_graph(state: NovelState, user_input: str) -> bool:
+    return detect_research_need_text(user_input, has_reference_brief=bool(state.reference_brief.strip()))
+
+
+def should_use_outline_graph(state: NovelState, user_input: str) -> bool:
+    if state.active_workflow != "outline":
+        return False
+    return not is_project_status_request(user_input)
+
+
+def is_project_status_request(text: str) -> bool:
+    lowered = text.strip().lower()
+    return lowered in {"status", "show status"} or any(marker in text for marker in ("查看状态", "项目状态", "显示状态"))
+
+
+def print_progress(stage: str, message: str) -> None:
+    print(f"[{stage}] {message}", flush=True)
+
+
+def print_chat_turn_result(state: NovelState, store: LocalStore) -> None:
+    if state.director_action == "show_outline":
+        print(f"Director> {state.director_message}")
+        return
+
+    if state.director_message:
+        print(f"Director> {state.director_message}")
+
+    if state.director_action == "research":
+        print_research_result(state, store)
+    elif state.director_action in {"generate_outline", "revise_outline", "review_outline", "compare_versions"}:
+        print_outline_artifacts(state)
+    elif state.director_action == "propose_directions":
+        print_direction_proposal(state)
+
+    print_locked_constraints(state)
+
+
+def print_research_result(state: NovelState, store: LocalStore) -> None:
+    if state.reference_brief:
+        print("\n参考简报：")
+        print(state.reference_brief)
+    if state.research_sources:
+        print("\n来源：")
+        for item in state.research_sources:
+            title = item.get("title", "无标题")
+            url = item.get("url", "")
+            print(f"- {title}: {url}")
+    if state.reference_brief:
+        print(f"\n参考简报已保存：{store.reference_brief_path(state.project_id)}")
+        print(f"来源列表已保存：{store.research_sources_path(state.project_id)}")
+
+
+def print_outline_artifacts(state: NovelState) -> None:
+    if state.outline:
+        print("\n当前大纲：")
+        print(state.outline)
+    if state.editor_notes:
+        print("\n最近编辑意见：")
+        print(state.editor_notes)
+
+
+def print_locked_constraints(state: NovelState) -> None:
+    if state.locked_constraints:
+        print("\n锁定约束：")
+        for item in state.locked_constraints:
+            print(f"- {item}")
+
+
+def print_direction_proposal(state: NovelState) -> None:
+    directions = latest_outline_version_content(state, "directions")
+    if directions:
+        print("\n方向提案：")
+        print(directions)
+
+
+def latest_outline_version_content(state: NovelState, kind: str) -> str:
+    for item in reversed(state.outline_versions):
+        if item.get("kind") == kind:
+            return str(item.get("content", ""))
+    return ""
 
 
 def looks_like_story_idea(text: str) -> bool:
@@ -464,6 +555,7 @@ def show_project(args: argparse.Namespace, store: LocalStore) -> int:
         print("风格偏好：" + "，".join(state.style_preferences))
     if state.revision_instruction:
         print(f"最近修订要求：{state.revision_instruction}")
+    print(artifact_status("参考简报", state.reference_brief, store.reference_brief_path(state.project_id)))
     print(artifact_status("世界观", state.worldbuilding, store.worldbuilding_path(state.project_id)))
     print(artifact_status("总大纲", state.outline, store.outline_path(state.project_id)))
     print(artifact_status("章节细纲", state.chapter_plan, store.chapter_plan_path(state.project_id)))

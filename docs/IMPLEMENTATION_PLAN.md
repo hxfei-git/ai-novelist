@@ -4,18 +4,22 @@
 
 AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、LangGraph、Codex CLI，并支持 DeepSeek API 作为可选模型提供方。
 
+当前推荐使用方式已经收敛为一个主入口：`ai-novelist chat`。Director Agent 作为主脑管理项目上下文，并根据用户输入调度 research、outline collaboration、章节写作、编辑审稿和保存等子工作流。
+
 已完成：
 
 - 阶段 1：最小 LangGraph + 模型适配器 + 本地存储。
 - 阶段 2：compose 多 Agent 小说创作图。
-- 阶段 2 增强：Director Agent chat 对话模式。
-- 大纲共创增强：outline collaboration graph，支持生成、审稿、用户反馈、修订、版本比较、锁定约束和保存。
+- 阶段 2 增强：Director Agent chat 主入口。
+- Research 增强：chat 可先用 `MockSearchBackend` 生成参考简报和来源列表，再进入 outline collaboration graph。
+- 大纲共创增强：outline collaboration graph，支持方向提案、生成、审稿、用户反馈、修订、版本比较、锁定约束、查看正文和保存。
 - mock 模式：不依赖外部模型即可端到端验证。
 - 真实模式：Codex CLI 或 DeepSeek API。
 
 未完成：
 
 - 阶段 3 飞书机器人入口。
+- 真实联网搜索后端，目前只有 `MockSearchBackend`，`WebSearchBackend` 仍是占位。
 - 后台任务队列、数据库、多用户存储、并发锁。
 - Claude Code Adapter。
 - 多章节批量自动续写。
@@ -28,11 +32,11 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
   |
   v
 本地 CLI: ai-novelist
-  |-- init
-  |-- outline: 大纲共创交互循环
+  |-- chat: 唯一推荐主入口，Director 管理上下文并调度子工作流
+  |-- outline: 保留为大纲共创调试/兼容入口，共享同一 state
   |-- compose: 一次性多 Agent 创作
-  |-- chat: Director Agent 连续对话
-  |-- worldbuild / plan-outline / plan-chapters / write-chapter / review
+  |-- worldbuild / plan-outline / plan-chapters / write-chapter / review: 单 Agent 兼容命令
+  |-- init
   `-- show
   |
   v
@@ -42,19 +46,35 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
   `-- DeepSeekAdapter
   |
   v
+Research 层
+  |-- SearchResult: title / url / snippet / source
+  |-- SearchBackend.search(query, limit=5)
+  |-- MockSearchBackend
+  `-- WebSearchBackend: 预留给 SerpAPI / Tavily / Exa
+  |
+  v
 LangGraph 编排层
   |-- graph_minimal.py
   |     `-- 保留阶段 1 最小图
   |
+  |-- graph_research.py
+  |     detect_research_need
+  |       -> build_research_queries
+  |       -> search_sources
+  |       -> synthesize_reference_brief
+  |       -> save_research_result
+  |       -> ask_user_confirm
+  |
   |-- graph_outline.py
   |     director
-  |       -> propose_directions / worldbuild / generate_outline / review_outline / revise_outline
-  |       -> compare_versions / persist_outline / show_status / ask_user / END
+  |       -> ask_user / propose_directions / worldbuild / generate_outline
+  |       -> review_outline / revise_outline / compare_versions
+  |       -> show_outline / show_status / persist_outline / END
   |
   `-- graph_writer.py
         |-- build_writer_graph: 单 Agent 兼容图
         |-- build_composer_graph: 完整 compose 图
-        `-- build_chat_graph: Director 单轮对话图，可调度 outline 共创节点
+        `-- build_chat_graph: Director 单轮对话图，可进入 outline workflow
   |
   v
 Prompt 模板层
@@ -73,15 +93,79 @@ Prompt 模板层
 本地文件存储
   `-- projects/<project>/
         |-- state.json
+        |-- reference_brief.md
+        |-- research_sources.json
         |-- worldbuilding.md
         |-- outline.md
         |-- chapter_plan.md
         `-- chapters/
 ```
 
-## 3. 大纲共创流程
+## 3. Chat 主入口调度
 
-`outline` 命令现在优先使用 `build_outline_collaboration_graph`：
+`run_chat_command` 每轮加载同一个项目的 `state.json`，根据状态和用户输入选择子图：
+
+```text
+用户输入
+  -> 写入 state.user_request + messages
+  -> 如果需要 research: build_research_graph
+  -> 否则如果 state.active_workflow == "outline": build_outline_collaboration_graph
+  -> 否则: build_chat_graph
+  -> 打印 Director 消息、阶段日志和产物正文
+  -> 保存 state.json
+```
+
+research 优先条件：
+
+- 用户输入 `/research xxx`。
+- 用户输入包含“同人 / 原作 / 参考网络 / 查一下 / 调研 / research / 小说名”。
+- 用户提出“写某某同人”且当前没有 `reference_brief`。
+- 对已存在 `reference_brief` 的项目，不重复强制 research，除非用户显式 `/research xxx`。
+
+outline workflow 条件：
+
+- `state.active_workflow == "outline"` 时，普通创作反馈继续进入 `build_outline_collaboration_graph`。
+- “查看状态 / status / 项目状态”仍走项目状态摘要，不被 outline graph 截获。
+
+## 4. Research 流程
+
+```text
+START
+  -> detect_research_need
+  -> build_research_queries
+  -> search_sources
+  -> synthesize_reference_brief
+  -> save_research_result
+  -> ask_user_confirm
+  -> END
+```
+
+输出与持久化：
+
+- `state.reference_brief`
+- `state.canon_facts`
+- `state.research_sources`
+- `state.research_uncertainties`
+- `projects/<project>/reference_brief.md`
+- `projects/<project>/research_sources.json`
+
+运行体验：
+
+```text
+[Research] 正在识别需要调研的原作信息...
+[Search] 正在搜索：...
+```
+
+research 完成后：
+
+- `director_action = "research"`
+- `active_workflow = "outline"`
+- `current_stage = "confirm_reference_brief"`
+- 展示参考简报和来源，要求用户确认或修正原作设定。
+
+## 5. 大纲共创流程
+
+`outline` 子图可由 chat 自动进入，也可通过 `outline` 命令单独调试。
 
 ```text
 START
@@ -93,28 +177,30 @@ START
       -> generate_outline -> review_outline -> human_feedback -> END
       -> review_outline -> human_feedback -> END
       -> revise_outline -> compare_versions -> review_outline -> human_feedback -> END
-      -> persist_outline -> END
+      -> show_outline -> END
       -> show_status -> END
+      -> persist_outline -> END
       -> stop -> END
 ```
 
-说明：
+关键行为：
 
-- 图内保留 conditional edge，但不会在同一次 invoke 里无限自动修订。
-- “生成 -> 审稿 -> 用户反馈 -> 修订 -> 再审稿 -> 再反馈 -> 保存”的循环由 CLI/chat 的下一轮用户输入驱动。
-- `review_outline` 如果返回 `revise`，只写入 `revision_instruction` 和审稿状态，不会自动保存。
-- `revise_outline` 会写入新大纲版本，并调用 `compare_versions` 帮用户理解差异。
+- 新小说创意不会直接生成完整大纲，优先方向提案或追问。
+- `review_outline` 返回 `revise` 时不会自动保存，只写入审稿状态和修订建议。
+- `revise_outline` 会写入新版本，并调用 `compare_versions`。
+- `show_outline` 展示 `state.outline` 正文。
+- `persist_outline` 保存 `outline.md`，并清空 `active_workflow`，`current_stage` 进入 `chapter_plan`。
+- 用户明确 `stop / 退出 / 结束` 会清空 `active_workflow/current_stage`。
 
-支持的用户输入：
+outline prompt 已注入 research 上下文：
 
-- `approve`：确认并保存当前大纲。
-- `revise: ...`：提炼为 `revision_instruction`，进入修订。
-- `variant`：生成 3 个不同创作方向。
-- `review`：调用大纲编辑审查。
-- `lock: ...`：写入 `locked_constraints`。
-- `stop`：结束当前流程但保留 state。
+- `reference_brief`
+- `canon_facts`
+- `research_uncertainties`
 
-## 4. Compose 图
+如果存在原作不确定点，prompt 要求先确认，不得擅自补完原作设定。
+
+## 6. Compose 图
 
 ```text
 worldbuild
@@ -127,38 +213,34 @@ worldbuild
        -> revise 超限或 stop: END
 ```
 
-compose 仍保留一次性自动推进能力，适合快速从创意生成到章节草稿和编辑意见。
+compose 仍保留一次性自动推进能力，适合快速 smoke 或批处理式验证；推荐日常创作从 `chat` 入口进入。
 
-## 5. Director Chat 图
+## 7. 状态字段
 
-```text
-director
-  |-- ask_user -> END
-  |-- worldbuild / plan_chapters / write_chapter / review / revise_chapter
-  |      -> run_selected_agent -> END
-  |-- propose_directions / generate_outline / review_outline / revise_outline / compare_versions
-  |      -> run_selected_outline_agent -> END
-  |-- persist_outputs -> END
-  |-- show_status -> END
-  `-- stop -> END
-```
+`NovelState.from_dict/to_dict` 保持旧 `state.json` 向后兼容。
 
-Director 输出结构：
+核心创作字段：
 
-```text
-ACTION: ask_user|propose_directions|worldbuild|generate_outline|review_outline|revise_outline|compare_versions|plan_chapters|write_chapter|review|revise_chapter|persist_outputs|show_status|stop
-TARGET: outline|worldbuilding|chapter|character|style|project|unknown
-INTENT: create|revise|review|approve|reject|lock|variant|save|status|stop|answer
-MESSAGE: 给用户看的简短回复
-INSTRUCTION: 提炼后的用户要求
-LOCKED_CONSTRAINTS: 可选，逗号分隔
-STYLE_PREFERENCES: 可选，逗号分隔
-CHAPTER: 可选章节编号
-```
+- `idea`
+- `worldbuilding`
+- `outline`
+- `chapter_plan`
+- `chapter_draft`
+- `editor_notes`
 
-## 6. 状态字段
+工作流字段：
 
-`NovelState.from_dict/to_dict` 保持旧 `state.json` 向后兼容。新增大纲共创字段：
+- `active_workflow`
+- `current_stage`
+- `active_artifact`
+- `active_task`
+- `director_action`
+- `director_intent`
+- `director_message`
+- `next_action`
+- `review_status`
+
+大纲共创字段：
 
 - `revision_instruction`
 - `locked_constraints`
@@ -168,42 +250,64 @@ CHAPTER: 可选章节编号
 - `pending_questions`
 - `open_decisions`
 - `last_user_feedback`
-- `active_artifact`
-- `director_intent`
 
-既有 chat 字段仍保留：`messages`、`user_request`、`director_action`、`director_message`、`pending_question`、`active_task`。
+research 字段：
 
-## 7. 使用方式
+- `reference_brief`
+- `canon_facts`
+- `research_sources`
+- `research_uncertainties`
 
-大纲共创 mock：
+chat 历史字段：
 
-```bash
-.venv/bin/ai-novelist outline   --project demo-outline   --idea "一个失忆工程师在月球城市追查自己的小说手稿"   --mock
-```
+- `messages`
+- `user_request`
+- `pending_question`
 
-大纲共创自动保存当前草案：
+## 8. 使用方式
 
-```bash
-.venv/bin/ai-novelist outline   --project demo-outline   --idea "一个失忆工程师在月球城市追查自己的小说手稿"   --mock   --auto-approve
-```
-
-Director chat：
+推荐入口：
 
 ```bash
 .venv/bin/ai-novelist chat --project demo-chat --mock
 ```
 
-Compose：
+示例对话：
 
-```bash
-.venv/bin/ai-novelist compose   --project demo-compose   --idea "一个失忆工程师在月球城市追查自己的小说手稿"   --chapter 1   --mock   --auto-approve
+```text
+我想写一个月球城市失忆工程师的悬疑科幻
+给我三个不同方向
+选择方向 1，强化主角罪感
+查看大纲
+保存大纲
+写第 1 章
+让编辑审稿
+保存当前结果
+查看状态
+退出
 ```
 
-## 8. 测试覆盖
+research 示例：
+
+```text
+/research 苟在初圣
+写苟在初圣同人
+查一下原作设定再写大纲
+```
+
+兼容调试入口：
+
+```bash
+.venv/bin/ai-novelist outline --project demo-outline --idea "一个失忆工程师在月球城市追查自己的小说手稿" --mock
+.venv/bin/ai-novelist compose --project demo-compose --idea "一个失忆工程师在月球城市追查自己的小说手稿" --chapter 1 --mock --auto-approve
+```
+
+## 9. 测试覆盖
 
 - `tests/test_graph_minimal.py`：阶段 1 最小图。
-- `tests/test_graph_writer.py`：单 Agent、compose、chat、Director 路由。
+- `tests/test_graph_writer.py`：单 Agent、compose、chat、Director 路由、chat 主入口 workflow。
 - `tests/test_outline_collaboration.py`：大纲 approve、revise、lock、variant、旧 state 兼容、chat 路由到大纲修订。
+- `tests/test_research_workflow.py`：research 触发、mock 搜索、参考简报持久化、research 后进入 outline。
 - `tests/smoke_outline_collaboration.py`：大纲生成、修订、保存 smoke。
 - `tests/smoke_phase2_compose.py`：compose smoke。
 - `tests/smoke_phase2_chat.py`：chat smoke。
@@ -216,31 +320,30 @@ Compose：
 .venv/bin/python tests/smoke_phase2.py
 .venv/bin/python tests/smoke_phase2_compose.py
 .venv/bin/python tests/smoke_phase2_chat.py
-.venv/bin/ai-novelist outline --project demo-outline-collab --idea "一个失忆工程师在月球城市追查自己的小说手稿" --mock --auto-approve
-.venv/bin/ai-novelist show --project demo-outline-collab
 ```
 
-当前已验证：`30 passed`，并通过 `smoke_outline_collaboration.py`、`smoke_phase2_chat.py`、`outline --mock --auto-approve`。
+当前已验证：`43 passed`，并通过 `smoke_outline_collaboration.py`、`smoke_phase2_chat.py`。
 
-## 9. 当前限制
+## 10. 当前限制
 
 - 仍是本地 CLI，不是长期运行服务。
-- outline/chat 的多轮共创由 CLI 循环驱动，不是后台会话服务。
+- research 当前只有 mock 搜索，不是真实联网搜索。
+- chat/outline 的多轮共创由 CLI 循环驱动，不是后台会话服务。
 - 真实模式每个 Agent 独立调用一次模型，没有流式 token 展示。
 - `persist_outputs` 只保存当前已有产物，不会自动补齐缺失产物。
 - `compose` 只围绕指定章节运行，不批量生成多章。
 - 本地文件存储没有并发锁。
 - 没有飞书、数据库、队列、Web UI、多租户权限或 Claude Code Adapter。
 
-## 10. 阶段 3 后续计划
+## 11. 阶段 3 后续计划
 
 ```text
 飞书用户
   -> 飞书机器人 / Webhook
   -> 会话映射与消息去重
-  -> 调用现有 chat / outline / compose 能力
-  -> 后台执行长任务
+  -> 调用现有 chat 主入口
+  -> 后台执行 research / outline / writing 长任务
   -> 飞书消息回复摘要和审核入口
 ```
 
-下一步应先抽出 service 层，把 CLI 循环中对 `LocalStore`、graph invoke 和用户输入归一化的逻辑复用给飞书入口。
+下一步应先抽出 service 层，把 CLI 循环中对 `LocalStore`、graph invoke、search backend 和用户输入归一化的逻辑复用给飞书入口。
