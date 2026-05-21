@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Callable, Protocol
 
-from ai_novelist.research import SearchBackend, SearchResult
+from ai_novelist.research import SearchBackend, SearchBackendError, SearchResult
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
 
@@ -85,7 +85,14 @@ def search_sources(data: dict, search_backend: SearchBackend, store: LocalStore,
     state = NovelState.from_dict(data)
     query = research_query_from_state(state)
     progress("Search", f"正在搜索：{query}")
-    results = search_backend.search(query, limit=5)
+    try:
+        results = search_backend.search(query, limit=5)
+    except SearchBackendError as exc:
+        state.error = str(exc)
+        state.review_status = "error"
+        state.current_stage = "search_sources"
+        store.save_state(state)
+        return state.to_dict()
     state.research_sources = [result.to_dict() for result in results]
     state.current_stage = "search_sources"
     store.save_state(state)
@@ -94,6 +101,9 @@ def search_sources(data: dict, search_backend: SearchBackend, store: LocalStore,
 
 def synthesize_reference_brief(data: dict, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
+    if state.error:
+        store.save_state(state)
+        return state.to_dict()
     query = research_query_from_state(state)
     results = [SearchResult(**item) for item in state.research_sources if item.get("title")]
     facts = canon_facts_from_results(results)
@@ -124,6 +134,9 @@ def synthesize_reference_brief(data: dict, store: LocalStore) -> dict:
 
 def save_research_result(data: dict, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
+    if state.error:
+        store.save_state(state)
+        return state.to_dict()
     if state.reference_brief.strip():
         store.save_reference_brief(state)
     store.save_research_sources(state)
@@ -134,6 +147,11 @@ def save_research_result(data: dict, store: LocalStore) -> dict:
 
 def ask_user_confirm(data: dict, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
+    if state.error:
+        state.director_message = f"参考调研失败：{state.error}"
+        state.active_workflow = ""
+        store.save_state(state)
+        return state.to_dict()
     state.director_message = "参考调研已完成。请确认是否把这份简报作为同人创作基础，或指出需要修正的原作设定。"
     state.active_workflow = "outline"
     state.current_stage = "confirm_reference_brief"

@@ -19,7 +19,7 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
 未完成：
 
 - 阶段 3 飞书机器人入口。
-- 真实联网搜索后端，目前只有 `MockSearchBackend`，`WebSearchBackend` 仍是占位。
+- 真实联网搜索后端已实现：`WebSearchBackend` 支持 SerpAPI、Tavily、Exa；默认仍是 mock，需要 API Key 才会联网。
 - 后台任务队列、数据库、多用户存储、并发锁。
 - Claude Code Adapter。
 - 多章节批量自动续写。
@@ -50,7 +50,7 @@ Research 层
   |-- SearchResult: title / url / snippet / source
   |-- SearchBackend.search(query, limit=5)
   |-- MockSearchBackend
-  `-- WebSearchBackend: 预留给 SerpAPI / Tavily / Exa
+  `-- WebSearchBackend: SerpAPI / Tavily / Exa
   |
   v
 LangGraph 编排层
@@ -327,7 +327,7 @@ research 示例：
 ## 10. 当前限制
 
 - 仍是本地 CLI，不是长期运行服务。
-- research 当前只有 mock 搜索，不是真实联网搜索。
+- research 默认只有 mock 搜索；真实搜索需要配置 `AI_NOVELIST_SEARCH_PROVIDER` 和 API Key。
 - chat/outline 的多轮共创由 CLI 循环驱动，不是后台会话服务。
 - 真实模式每个 Agent 独立调用一次模型，没有流式 token 展示。
 - `persist_outputs` 只保存当前已有产物，不会自动补齐缺失产物。

@@ -12,7 +12,7 @@ from ai_novelist.config import Settings, load_settings
 from ai_novelist.graph_minimal import build_minimal_graph
 from ai_novelist.graph_outline import build_outline_collaboration_graph
 from ai_novelist.graph_research import build_research_graph, detect_research_need_text
-from ai_novelist.research import MockSearchBackend
+from ai_novelist.research import MockSearchBackend, SearchBackend, SearchBackendError, WebSearchBackend
 from ai_novelist.graph_writer import (
     AgentTask,
     append_message,
@@ -55,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
             return run_writer_command(args, store, settings, "review")
         if args.command == "show":
             return show_project(args, store)
-    except LocalStoreError as exc:
+    except (LocalStoreError, SearchBackendError) as exc:
         print(f"错误：{exc}", file=sys.stderr)
         return 2
 
@@ -89,6 +89,11 @@ def build_parser() -> argparse.ArgumentParser:
     chat_parser.add_argument("--timeout", type=int, help="真实模型调用超时时间，单位秒")
     chat_parser.add_argument("--provider", choices=("codex", "deepseek"), help="模型提供方，默认读 AI_NOVELIST_MODEL_PROVIDER")
     chat_parser.add_argument("--model", help="模型名；DeepSeek 默认 deepseek-chat")
+    chat_parser.add_argument(
+        "--search-provider",
+        choices=("mock", "serpapi", "tavily", "exa"),
+        help="搜索提供方，默认读 AI_NOVELIST_SEARCH_PROVIDER；--mock 会强制使用 mock",
+    )
 
     worldbuild_parser = subparsers.add_parser("worldbuild", help="生成世界观设定")
     worldbuild_parser.add_argument("--project", required=True, help="项目 ID")
@@ -287,7 +292,7 @@ def run_chat_command(
     print_real_mode_notice(args.mock, adapter, effective_timeout)
     chat_graph = build_chat_graph(adapter, store, progress=print_progress)
     outline_graph = build_outline_collaboration_graph(adapter, store)
-    research_graph = build_research_graph(MockSearchBackend(), store, progress=print_progress)
+    research_graph = build_research_graph(make_search_backend(args, settings), store, progress=print_progress)
 
     print(f"进入 ai-novelist chat：项目 {state.project_id}。输入 exit/quit/退出 结束。")
     while True:
@@ -444,6 +449,21 @@ def run_writer_command(
     if result.review_status == "approved":
         print_persisted_path(task, result, store)
     return 1 if result.review_status == "error" else 0
+
+
+def make_search_backend(args: argparse.Namespace, settings: Settings) -> SearchBackend:
+    if args.mock:
+        return MockSearchBackend()
+
+    provider = (args.search_provider or settings.search_provider).strip().lower()
+    if provider in {"", "mock"}:
+        return MockSearchBackend()
+    return WebSearchBackend(
+        provider=provider,
+        api_key=settings.search_api_key,
+        base_url=settings.search_base_url,
+        timeout_seconds=settings.search_timeout_seconds,
+    )
 
 
 def make_agent_adapter(args: argparse.Namespace, settings: Settings, timeout_seconds: int) -> AgentAdapter:

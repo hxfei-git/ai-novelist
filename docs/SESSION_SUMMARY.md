@@ -209,7 +209,7 @@ worldbuild
 - `chat` 是唯一推荐主入口，`outline` 和单步命令保留为兼容/调试能力。
 - Director 不直接替代子 Agent，只判断意图、提炼指令、记录约束并调度节点。
 - research 在大纲前执行，避免把已有小说/IP/专有名词当普通题材生成错误同人设定。
-- research 当前使用 mock 搜索，真实联网搜索留给 `WebSearchBackend` 后续实现。
+- research 默认使用 mock 搜索；真实联网可通过 `AI_NOVELIST_SEARCH_PROVIDER=serpapi|tavily|exa` 和对应 API Key 启用。
 - 大纲共创循环跨多轮用户输入推进，而不是单次 invoke 无限循环。
 - 当前不引入数据库、队列、FastAPI 或飞书依赖。
 
@@ -217,7 +217,7 @@ worldbuild
 
 - 本地 CLI，不是服务端。
 - 飞书未接入。
-- research 目前不联网，只有 mock 后端。
+- research 默认不联网；配置 SerpAPI、Tavily 或 Exa 后可使用真实搜索。
 - 无数据库、队列、权限、多用户隔离或并发锁。
 - 真实模式每个 Agent 单独调用一次模型。
 - `chat` 的 `persist_outputs` 只保存已有产物，不会自动补齐缺失产物。

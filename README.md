@@ -95,13 +95,35 @@ Director 可路由动作：
 
 ## Research 参考调研
 
-`chat` 会在用户显式输入 `/research xxx`，或提出同人/原作/调研类需求时，先进入 research 工作流，生成参考简报后再进入大纲共创。当前实现使用 `MockSearchBackend`，预留了 WebSearchBackend/SerpAPI/Tavily/Exa 的接入位置。
+`chat` 会在用户显式输入 `/research xxx`，或提出同人/原作/调研类需求时，先进入 research 工作流，生成参考简报后再进入大纲共创。`--mock` 会使用 `MockSearchBackend`；真实模式可通过 `WebSearchBackend` 接入 SerpAPI、Tavily 或 Exa。
 
 ```text
 /research 苟在初圣
 写苟在初圣同人
 查一下原作设定再写大纲
 ```
+
+
+真实搜索配置示例：
+
+```bash
+export AI_NOVELIST_SEARCH_PROVIDER=serpapi  # 可选：serpapi / tavily / exa
+export SERPAPI_API_KEY="你的 SerpAPI Key"
+.venv/bin/ai-novelist chat --project real-research --provider deepseek --timeout 180
+```
+
+也可以单次指定搜索提供方：
+
+```bash
+.venv/bin/ai-novelist chat --project real-research --search-provider tavily --provider deepseek
+```
+
+相关环境变量：
+
+- `AI_NOVELIST_SEARCH_PROVIDER`：`mock`、`serpapi`、`tavily` 或 `exa`，默认 `mock`。
+- `AI_NOVELIST_SEARCH_API_KEY`：通用搜索 API Key；也可使用 `SERPAPI_API_KEY`、`TAVILY_API_KEY`、`EXA_API_KEY`。
+- `AI_NOVELIST_SEARCH_BASE_URL`：自定义搜索接口地址，通常不需要设置。
+- `AI_NOVELIST_SEARCH_TIMEOUT`：搜索请求超时秒数，默认 `20`。
 
 产物：
 
@@ -234,7 +256,7 @@ codex doctor
 .venv/bin/python tests/smoke_outline_collaboration.py
 ```
 
-当前已验证：`43 passed`。
+当前已验证：`51 passed`。
 
 ## 当前限制
 

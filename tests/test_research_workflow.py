@@ -1,7 +1,10 @@
-from ai_novelist.cli import should_use_research_graph, should_use_outline_graph
+from argparse import Namespace
+
+from ai_novelist.cli import make_search_backend, should_use_research_graph, should_use_outline_graph
 from ai_novelist.graph_research import build_research_graph, detect_research_need_text
 from ai_novelist.graph_outline import build_outline_collaboration_graph
-from ai_novelist.research import MockSearchBackend
+from ai_novelist.config import Settings
+from ai_novelist.research import MockSearchBackend, SearchBackendError, WebSearchBackend
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
 from ai_novelist.adapters.codex_cli import CodexCLIAdapter
@@ -62,3 +65,41 @@ def test_research_then_outline_prompt_contains_reference_brief(tmp_path):
     assert outlined["director_action"] == "propose_directions"
     assert outlined["reference_brief"]
     assert outlined["canon_facts"]
+
+
+class FailingSearchBackend:
+    def search(self, query: str, limit: int = 5):
+        raise SearchBackendError("provider failed")
+
+
+def test_research_graph_records_search_backend_error(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.user_request = "/research 不存在作品"
+    graph = build_research_graph(FailingSearchBackend(), store)
+
+    result = NovelState.from_dict(graph.invoke(state.to_dict()))
+
+    assert result.review_status == "error"
+    assert result.error == "provider failed"
+    assert result.active_workflow == ""
+    assert "参考调研失败" in result.director_message
+    assert not store.reference_brief_path("demo").exists()
+
+
+def test_make_search_backend_uses_mock_when_chat_mock_enabled():
+    args = Namespace(mock=True, search_provider="serpapi")
+    settings = Settings(search_provider="serpapi", search_api_key="key")
+
+    assert isinstance(make_search_backend(args, settings), MockSearchBackend)
+
+
+def test_make_search_backend_uses_configured_web_provider():
+    args = Namespace(mock=False, search_provider=None)
+    settings = Settings(search_provider="tavily", search_api_key="key", search_timeout_seconds=9)
+
+    backend = make_search_backend(args, settings)
+
+    assert isinstance(backend, WebSearchBackend)
+    assert backend.provider == "tavily"
+    assert backend.timeout_seconds == 9
