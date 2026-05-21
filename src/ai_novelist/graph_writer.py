@@ -341,6 +341,7 @@ def task_display_name(task: AgentTask) -> str:
 
 DIRECTOR_ACTIONS = {
     "ask_user",
+    "research",
     "worldbuild",
     "propose_directions",
     "generate_outline",

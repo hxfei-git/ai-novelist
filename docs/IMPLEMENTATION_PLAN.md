@@ -351,7 +351,7 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 .venv/bin/python tests/smoke_phase2_chat.py
 ```
 
-当前已验证：`65 passed`。本轮目标测试 `tests/test_search_backend.py tests/test_research_workflow.py` 为 `23 passed`。
+当前已验证：`65 passed`。本轮目标测试 `tests/test_search_backend.py tests/test_research_workflow.py` 为 `24 passed`。
 
 ## 10. 当前限制
 
@@ -366,7 +366,84 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 - 本地文件存储没有并发锁。
 - 没有飞书、数据库、队列、Web UI、多租户权限或 Claude Code Adapter。
 
-## 11. 阶段 3 后续计划
+## 11. 本地 RAG 后续推进计划
+
+当前本地 RAG 已完成 V0-V2 的最小闭环：配置本地 `.txt/.md` 语料目录、按 chunk 检索、metadata 持久化、本地命中优先、未命中回退 mock/web。后续按以下阶段推进。
+
+### V3：证据质量与 Prompt 强化
+
+目标：让下游 Agent 明确区分本地原文证据、网络摘要和 mock 测试资料。
+
+计划：
+
+- 在 `retrieval_context_synthesizer.md` 中增加证据层级要求：`local_corpus` 优先，web 仅补充，mock 仅测试。
+- 在 `build_retrieval_context_prompt` 中注入本地 metadata 摘要，包括 `relative_path`、`chunk_id`、offset 和 score。
+- 在规则 fallback 的 `retrieval_context` 中增加“证据层级 / 使用边界”段落。
+- 在 `reference_brief` 中保留本地 chunk 位置，便于用户回查原文。
+- 增加测试：本地结果进入 prompt 时必须标记为本地原文证据，mock/web 不得被标成原文证据。
+
+验收标准：
+
+- `/research` 本地命中后，`reference_brief.md` 和 `retrieval_context` 能直接看到本地文件位置。
+- outline/writer prompt 中本地证据优先级明确，不会把 mock 当真实资料。
+
+### V4：索引缓存与性能边界
+
+目标：避免每轮 research 全量读取和切片大目录。
+
+计划：
+
+- 为 `LocalRAGSearchBackend` 增加轻量索引缓存。
+- 缓存键基于 `relative_path`、`mtime_ns`、`size`、`chunk_size`、`chunk_overlap`。
+- 首版优先做进程内缓存；如 CLI 多轮 chat 性能仍不足，再落盘到项目或语料目录旁的 JSON 索引。
+- 目录不存在、空目录、文件删除、文件修改时自动失效。
+- 增加测试：重复查询复用索引，文件修改后重建索引。
+
+验收标准：
+
+- 同一 chat 会话内重复 `/research` 不重复读取未变化文件。
+- 文件内容变化后能检索到新内容。
+
+### V5：检索质量增强
+
+目标：提升本地语料命中质量，减少关键词误召回。
+
+计划：
+
+- 把现有简化关键词打分整理成更明确的 BM25 近似策略。
+- 增加标题、文件名、章节名权重。
+- 支持可配置 chunk 大小和 overlap，优先通过环境变量，CLI 参数再按需要增加。
+- 增加“本地结果不足时混合 web”的策略开关，默认仍保持本地命中即优先，避免破坏当前行为。
+- 评估是否引入向量检索；除非本地关键词检索明显不够，否则不新增依赖。
+
+验收标准：
+
+- 同一查询下更相关 chunk 排在前面。
+- 常见中文单字不会触发本地误命中。
+- 默认行为与现有本地优先策略兼容。
+
+### V6：任务级深度检索
+
+目标：让本地知识库从 research 前置资料升级为创作全过程记忆。
+
+计划：
+
+- 先抽象 `RetrievalService`，把 CLI 中 search backend 构造、查询生成、结果格式化和 graph 调用解耦。
+- 在 writer 任务中按任务类型生成检索 query：worldbuild 查设定，plan_chapters 查剧情线，write_chapter 查角色/地点/前文，review 查连续性。
+- 避免每个 Agent 自动无界补搜；每个任务设定最大查询数和最大注入 token。
+- 将任务级检索结果写入 state 的通用 retrieval 字段或新增任务级临时字段，具体实现前再定 schema。
+- 增加测试：writer prompt 能拿到任务相关本地片段，且未配置本地语料时行为不变。
+
+验收标准：
+
+- `write-chapter` 能按当前章节需求检索本地设定/前文。
+- 未配置本地 RAG 时，现有 compose/chat/writer 流程保持兼容。
+
+### 与阶段 3 飞书接入的关系
+
+本地 RAG 的 V3-V6 不阻塞飞书入口，但 V6 的 `RetrievalService` 与飞书 service 层复用价值高。推荐顺序是先完成 V3-V4，随后抽 service 层，再决定 V5/V6 与飞书阶段的优先级。
+
+## 12. 阶段 3 后续计划
 
 ```text
 飞书用户
@@ -378,3 +455,19 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 ```
 
 下一步应先抽出 service 层，把 CLI 循环中对 `LocalStore`、graph invoke、search backend 和用户输入归一化的逻辑复用给飞书入口。
+
+
+## 13. Research 意图管理改造
+
+已完成：
+
+- 新增 research 专用意图 prompt：`src/ai_novelist/prompts/research_intent.md`。
+- chat 顶层路由先通过 Director prompt 识别 ACTION，`research` 会进入 research graph；规则路由保留为模型异常兜底。
+- research 工作流在搜索前先通过模型提取结构化字段：`NEED_RESEARCH`、`QUERY`、`WORK_TITLE`、`AUTHOR`、`INTENT`。
+- 原 `extract_research_query` 保留为兜底，避免 mock、模型异常或输出格式异常时 research 中断。
+- 测试覆盖复杂同人输入，避免把“一本/一部/同人小说”等泛词当作搜索词。
+
+当前边界：
+
+- 当前仍保留 `should_use_research_graph` 作为 Director 调用失败时的兜底。
+- 后续可继续减少 outline/chat 的前置规则分支，让所有顶层路由共享同一份 Director 决策结果，避免重复调用模型。

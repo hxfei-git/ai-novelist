@@ -38,7 +38,7 @@ class ResearchSequentialGraph:
 
     def invoke(self, state: dict) -> dict:
         current = detect_research_need(state, self.store, self.progress)
-        current = build_research_queries(current, self.store)
+        current = build_research_queries(current, self.store, self.adapter)
         current = search_sources(current, self.search_backend, self.store, self.progress)
         current = synthesize_retrieval_context(current, self.store, self.adapter, self.progress)
         current = synthesize_reference_brief(current, self.store)
@@ -63,7 +63,7 @@ def build_research_graph(
 
     graph = StateGraph(dict)
     graph.add_node("detect_research_need", lambda data: detect_research_need(data, store, progress_func))
-    graph.add_node("build_research_queries", lambda data: build_research_queries(data, store))
+    graph.add_node("build_research_queries", lambda data: build_research_queries(data, store, adapter))
     graph.add_node("search_sources", lambda data: search_sources(data, search_backend, store, progress_func))
     graph.add_node("synthesize_retrieval_context", lambda data: synthesize_retrieval_context(data, store, adapter, progress_func))
     graph.add_node("synthesize_reference_brief", lambda data: synthesize_reference_brief(data, store))
@@ -93,9 +93,18 @@ def detect_research_need(data: dict, store: LocalStore, progress: ProgressFunc =
     return state.to_dict()
 
 
-def build_research_queries(data: dict, store: LocalStore) -> dict:
+def build_research_queries(data: dict, store: LocalStore, adapter: AgentAdapter | None = None) -> dict:
     state = NovelState.from_dict(data)
-    query = extract_research_query(state.user_request) or state.idea or state.user_request
+    query = ""
+    if adapter is not None:
+        try:
+            output = adapter.complete(build_research_intent_prompt(state), store.project_dir(state.project_id))
+            decision = parse_research_intent_output(output)
+            if decision["need_research"] != "no":
+                query = decision["query"] or decision["work_title"] or decision["author"]
+        except AgentAdapterError:
+            query = ""
+    query = query or extract_research_query(state.user_request) or state.idea or state.user_request
     state.open_decisions = [item for item in state.open_decisions if not item.startswith("research_query:")]
     state.open_decisions.append(f"research_query:{query}")
     state.retrieval_query = query
@@ -214,6 +223,40 @@ def ask_user_confirm(data: dict, store: LocalStore) -> dict:
     return state.to_dict()
 
 
+def build_research_intent_prompt(state: NovelState) -> str:
+    template = load_prompt("research_intent")
+    history = "\n".join(f"{msg['role']}: {msg['content']}" for msg in state.messages[-8:])
+    return (
+        f"{template.rstrip()}\n\n"
+        "## 当前项目状态\n"
+        f"项目：{state.project_id}\n"
+        f"标题：{state.title}\n"
+        f"创意：{state.idea or '暂无'}\n"
+        f"已有参考简报：{'是' if state.reference_brief else '否'}\n\n"
+        f"## 最近对话\n{history or '暂无'}\n\n"
+        f"最新用户输入：{state.user_request}\n"
+    )
+
+
+def parse_research_intent_output(output: str) -> dict[str, str]:
+    need_research = research_intent_field(output, "NEED_RESEARCH").lower()
+    if need_research not in {"yes", "no"}:
+        need_research = "yes"
+    return {
+        "need_research": need_research,
+        "query": research_intent_field(output, "QUERY"),
+        "work_title": research_intent_field(output, "WORK_TITLE"),
+        "author": research_intent_field(output, "AUTHOR"),
+        "intent": research_intent_field(output, "INTENT").lower() or "unknown",
+        "reason": research_intent_field(output, "REASON"),
+    }
+
+
+def research_intent_field(output: str, field: str) -> str:
+    match = re.search(rf"^{field}:\s*(.*)$", output, re.IGNORECASE | re.MULTILINE)
+    return match.group(1).strip() if match else ""
+
+
 def build_retrieval_context_prompt(state: NovelState, results: list[SearchResult]) -> str:
     template = load_prompt("retrieval_context_synthesizer")
     source_lines = "\n".join(
@@ -289,13 +332,44 @@ def extract_research_query(text: str) -> str:
     quote_match = re.search(r"[《\"]([^》\"]+)[》\"]", raw)
     if quote_match:
         return quote_match.group(1).strip()
-    fanfic_match = re.search(r"写\s*([^，。,.!！?？]{2,30}?)(?:的)?同人", raw)
-    if fanfic_match:
-        return fanfic_match.group(1).strip()
+    for fanfic_match in re.finditer(r"([^，。,.!！?？]{2,30}?)(?:的)?同人(?:小说|文|作品)?", raw):
+        candidate = clean_research_query_candidate(fanfic_match.group(1))
+        if candidate:
+            return candidate
     for marker in ("查一下", "调研", "research"):
         if marker in raw:
             return raw.split(marker, 1)[1].strip(" ：:，,")
     return raw
+
+
+def clean_research_query_candidate(candidate: str) -> str:
+    cleaned = candidate.strip(" ：:，,。.!！?？ ")
+    prefixes = (
+        "我想写",
+        "我想要写",
+        "想写",
+        "想要写",
+        "我要写",
+        "请写",
+        "帮我写",
+        "写",
+    )
+    changed = True
+    while changed:
+        changed = False
+        for prefix in prefixes:
+            if cleaned.startswith(prefix):
+                cleaned = cleaned[len(prefix):].strip(" ：:，,。.!！?？ ")
+                changed = True
+    generic_terms = {"一本", "一部", "一篇", "一个", "同人", "同人小说", "同人文", "小说"}
+    if cleaned in generic_terms:
+        return ""
+    for generic_prefix in ("一本", "一部", "一篇", "一个"):
+        if cleaned.startswith(generic_prefix) and len(cleaned) > len(generic_prefix) + 1:
+            cleaned = cleaned[len(generic_prefix):].strip(" ：:，,。.!！?？ ")
+    if cleaned in generic_terms or not cleaned:
+        return ""
+    return cleaned
 
 
 def research_query_from_state(state: NovelState) -> str:

@@ -1,7 +1,7 @@
 from argparse import Namespace
 
-from ai_novelist.cli import make_search_backend, should_use_research_graph, should_use_outline_graph
-from ai_novelist.graph_research import build_research_graph, detect_research_need_text
+from ai_novelist.cli import make_search_backend, select_chat_graph, should_use_research_graph, should_use_outline_graph
+from ai_novelist.graph_research import build_research_graph, detect_research_need_text, extract_research_query
 from ai_novelist.graph_outline import build_outline_collaboration_graph
 from ai_novelist.config import Settings
 from ai_novelist.research import (
@@ -16,6 +16,12 @@ from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
 from ai_novelist.adapters.base import AgentAdapterError
 from ai_novelist.adapters.codex_cli import CodexCLIAdapter
+
+
+def test_extract_research_query_ignores_fanfic_quantity_words():
+    assert extract_research_query("写苟在初圣同人") == "苟在初圣"
+    assert extract_research_query("我想写一本同人小说，苟在初圣的同人，作者是初圣") == "苟在初圣"
+    assert extract_research_query("我想写《苟在初圣》的同人") == "苟在初圣"
 
 
 def test_detect_research_need_for_fanfic_and_slash_command():
@@ -51,6 +57,27 @@ def test_research_graph_persists_reference_brief_and_sources(tmp_path):
     assert events[1][0] == "Search"
 
 
+def test_select_chat_graph_uses_director_prompt_for_research(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.user_request = "我想写一本同人小说，苟在初圣的同人，作者是初圣"
+    research_graph = object()
+    outline_graph = object()
+    chat_graph = object()
+
+    selected = select_chat_graph(
+        state,
+        state.user_request,
+        research_graph,
+        outline_graph,
+        chat_graph,
+        CodexCLIAdapter(mock=True),
+        store,
+    )
+
+    assert selected is research_graph
+
+
 def test_chat_routing_prefers_research_before_outline(tmp_path):
     store = LocalStore(tmp_path)
     state = store.create_project("Demo", "demo")
@@ -77,6 +104,28 @@ def test_research_then_outline_prompt_contains_reference_brief(tmp_path):
     assert outlined["reference_brief"]
     assert outlined["retrieval_context"]
     assert outlined["canon_facts"]
+
+
+class RecordingSearchBackend:
+    def __init__(self):
+        self.queries = []
+
+    def search(self, query: str, limit: int = 5):
+        self.queries.append(query)
+        return [SearchResult(title="recorded", url="mock://recorded", snippet=query, source="recording")]
+
+
+def test_research_graph_uses_prompt_intent_for_fanfic_query(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.user_request = "我想写一本同人小说，苟在初圣的同人，作者是初圣"
+    backend = RecordingSearchBackend()
+    graph = build_research_graph(backend, store, adapter=CodexCLIAdapter(mock=True))
+
+    result = NovelState.from_dict(graph.invoke(state.to_dict()))
+
+    assert backend.queries == ["苟在初圣"]
+    assert result.retrieval_query == "苟在初圣"
 
 
 class FailingSearchBackend:
@@ -205,8 +254,9 @@ def test_research_graph_uses_llm_to_synthesize_retrieval_context(tmp_path):
     result = NovelState.from_dict(graph.invoke(state.to_dict()))
 
     assert adapter.prompts
-    assert "AGENT: retrieval_context_synthesizer" in adapter.prompts[0]
-    assert "苟在初圣" in adapter.prompts[0]
+    retrieval_prompts = [prompt for prompt in adapter.prompts if "AGENT: retrieval_context_synthesizer" in prompt]
+    assert retrieval_prompts
+    assert "苟在初圣" in retrieval_prompts[0]
     assert result.retrieval_context.startswith("# LLM 检索上下文")
     assert "## 通用检索上下文" in result.reference_brief
 

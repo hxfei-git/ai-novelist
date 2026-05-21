@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -102,6 +103,8 @@ class CodexCLIAdapter(AgentAdapter):
         return ""
 
     def _mock_response(self, prompt: str) -> str:
+        if "AGENT: research_intent" in prompt:
+            return self._mock_research_intent(prompt)
         if "AGENT: director" in prompt:
             return self._mock_director(prompt)
         if "AGENT: retrieval_context_synthesizer" in prompt:
@@ -125,6 +128,29 @@ class CodexCLIAdapter(AgentAdapter):
         if "AGENT: editor" in prompt:
             return self._mock_editor_review(revised="修订次数：0" not in prompt)
         return self._mock_outline(prompt)
+
+
+    def _mock_research_intent(self, prompt: str) -> str:
+        request = self._extract_director_request(prompt)
+        query = ""
+        quote_match = re.search(r"[《\"]([^》\"]+)[》\"]", request)
+        if quote_match:
+            query = quote_match.group(1).strip()
+        elif "苟在初圣" in request:
+            query = "苟在初圣"
+        else:
+            query = request.strip()
+        author = "初圣" if "作者是初圣" in request or "作者：初圣" in request else ""
+        need = "yes" if any(word in request for word in ("同人", "原作", "查一下", "调研", "research", "/research", "苟在初圣")) else "no"
+        intent = "fanfic" if "同人" in request else "web_research" if need == "yes" else "original"
+        return (
+            f"NEED_RESEARCH: {need}\n"
+            f"QUERY: {query}\n"
+            f"WORK_TITLE: {query if need == 'yes' else ''}\n"
+            f"AUTHOR: {author}\n"
+            f"INTENT: {intent}\n"
+            "REASON: mock research intent"
+        )
 
 
     def _mock_retrieval_context(self) -> str:
@@ -167,6 +193,8 @@ class CodexCLIAdapter(AgentAdapter):
             return response("show_status", "project", "status", "我会展示当前项目状态和已有产物。")
         if any(word in request for word in ("多个方向", "三个方向", "不同方向", "variant", "备选", "讨论大纲", "敲定大纲", "聊大纲")):
             return response("propose_directions", "outline", "variant", "我会给出三个不同的创作方向供你选择。")
+        if any(word in request for word in ("同人", "原作", "参考网络", "查一下", "调研", "research", "/research", "小说名", "苟在初圣")):
+            return response("research", "project", "web_research", "我会先调研原作资料，再进入同人创作。")
         if any(word in request for word in ("这个设定别改", "别改", "不要改", "保留")):
             return response("show_status", "outline", "lock", "我已记录锁定约束，后续修订会遵守。", request, request)
         if any(word in request for word in ("审查大纲", "审稿大纲", "review outline", "看看大纲问题")):

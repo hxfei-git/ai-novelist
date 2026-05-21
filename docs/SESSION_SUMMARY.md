@@ -219,7 +219,7 @@ worldbuild
 .venv/bin/python tests/smoke_phase2_chat.py
 ```
 
-当前验证结果：`65 passed`；本轮目标测试 `tests/test_search_backend.py tests/test_research_workflow.py` 为 `23 passed`。
+当前验证结果：`65 passed`；本轮目标测试 `tests/test_search_backend.py tests/test_research_workflow.py` 为 `24 passed`。
 
 ## 8. 设计决策
 
@@ -246,7 +246,18 @@ worldbuild
 - `compose` 不批量生成多章。
 - Claude Code Adapter 未实现。
 
-## 10. 后续恢复上下文
+## 10. 本地 RAG 后续安排
+
+仅文档计划，尚未在代码中实现：
+
+- V3 证据质量与 Prompt 强化：在 `retrieval_context_synthesizer.md`、规则 fallback 和 `reference_brief` 中明确区分本地原文证据、网络摘要和 mock 测试资料；本地 chunk 位置应进入输出。
+- V4 索引缓存：为本地语料增加基于 `relative_path + mtime_ns + size + chunk 配置` 的缓存，首版优先进程内缓存，必要时再落盘。
+- V5 检索质量增强：整理 BM25 近似策略，增加标题/文件名/章节名权重，支持 chunk 参数配置，并评估是否需要向量检索。
+- V6 任务级深度检索：抽象 `RetrievalService`，让 writer/worldbuild/review 可按任务补充检索，但必须限制查询数和注入规模，保持未配置本地语料时行为不变。
+
+推荐推进顺序：先做 V3-V4，保证证据可靠性和性能；再抽 service 层；最后根据实际语料规模决定 V5/V6 和飞书入口的先后。
+
+## 11. 后续恢复上下文
 
 建议先读：
 
@@ -264,3 +275,23 @@ sed -n '1,420p' src/ai_novelist/cli.py
 .venv/bin/python -m pytest
 .venv/bin/python tests/smoke_outline_collaboration.py
 ```
+
+
+## 12. 本轮更新：Research 意图 prompt 化
+
+- 新增 `research_intent.md`，在 research 搜索前用 prompt 识别是否需要调研、作品名、作者和最小搜索词。
+- chat 顶层路由先调用 Director prompt；当 ACTION=research 时进入 research graph，规则判断只做兜底。
+- `graph_research.build_research_queries` 优先调用 adapter 解析 `QUERY/WORK_TITLE/AUTHOR`，失败时才回退到规则抽取。
+- 修复“我想写一本同人小说，苟在初圣的同人，作者是初圣”被抽成“一本”的问题；mock adapter 现在也支持 `AGENT: research_intent`。
+- 增加回归测试，确认传给搜索后端的 query 是 `苟在初圣`。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_research_workflow.py tests/test_search_backend.py
+```
+
+结果：目标测试 `38 passed`，全量测试见本轮最终验证。
+
+
+全量验证：`.venv/bin/python -m pytest`，结果 `68 passed`。

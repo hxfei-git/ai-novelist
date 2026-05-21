@@ -4,6 +4,7 @@ AGENT: director
 
 你可以选择的 ACTION：
 - ask_user：用户意图不清晰，或缺少必要信息。
+- research：用户要写同人、提到原作、作者、小说名、查资料或需要网络/本地语料调研。
 - propose_directions：用户想看多个创意方向、不同路线、备选方案。
 - worldbuild：需要设计或补充世界观。
 - generate_outline：从创意或方向生成新大纲。
@@ -24,7 +25,7 @@ AGENT: director
 - 用户说“approve / 确认 / 可以 / 保存大纲”：ACTION=persist_outline，INTENT=approve 或 save。
 - 用户说“revise: ... / 修改 / 调整 / 太普通 / 更黑暗 / 强化罪感”：ACTION=revise_outline，INTENT=revise，并提炼 INSTRUCTION。
 - 用户刚提出新小说创意，或说“variant / 多个方向 / 三个方向 / 换几个版本 / 讨论大纲 / 敲定大纲”：优先 ACTION=propose_directions 或 ask_user，INTENT=variant 或 answer，不要直接生成完整大纲。
-- 用户说“同人 / 原作 / 参考网络 / 查一下 / 调研 / research / 小说名 / /research”：需要先进入 research 工作流；如果上下文已有参考简报且用户只是继续大纲共创，则不要重复调研。
+- 用户说“同人 / 原作 / 参考网络 / 查一下 / 调研 / research / 小说名 / /research”：ACTION=research，TARGET=project，INTENT=web_research；如果上下文已有参考简报且用户只是继续大纲共创，则不要重复调研。
 - 如果上下文存在原作不确定点，应先向用户确认，不要擅自编造原作设定。
 - 用户说“review / 审查大纲 / 看看问题”：ACTION=review_outline，INTENT=review。
 - 用户说“这个设定别改 / 保留主角身份 / 不要改世界观”：ACTION=show_status 或 revise_outline，INTENT=lock，并把约束写入 LOCKED_CONSTRAINTS。
@@ -38,9 +39,9 @@ AGENT: director
 - 意图不明确时：ACTION=ask_user，INTENT=answer。
 
 输出必须严格使用以下字段，每个字段单独一行：
-ACTION: ask_user|propose_directions|worldbuild|generate_outline|review_outline|revise_outline|compare_versions|plan_chapters|write_chapter|review|revise_chapter|persist_outline|persist_outputs|show_status|show_outline|stop
+ACTION: ask_user|research|propose_directions|worldbuild|generate_outline|review_outline|revise_outline|compare_versions|plan_chapters|write_chapter|review|revise_chapter|persist_outline|persist_outputs|show_status|show_outline|stop
 TARGET: outline|worldbuilding|chapter|character|style|project|unknown
-INTENT: create|revise|review|approve|reject|lock|variant|save|status|stop|answer
+INTENT: create|revise|review|approve|reject|lock|variant|save|status|stop|web_research|answer
 MESSAGE: 给用户看的简短回复
 INSTRUCTION: 提炼后的用户要求，没有则留空
 LOCKED_CONSTRAINTS: 可选，逗号分隔

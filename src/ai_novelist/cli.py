@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from ai_novelist.adapters.base import AgentAdapter
+from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
 from ai_novelist.adapters.codex_cli import CodexCLIAdapter
 from ai_novelist.adapters.deepseek import DeepSeekAdapter
 from ai_novelist.config import Settings, load_settings
@@ -25,8 +25,10 @@ from ai_novelist.graph_writer import (
     append_message,
     artifact_status,
     build_chat_graph,
+    build_director_prompt,
     build_composer_graph,
     build_writer_graph,
+    parse_director_decision,
     task_display_name,
     task_output,
 )
@@ -326,7 +328,7 @@ def run_chat_command(
             state.idea = user_input
         store.save_state(state)
 
-        graph = select_chat_graph(state, user_input, research_graph, outline_graph, chat_graph)
+        graph = select_chat_graph(state, user_input, research_graph, outline_graph, chat_graph, adapter, store)
         result = NovelState.from_dict(graph.invoke(state.to_dict()))
         print_chat_turn_result(result, store)
         if result.error:
@@ -337,12 +339,32 @@ def run_chat_command(
     return 0
 
 
-def select_chat_graph(state: NovelState, user_input: str, research_graph, outline_graph, chat_graph):
+def select_chat_graph(
+    state: NovelState,
+    user_input: str,
+    research_graph,
+    outline_graph,
+    chat_graph,
+    adapter: AgentAdapter | None = None,
+    store: LocalStore | None = None,
+):
+    if adapter is not None and store is not None and director_selects_research(state, adapter, store):
+        return research_graph
     if should_use_research_graph(state, user_input):
         return research_graph
     if should_use_outline_graph(state, user_input):
         return outline_graph
     return chat_graph
+
+
+def director_selects_research(state: NovelState, adapter: AgentAdapter, store: LocalStore) -> bool:
+    if state.reference_brief.strip():
+        return False
+    try:
+        output = adapter.complete(build_director_prompt(state), store.project_dir(state.project_id))
+    except AgentAdapterError:
+        return False
+    return parse_director_decision(output)["action"] == "research"
 
 
 def should_use_research_graph(state: NovelState, user_input: str) -> bool:
