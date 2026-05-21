@@ -12,7 +12,14 @@ from ai_novelist.config import Settings, load_settings
 from ai_novelist.graph_minimal import build_minimal_graph
 from ai_novelist.graph_outline import build_outline_collaboration_graph
 from ai_novelist.graph_research import build_research_graph, detect_research_need_text
-from ai_novelist.research import MockSearchBackend, SearchBackend, SearchBackendError, WebSearchBackend
+from ai_novelist.research import (
+    LocalFirstSearchBackend,
+    LocalRAGSearchBackend,
+    MockSearchBackend,
+    SearchBackend,
+    SearchBackendError,
+    WebSearchBackend,
+)
 from ai_novelist.graph_writer import (
     AgentTask,
     append_message,
@@ -89,6 +96,10 @@ def build_parser() -> argparse.ArgumentParser:
     chat_parser.add_argument("--timeout", type=int, help="真实模型调用超时时间，单位秒")
     chat_parser.add_argument("--provider", choices=("codex", "deepseek"), help="模型提供方，默认读 AI_NOVELIST_MODEL_PROVIDER")
     chat_parser.add_argument("--model", help="模型名；DeepSeek 默认 deepseek-chat")
+    chat_parser.add_argument(
+        "--local-corpus-dir",
+        help="本地 RAG 语料目录，默认读 AI_NOVELIST_LOCAL_CORPUS_DIR；配置后 research 优先检索 .txt/.md",
+    )
     chat_parser.add_argument(
         "--search-provider",
         choices=("mock", "serpapi", "tavily", "exa"),
@@ -452,18 +463,25 @@ def run_writer_command(
 
 
 def make_search_backend(args: argparse.Namespace, settings: Settings) -> SearchBackend:
+    fallback_backend: SearchBackend
     if args.mock:
-        return MockSearchBackend()
+        fallback_backend = MockSearchBackend()
+    else:
+        provider = (args.search_provider or settings.search_provider).strip().lower()
+        if provider in {"", "mock"}:
+            fallback_backend = MockSearchBackend()
+        else:
+            fallback_backend = WebSearchBackend(
+                provider=provider,
+                api_key=settings.search_api_key,
+                base_url=settings.search_base_url,
+                timeout_seconds=settings.search_timeout_seconds,
+            )
 
-    provider = (args.search_provider or settings.search_provider).strip().lower()
-    if provider in {"", "mock"}:
-        return MockSearchBackend()
-    return WebSearchBackend(
-        provider=provider,
-        api_key=settings.search_api_key,
-        base_url=settings.search_base_url,
-        timeout_seconds=settings.search_timeout_seconds,
-    )
+    local_corpus_dir = (getattr(args, "local_corpus_dir", None) or settings.local_corpus_dir).strip()
+    if not local_corpus_dir:
+        return fallback_backend
+    return LocalFirstSearchBackend(LocalRAGSearchBackend(local_corpus_dir), fallback_backend)
 
 
 def make_agent_adapter(args: argparse.Namespace, settings: Settings, timeout_seconds: int) -> AgentAdapter:

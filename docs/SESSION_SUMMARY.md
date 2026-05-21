@@ -26,6 +26,7 @@
 
 - `chat`：唯一推荐主入口，Director Agent 连续对话并调度 research、outline 和写作子工作流。
 - `research/retrieval`：搜索原始资料，生成通用 `retrieval_context`，并继续生成兼容旧流程的参考简报、原作事实、来源列表和不确定点。
+- 本地小说知识库优先 RAG：可通过 `AI_NOVELIST_LOCAL_CORPUS_DIR` 或 `chat --local-corpus-dir` 指定 `.txt/.md` 语料目录，research 本地命中时不调用 mock/web。
 - `outline`：交互式大纲共创流程，支持方向、生成、审稿、修订、版本比较、查看、锁定和保存。
 - `compose`：一次性完整多 Agent 创作图。
 - 单步 Agent 命令：`worldbuild`、`plan-outline`、`plan-chapters`、`write-chapter`、`review`。
@@ -36,6 +37,7 @@
 chat 主入口
   -> 写入 state.user_request + messages
   -> research 需求: build_research_graph(search_backend, store, adapter=adapter)
+     search_backend 可为 LocalFirstSearchBackend(LocalRAGSearchBackend, mock/web fallback)
   -> active_workflow == outline: build_outline_collaboration_graph
   -> 其他请求: build_chat_graph
   -> 打印阶段日志、Director 消息和产物正文
@@ -63,6 +65,12 @@ detect_research_need
   -> ask_user_confirm
   -> END
 ```
+
+本地 RAG 结果：
+
+- `source=local_corpus`
+- `url=local://corpus/<relative_path>#chunk=<id>`
+- `metadata` 包含 `file_path`、`relative_path`、`chapter_name`、`chunk_id`、`start_offset`、`end_offset`、`score`
 
 输出：
 
@@ -128,7 +136,7 @@ worldbuild
 - `src/ai_novelist/graph_outline.py`
 - `src/ai_novelist/graph_writer.py`
 - `src/ai_novelist/graph_minimal.py`
-- `src/ai_novelist/research/search_backend.py`
+- `src/ai_novelist/research/search_backend.py`：包含 `MockSearchBackend`、`WebSearchBackend`、`LocalRAGSearchBackend`、`LocalFirstSearchBackend`。
 - `src/ai_novelist/adapters/codex_cli.py`
 - `src/ai_novelist/adapters/deepseek.py`
 - `src/ai_novelist/storage/local_store.py`
@@ -179,6 +187,7 @@ worldbuild
 
 ```bash
 .venv/bin/ai-novelist chat --project demo-chat --mock
+.venv/bin/ai-novelist chat --project demo-chat --mock --local-corpus-dir /data/novels
 ```
 
 示例对话：
@@ -204,12 +213,13 @@ worldbuild
 验证：
 
 ```bash
+.venv/bin/python -m pytest tests/test_search_backend.py tests/test_research_workflow.py
 .venv/bin/python -m pytest
 .venv/bin/python tests/smoke_outline_collaboration.py
 .venv/bin/python tests/smoke_phase2_chat.py
 ```
 
-当前验证结果：`55 passed`，`smoke_outline_collaboration.py` 通过，`smoke_phase2_chat.py` 通过。
+当前验证结果：`65 passed`；本轮目标测试 `tests/test_search_backend.py tests/test_research_workflow.py` 为 `23 passed`。
 
 ## 8. 设计决策
 
@@ -217,6 +227,7 @@ worldbuild
 - Director 不直接替代子 Agent，只判断意图、提炼指令、记录约束并调度节点。
 - research 在大纲前执行，避免把已有小说/IP/专有名词当普通题材生成错误同人设定。
 - research 默认使用 mock 搜索；真实联网可通过 `AI_NOVELIST_SEARCH_PROVIDER=serpapi|tavily|exa` 和对应 API Key 启用。
+- 配置本地语料目录后，research 先走本地 `.txt/.md` 关键词检索；至少 1 条本地命中即视为证据充足并跳过 fallback。
 - SearchBackend 只返回原始搜索结果；LLM 总结由 `retrieval_context_synthesizer.md` 和 research graph 负责，失败时使用规则 fallback。
 - outline 和 writer prompts 都消费已有 `retrieval_context`，但当前不会基于大纲或每个写作任务自动搜索。
 - 大纲共创循环跨多轮用户输入推进，而不是单次 invoke 无限循环。
@@ -227,6 +238,7 @@ worldbuild
 - 本地 CLI，不是服务端。
 - 飞书未接入。
 - research 默认不联网；配置 SerpAPI、Tavily 或 Exa 后可使用真实搜索。
+- 本地 RAG 首版无向量库、索引缓存、增量更新、证据分层 prompt 强化或任务级深度检索。
 - 通用检索上下文只复用已有 `/research` 结果，不会主动补搜或按任务刷新。
 - 无数据库、队列、权限、多用户隔离或并发锁。
 - 真实模式每个 Agent 单独调用一次模型。

@@ -20,6 +20,7 @@ class Settings:
     search_api_key: str = ""
     search_base_url: str = ""
     search_timeout_seconds: int = 20
+    local_corpus_dir: str = ""
 
 
 def load_settings() -> Settings:
@@ -35,6 +36,7 @@ def load_settings() -> Settings:
         search_api_key=search_api_key(),
         search_base_url=os.getenv("AI_NOVELIST_SEARCH_BASE_URL", "").strip(),
         search_timeout_seconds=int(os.getenv("AI_NOVELIST_SEARCH_TIMEOUT", "20")),
+        local_corpus_dir=os.getenv("AI_NOVELIST_LOCAL_CORPUS_DIR", "").strip(),
     )
 
 

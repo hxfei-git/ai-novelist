@@ -3,7 +3,13 @@ import urllib.error
 
 import pytest
 
-from ai_novelist.research import SearchBackendError, WebSearchBackend
+from ai_novelist.research import (
+    LocalFirstSearchBackend,
+    LocalRAGSearchBackend,
+    SearchBackendError,
+    SearchResult,
+    WebSearchBackend,
+)
 
 
 class FakeResponse:
@@ -109,4 +115,86 @@ def test_web_search_backend_raises_on_http_error(monkeypatch):
 
     with pytest.raises(SearchBackendError, match="HTTP 401"):
         backend.search("query")
+
+
+def test_local_rag_backend_reads_txt_md_and_returns_metadata(tmp_path):
+    corpus = tmp_path / "corpus"
+    (corpus / "nested").mkdir(parents=True)
+    (corpus / "chapter1.txt").write_text("月影城有一座静默钟塔。主角在钟塔下发现失忆线索。", encoding="utf-8")
+    (corpus / "nested" / "chapter2.md").write_text("# 第二章\n银色档案馆记录月影城的旧案。", encoding="utf-8")
+    (corpus / "skip.pdf").write_text("月影城", encoding="utf-8")
+
+    backend = LocalRAGSearchBackend(corpus, chunk_size=20, chunk_overlap=5)
+    results = backend.search("月影城", limit=5)
+
+    assert results
+    assert {item.source for item in results} == {"local_corpus"}
+    assert all(item.metadata for item in results)
+    assert results[0].url.startswith("local://corpus/")
+    assert "chunk=" in results[0].url
+    assert results[0].metadata["relative_path"].endswith(("chapter1.txt", "chapter2.md"))
+    assert results[0].metadata["chapter_name"] in {"chapter1", "chapter2"}
+    assert isinstance(results[0].metadata["start_offset"], int)
+    assert isinstance(results[0].metadata["end_offset"], int)
+
+
+def test_local_rag_backend_orders_keyword_hits(tmp_path):
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    (corpus / "a.txt").write_text("星门 星门 星门 冷湖", encoding="utf-8")
+    (corpus / "b.txt").write_text("星门 冷湖", encoding="utf-8")
+
+    results = LocalRAGSearchBackend(corpus).search("星门", limit=2)
+
+    assert results[0].metadata["relative_path"] == "a.txt"
+    assert results[1].metadata["relative_path"] == "b.txt"
+
+
+def test_local_rag_backend_returns_empty_for_missing_or_empty_dir(tmp_path):
+    assert LocalRAGSearchBackend(tmp_path / "missing").search("月影城") == []
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert LocalRAGSearchBackend(empty).search("月影城") == []
+
+
+def test_local_rag_backend_ignores_single_chinese_character_noise(tmp_path):
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    (corpus / "chapter.md").write_text("主角在山中修行，尚未出现目标作品。", encoding="utf-8")
+
+    assert LocalRAGSearchBackend(corpus).search("苟在初圣") == []
+
+
+class CountingFallbackBackend:
+    def __init__(self):
+        self.calls = 0
+
+    def search(self, query: str, limit: int = 5):
+        self.calls += 1
+        return [SearchResult(title="fallback", url="mock://fallback", snippet=query)]
+
+
+def test_local_first_backend_skips_fallback_when_local_hits(tmp_path):
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    (corpus / "chapter.md").write_text("青铜门后是月影城。", encoding="utf-8")
+    fallback = CountingFallbackBackend()
+
+    results = LocalFirstSearchBackend(LocalRAGSearchBackend(corpus), fallback).search("月影城")
+
+    assert results[0].source == "local_corpus"
+    assert fallback.calls == 0
+
+
+def test_local_first_backend_uses_fallback_when_local_misses(tmp_path):
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    (corpus / "chapter.md").write_text("青铜门后没有目标词。", encoding="utf-8")
+    fallback = CountingFallbackBackend()
+
+    results = LocalFirstSearchBackend(LocalRAGSearchBackend(corpus), fallback).search("月影城")
+
+    assert results[0].title == "fallback"
+    assert fallback.calls == 1
 

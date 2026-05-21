@@ -12,6 +12,7 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
 - 阶段 2：compose 多 Agent 小说创作图。
 - 阶段 2 增强：Director Agent chat 主入口。
 - Research/检索增强：chat 可先搜索原始资料，生成通用 `retrieval_context`，并继续产出兼容旧流程的参考简报和来源列表。
+- 本地小说知识库优先 RAG：chat 可配置本地 `.txt/.md` 语料目录，research 优先检索本地语料；本地无命中时回退 mock 或真实联网搜索。
 - 大纲共创增强：outline collaboration graph，支持方向提案、生成、审稿、用户反馈、修订、版本比较、锁定约束、查看正文和保存。
 - mock 模式：不依赖外部模型即可端到端验证。
 - 真实模式：Codex CLI 或 DeepSeek API。
@@ -48,10 +49,12 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
   |
   v
 Research / Retrieval 层
-  |-- SearchResult: title / url / snippet / source
+  |-- SearchResult: title / url / snippet / source / metadata
   |-- SearchBackend.search(query, limit=5)  # 只负责原始搜索结果
   |-- MockSearchBackend
   |-- WebSearchBackend: SerpAPI / Tavily / Exa
+  |-- LocalRAGSearchBackend: 递归读取本地 .txt/.md，固定窗口切片并关键词打分
+  |-- LocalFirstSearchBackend: 本地命中即返回；本地无命中、目录不存在或为空时回退 fallback
   `-- retrieval_context_synthesizer.md: LLM 整理通用检索上下文，失败时规则 fallback
   |
   v
@@ -154,6 +157,13 @@ START
 - `state.research_uncertainties`
 - `projects/<project>/reference_brief.md`
 - `projects/<project>/research_sources.json`
+
+本地 RAG 配置：
+
+- 环境变量：`AI_NOVELIST_LOCAL_CORPUS_DIR=/path/to/corpus`。
+- CLI 参数：`ai-novelist chat --project demo --local-corpus-dir /path/to/corpus`。
+- 当前仅 `chat` research 入口接收 CLI 参数；未配置时保持原 mock/web 行为。
+- 本地结果 `source=local_corpus`，URL 形如 `local://corpus/<relative_path>#chunk=<id>`，metadata 保留 `file_path`、`relative_path`、`chapter_name`、`chunk_id`、`start_offset`、`end_offset` 和 `score`。
 
 运行体验：
 
@@ -306,6 +316,13 @@ research 示例：
 查一下原作设定再写大纲
 ```
 
+本地语料优先示例：
+
+```bash
+AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project demo-chat --mock
+.venv/bin/ai-novelist chat --project demo-chat --mock --local-corpus-dir /data/novels
+```
+
 兼容调试入口：
 
 ```bash
@@ -318,7 +335,8 @@ research 示例：
 - `tests/test_graph_minimal.py`：阶段 1 最小图。
 - `tests/test_graph_writer.py`：单 Agent、compose、chat、Director 路由、chat 主入口 workflow。
 - `tests/test_outline_collaboration.py`：大纲 approve、revise、lock、variant、旧 state 兼容、chat 路由到大纲修订。
-- `tests/test_research_workflow.py`：research 触发、mock 搜索、参考简报持久化、research 后进入 outline。
+- `tests/test_research_workflow.py`：research 触发、mock 搜索、参考简报持久化、research 后进入 outline、本地优先后端配置和回退。
+- `tests/test_search_backend.py`：WebSearchBackend、本地 `.txt/.md` 检索、切片 metadata、关键词排序、本地优先 fallback。
 - `tests/smoke_outline_collaboration.py`：大纲生成、修订、保存 smoke。
 - `tests/smoke_phase2_compose.py`：compose smoke。
 - `tests/smoke_phase2_chat.py`：chat smoke。
@@ -333,12 +351,13 @@ research 示例：
 .venv/bin/python tests/smoke_phase2_chat.py
 ```
 
-当前已验证：`55 passed`，并通过 `smoke_outline_collaboration.py`、`smoke_phase2_chat.py`。
+当前已验证：`65 passed`。本轮目标测试 `tests/test_search_backend.py tests/test_research_workflow.py` 为 `23 passed`。
 
 ## 10. 当前限制
 
 - 仍是本地 CLI，不是长期运行服务。
-- research 默认只有 mock 搜索；真实搜索需要配置 `AI_NOVELIST_SEARCH_PROVIDER` 和 API Key。
+- research 未配置本地语料时默认只有 mock 搜索；真实搜索需要配置 `AI_NOVELIST_SEARCH_PROVIDER` 和 API Key。
+- 本地 RAG 首版是轻量关键词/BM25 近似检索，没有向量检索、索引缓存、文件变更监听或任务级深度检索。
 - 当前不会基于大纲自动搜索，也不会为每个 worldbuild/write/review 任务自动搜索；只消费已有检索上下文。
 - chat/outline 的多轮共创由 CLI 循环驱动，不是后台会话服务。
 - 真实模式每个 Agent 独立调用一次模型，没有流式 token 展示。

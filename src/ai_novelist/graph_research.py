@@ -262,6 +262,7 @@ def search_results_from_state(state: NovelState) -> list[SearchResult]:
                 url=str(item.get("url", "")),
                 snippet=str(item.get("snippet", "")),
                 source=str(item.get("source", "search")),
+                metadata=item.get("metadata") if isinstance(item.get("metadata"), dict) else None,
             )
         )
     return results

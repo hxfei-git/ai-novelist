@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 
@@ -16,9 +18,13 @@ class SearchResult:
     url: str
     snippet: str
     source: str = "mock"
+    metadata: dict[str, Any] | None = None
 
-    def to_dict(self) -> dict[str, str]:
-        return asdict(self)
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        if self.metadata is None:
+            data.pop("metadata")
+        return data
 
 
 class SearchBackend(Protocol):
@@ -67,6 +73,84 @@ class MockSearchBackend:
                 ),
             ]
         return results[:limit]
+
+
+class LocalRAGSearchBackend:
+    """Lightweight keyword retrieval over local .txt/.md corpus files."""
+
+    SUPPORTED_SUFFIXES = {".txt", ".md"}
+
+    def __init__(self, corpus_dir: str | Path, chunk_size: int = 800, chunk_overlap: int = 120) -> None:
+        self.corpus_dir = Path(corpus_dir).expanduser()
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
+        if self.chunk_size < 1:
+            raise SearchBackendError("Local RAG chunk_size must be greater than 0")
+        if self.chunk_overlap < 0 or self.chunk_overlap >= self.chunk_size:
+            raise SearchBackendError("Local RAG chunk_overlap must be >= 0 and smaller than chunk_size")
+
+    def search(self, query: str, limit: int = 5) -> list[SearchResult]:
+        normalized = query.strip()
+        if not normalized or limit < 1 or not self.corpus_dir.is_dir():
+            return []
+
+        terms = query_terms(normalized)
+        scored: list[tuple[float, str, int, SearchResult]] = []
+        for file_path in sorted(self._corpus_files()):
+            text = read_text_file(file_path)
+            if not text.strip():
+                continue
+            relative_path = file_path.relative_to(self.corpus_dir).as_posix()
+            for chunk_id, start_offset, end_offset, chunk in chunk_text(text, self.chunk_size, self.chunk_overlap):
+                score = local_keyword_score(normalized, terms, chunk, relative_path)
+                if score <= 0:
+                    continue
+                metadata = {
+                    "file_path": str(file_path),
+                    "relative_path": relative_path,
+                    "chapter_name": file_path.stem,
+                    "chunk_id": chunk_id,
+                    "start_offset": start_offset,
+                    "end_offset": end_offset,
+                    "score": score,
+                }
+                scored.append(
+                    (
+                        score,
+                        relative_path,
+                        chunk_id,
+                        SearchResult(
+                            title=f"{file_path.stem} #{chunk_id}",
+                            url=local_corpus_url(relative_path, chunk_id),
+                            snippet=clean_snippet(chunk),
+                            source="local_corpus",
+                            metadata=metadata,
+                        ),
+                    )
+                )
+        scored.sort(key=lambda item: (-item[0], item[1], item[2]))
+        return [item[3] for item in scored[:limit]]
+
+    def _corpus_files(self) -> list[Path]:
+        return [
+            path
+            for path in self.corpus_dir.rglob("*")
+            if path.is_file() and path.suffix.lower() in self.SUPPORTED_SUFFIXES
+        ]
+
+
+class LocalFirstSearchBackend:
+    """Use local corpus results when available, otherwise delegate to fallback."""
+
+    def __init__(self, local_backend: SearchBackend, fallback_backend: SearchBackend) -> None:
+        self.local_backend = local_backend
+        self.fallback_backend = fallback_backend
+
+    def search(self, query: str, limit: int = 5) -> list[SearchResult]:
+        local_results = self.local_backend.search(query, limit)
+        if local_results:
+            return local_results
+        return self.fallback_backend.search(query, limit)
 
 
 class WebSearchBackend:
@@ -243,3 +327,66 @@ def clean_text(value: Any) -> str:
 
 def slugify_query(value: str) -> str:
     return "-".join(value.lower().split())[:80] or "query"
+
+
+def read_text_file(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return path.read_text(encoding="utf-8", errors="ignore")
+
+
+def chunk_text(text: str, chunk_size: int, chunk_overlap: int) -> list[tuple[int, int, int, str]]:
+    chunks: list[tuple[int, int, int, str]] = []
+    start = 0
+    chunk_id = 1
+    text_length = len(text)
+    while start < text_length:
+        end = min(start + chunk_size, text_length)
+        chunk = text[start:end]
+        if chunk.strip():
+            chunks.append((chunk_id, start, end, chunk))
+            chunk_id += 1
+        if end >= text_length:
+            break
+        start = max(end - chunk_overlap, start + 1)
+    return chunks
+
+
+def query_terms(query: str) -> list[str]:
+    lowered = query.lower()
+    terms: list[str] = []
+    if lowered:
+        terms.append(lowered)
+    for match in re.findall(r"[a-z0-9_]+|[\u4e00-\u9fff]+", lowered):
+        if not match.strip() or match in terms:
+            continue
+        if re.fullmatch(r"[\u4e00-\u9fff]+", match) and len(match) > 2:
+            terms.extend(match[idx : idx + 2] for idx in range(len(match) - 1))
+        terms.append(match)
+    return list(dict.fromkeys(term for term in terms if len(term) > 1 or len(lowered) == 1))
+
+
+def local_keyword_score(query: str, terms: list[str], text: str, relative_path: str) -> float:
+    haystack = f"{relative_path}\n{text}".lower()
+    score = 0.0
+    lowered_query = query.lower()
+    if lowered_query in haystack:
+        score += 5.0
+    for term in terms:
+        if not term:
+            continue
+        score += haystack.count(term)
+    return score
+
+
+def clean_snippet(text: str, max_length: int = 300) -> str:
+    snippet = re.sub(r"\s+", " ", text).strip()
+    if len(snippet) <= max_length:
+        return snippet
+    return snippet[: max_length - 1].rstrip() + "..."
+
+
+def local_corpus_url(relative_path: str, chunk_id: int) -> str:
+    return f"local://corpus/{urllib.parse.quote(relative_path)}#chunk={chunk_id}"
+

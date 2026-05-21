@@ -4,7 +4,14 @@ from ai_novelist.cli import make_search_backend, should_use_research_graph, shou
 from ai_novelist.graph_research import build_research_graph, detect_research_need_text
 from ai_novelist.graph_outline import build_outline_collaboration_graph
 from ai_novelist.config import Settings
-from ai_novelist.research import MockSearchBackend, SearchBackendError, WebSearchBackend
+from ai_novelist.research import (
+    LocalFirstSearchBackend,
+    LocalRAGSearchBackend,
+    MockSearchBackend,
+    SearchBackendError,
+    SearchResult,
+    WebSearchBackend,
+)
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
 from ai_novelist.adapters.base import AgentAdapterError
@@ -108,6 +115,70 @@ def test_make_search_backend_uses_configured_web_provider():
     assert isinstance(backend, WebSearchBackend)
     assert backend.provider == "tavily"
     assert backend.timeout_seconds == 9
+
+
+def test_make_search_backend_wraps_cli_local_corpus_dir(tmp_path):
+    args = Namespace(mock=True, search_provider=None, local_corpus_dir=str(tmp_path))
+    settings = Settings()
+
+    backend = make_search_backend(args, settings)
+
+    assert isinstance(backend, LocalFirstSearchBackend)
+
+
+def test_make_search_backend_wraps_env_local_corpus_dir(tmp_path):
+    args = Namespace(mock=False, search_provider="mock", local_corpus_dir=None)
+    settings = Settings(local_corpus_dir=str(tmp_path))
+
+    backend = make_search_backend(args, settings)
+
+    assert isinstance(backend, LocalFirstSearchBackend)
+
+
+def test_research_graph_prefers_local_results_without_fallback(tmp_path):
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    (corpus / "chapter.md").write_text("月影城主角依靠静默钟塔隐藏身份。", encoding="utf-8")
+    store = LocalStore(tmp_path / "projects")
+    state = store.create_project("Demo", "demo")
+    state.user_request = "/research 月影城"
+    fallback = CountingSearchBackend()
+    backend = LocalFirstSearchBackend(LocalRAGSearchBackend(corpus), fallback)
+    graph = build_research_graph(backend, store)
+
+    result = NovelState.from_dict(graph.invoke(state.to_dict()))
+
+    assert result.research_sources[0]["source"] == "local_corpus"
+    assert result.research_sources[0]["metadata"]["relative_path"] == "chapter.md"
+    assert fallback.calls == 0
+
+
+def test_research_graph_falls_back_when_local_misses(tmp_path):
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    (corpus / "chapter.md").write_text("这里没有目标关键词。", encoding="utf-8")
+    store = LocalStore(tmp_path / "projects")
+    state = store.create_project("Demo", "demo")
+    state.user_request = "/research 月影城"
+    fallback = CountingSearchBackend()
+    backend = LocalFirstSearchBackend(LocalRAGSearchBackend(corpus), fallback)
+    graph = build_research_graph(backend, store)
+
+    result = NovelState.from_dict(graph.invoke(state.to_dict()))
+
+    assert result.research_sources[0]["source"] == "mock_counting"
+    assert fallback.calls == 1
+
+
+class CountingSearchBackend:
+    def __init__(self):
+        self.calls = 0
+
+    def search(self, query: str, limit: int = 5):
+        self.calls += 1
+        return [
+            SearchResult(title="fallback", url="mock://fallback", snippet=query, source="mock_counting")
+        ]
 
 
 class RetrievalSummaryAdapter:
