@@ -1,5 +1,5 @@
 from ai_novelist.adapters.codex_cli import CodexCLIAdapter, CodexCLIError
-from ai_novelist.cli import print_chat_turn_result, should_use_outline_graph
+from ai_novelist.cli import print_chat_turn_result, select_chat_graph, should_use_outline_graph
 from ai_novelist.graph_outline import build_outline_collaboration_graph
 from ai_novelist.graph_writer import build_chat_graph, build_composer_graph, build_task_prompt, build_writer_graph, parse_director_output, parse_editor_review
 from ai_novelist.state import NovelState
@@ -246,6 +246,39 @@ def test_chat_graph_show_outline_returns_outline_body(tmp_path):
     assert result["director_action"] == "show_outline"
     assert "# 当前大纲" in result["director_message"]
     assert "项目：" not in result["director_message"]
+
+
+def test_chat_graph_show_reference_returns_research_context(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.reference_brief = "# 参考简报：苟在初圣\n\n## 可用事实\n- 初圣山有外门杂役院。"
+    state.retrieval_query = "苟在初圣"
+    state.research_sources = [{"title": "gou_zai_chu_sheng #1", "url": "local://corpus/gou_zai_chu_sheng.md#chunk=1", "source": "local_corpus"}]
+    state.user_request = "给我看一下当前获取的信息，或者大纲"
+    state.messages.append({"role": "user", "content": state.user_request})
+    graph = build_chat_graph(CodexCLIAdapter(mock=True), store)
+
+    result = graph.invoke(state.to_dict())
+
+    assert result["director_action"] == "show_reference"
+    assert "当前已获取的信息" in result["director_message"]
+    assert "苟在初圣" in result["director_message"]
+    assert "local://corpus/gou_zai_chu_sheng.md#chunk=1" in result["director_message"]
+    assert "当前还没有大纲草案" in result["director_message"]
+
+
+def test_outline_workflow_context_request_uses_chat_graph(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.active_workflow = "outline"
+    state.reference_brief = "# 参考简报"
+    research_graph = object()
+    outline_graph = object()
+    chat_graph = object()
+
+    selected = select_chat_graph(state, "给我看一下当前获取的信息，或者大纲", research_graph, outline_graph, chat_graph)
+
+    assert selected is chat_graph
 
 
 def test_chat_graph_show_status_still_returns_status_summary(tmp_path):

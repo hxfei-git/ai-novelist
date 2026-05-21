@@ -58,6 +58,9 @@ class LocalStore:
     def research_sources_path(self, project_id: str) -> Path:
         return self.project_dir(project_id) / "research_sources.json"
 
+    def project_context_path(self, project_id: str) -> Path:
+        return self.project_dir(project_id) / "project_context.md"
+
     def chapter_path(self, project_id: str, chapter: int) -> Path:
         return self.chapters_dir(project_id) / f"chapter_{chapter:03d}.md"
 
@@ -97,6 +100,18 @@ class LocalStore:
         with path.open("w", encoding="utf-8") as file:
             json.dump(state.research_sources, file, ensure_ascii=False, indent=2)
             file.write("\n")
+        return path
+
+    def load_project_context(self, project_id: str) -> str:
+        path = self.project_context_path(project_id)
+        if not path.exists():
+            return ""
+        return path.read_text(encoding="utf-8")
+
+    def save_project_context(self, project_id: str, content: str) -> Path:
+        path = self.project_context_path(project_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content.rstrip() + "\n", encoding="utf-8")
         return path
 
     def save_chapter(self, state: NovelState) -> Path:

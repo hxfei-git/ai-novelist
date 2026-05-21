@@ -356,6 +356,7 @@ DIRECTOR_ACTIONS = {
     "persist_outputs",
     "show_status",
     "show_outline",
+    "show_reference",
     "stop",
 }
 
@@ -394,6 +395,8 @@ class ChatSequentialGraph:
             current.update(show_status_node(current, self.store))
         elif route == "show_outline":
             current.update(show_outline_node(current, self.store))
+        elif route == "show_reference":
+            current.update(show_reference_node(current, self.store))
         return current
 
 
@@ -411,6 +414,7 @@ def build_chat_graph(adapter: AgentAdapter, store: LocalStore, progress: Progres
     graph.add_node("persist_outputs", lambda data: persist_available_outputs(data, store))
     graph.add_node("show_status", lambda data: show_status_node(data, store))
     graph.add_node("show_outline", lambda data: show_outline_node(data, store))
+    graph.add_node("show_reference", lambda data: show_reference_node(data, store))
     graph.set_entry_point("director")
     graph.add_conditional_edges(
         "director",
@@ -420,6 +424,7 @@ def build_chat_graph(adapter: AgentAdapter, store: LocalStore, progress: Progres
             "persist_outputs": "persist_outputs",
             "show_status": "show_status",
             "show_outline": "show_outline",
+            "show_reference": "show_reference",
             "end": END,
         },
     )
@@ -427,6 +432,7 @@ def build_chat_graph(adapter: AgentAdapter, store: LocalStore, progress: Progres
     graph.add_edge("persist_outputs", END)
     graph.add_edge("show_status", END)
     graph.add_edge("show_outline", END)
+    graph.add_edge("show_reference", END)
     return graph.compile()
 
 
@@ -484,6 +490,8 @@ def route_after_director(data: dict) -> str:
         return "show_status"
     if action == "show_outline":
         return "show_outline"
+    if action == "show_reference":
+        return "show_reference"
     return "end"
 
 
@@ -624,11 +632,64 @@ def show_outline_node(data: dict, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
     if state.outline.strip():
         state.director_message = "当前大纲：\n" + state.outline
+    elif state.reference_brief.strip():
+        state.director_message = (
+            "当前还没有大纲草案。已获取的参考信息如下：\n"
+            + build_reference_summary(state)
+            + "\n\n下一步可以说：给我几个方向，或基于这些资料生成大纲。"
+        )
     else:
-        state.director_message = "当前还没有大纲草案。你可以先说：生成大纲。"
+        state.director_message = "当前还没有大纲草案，也没有参考简报。你可以先说：调研某本书，或给我几个方向。"
     append_message(state, "assistant", state.director_message)
     store.save_state(state)
     return state.to_dict()
+
+
+def show_reference_node(data: dict, store: LocalStore) -> dict:
+    state = NovelState.from_dict(data)
+    if state.reference_brief.strip() or state.retrieval_context.strip() or state.research_sources:
+        parts = ["当前已获取的信息：", build_reference_summary(state)]
+        if state.outline.strip():
+            parts.append("\n当前大纲：\n" + state.outline)
+        else:
+            parts.append("\n当前还没有大纲草案。")
+        state.director_message = "\n".join(parts)
+    elif state.outline.strip():
+        state.director_message = "当前还没有参考简报。当前大纲：\n" + state.outline
+    else:
+        state.director_message = "当前还没有参考简报或大纲草案。可以先说：调研《作品名》，或给我几个方向。"
+    append_message(state, "assistant", state.director_message)
+    store.save_state(state)
+    return state.to_dict()
+
+
+def build_reference_summary(state: NovelState, max_chars: int = 2200) -> str:
+    lines: list[str] = []
+    if state.retrieval_query.strip():
+        lines.append(f"检索查询：{state.retrieval_query.strip()}")
+    if state.canon_facts:
+        lines.append("关键事实：")
+        lines.extend(f"- {item}" for item in state.canon_facts[:8])
+    if state.research_uncertainties:
+        lines.append("不确定点：")
+        lines.extend(f"- {item}" for item in state.research_uncertainties[:5])
+    if state.reference_brief.strip():
+        lines.append("参考简报：")
+        lines.append(state.reference_brief.strip())
+    elif state.retrieval_context.strip():
+        lines.append("检索上下文：")
+        lines.append(state.retrieval_context.strip())
+    if state.research_sources:
+        lines.append("来源：")
+        for item in state.research_sources[:8]:
+            title = item.get("title", "无标题")
+            url = item.get("url", "")
+            source = item.get("source", "search")
+            lines.append(f"- {title} ({source}): {url}")
+    summary = "\n".join(lines).strip()
+    if len(summary) > max_chars:
+        return summary[:max_chars].rstrip() + "\n..."
+    return summary or "暂无"
 
 
 def task_progress_message(task: AgentTask) -> tuple[str, str]:
@@ -684,8 +745,11 @@ def build_director_prompt(state: NovelState) -> str:
         f"章节细纲：{'已有' if state.chapter_plan else '暂无'}\n"
         f"章节正文：{'已有' if state.chapter_draft else '暂无'}\n"
         f"编辑意见：{'已有' if state.editor_notes else '暂无'}\n"
+        f"参考简报：{'已有' if state.reference_brief else '暂无'}\n"
+        f"检索查询：{state.retrieval_query or '暂无'}\n"
         f"编辑结论：{state.editor_decision}\n"
         f"质量分：{state.quality_score}\n\n"
+        f"## 已获取参考信息摘要\n{build_reference_summary(state, max_chars=1200) if state.reference_brief or state.retrieval_context or state.research_sources else '暂无'}\n\n"
         f"## 最近对话\n{history or '暂无'}\n\n"
         f"最新用户输入：{state.user_request}\n"
     )

@@ -471,3 +471,46 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 
 - 当前仍保留 `should_use_research_graph` 作为 Director 调用失败时的兜底。
 - 后续可继续减少 outline/chat 的前置规则分支，让所有顶层路由共享同一份 Director 决策结果，避免重复调用模型。
+
+
+## 14. Project Context / Director 记忆增强
+
+已完成：
+
+- 启动 `chat` 时展示当前项目状态，避免用户进入会话后不知道已有参考资料和产物。
+- Director prompt 注入参考信息摘要，让每轮意图判断都能看到已检索内容，而不只是“参考简报：已有”。
+- 增加 `show_reference` 动作，专门展示参考简报、检索查询、关键事实、不确定点和来源。
+- `select_chat_graph` 对“当前获取的信息/参考简报/检索信息”等请求优先走 chat graph，避免 outline graph 把请求误解为只看大纲。
+
+后续可做：
+
+- 把项目上下文摘要持久化为独立 `project_context.md`，由每次 research/outline/write/review 后增量更新。
+- 缓存顶层 Director 决策，避免 `select_chat_graph` 和 chat graph 内部重复调用模型。
+- 将参考信息展示改成更结构化的“事实 / 不确定点 / 来源 / 下一步建议”固定格式。
+
+
+## 15. DirectorService 主脑服务重构
+
+已完成：
+
+- 新增 `src/ai_novelist/director_service.py`，提供 `DirectorService.handle_turn(project_id, user_text, channel)`，返回 `immediate_message`、`started_task`、`final_message`、`artifact_paths`、`requires_followup`，为 CLI 和未来飞书入口共用。
+- `chat` 主循环改为只调用 `DirectorService`，不再先由 `select_chat_graph` 关键字分流；旧分流函数暂保留给兼容测试和兜底代码。
+- Director 决策优先解析 JSON，兼容旧 `ACTION/MESSAGE` 字段格式；结构化字段包含 `requires_confirmation`、`confidence`、`task_args` 和 `next_steps`。
+- 增加分级确认：状态/参考/大纲/退出直接执行；research、生成/修订/审查大纲、写章、审稿、保存等动作先缓存到 `pending_director_decision`，用户确认后复用同一决策执行。
+- `NovelState` 增加 `director_task_args` 与 `pending_director_decision`，用于跨轮保存结构化参数和待确认计划。
+- `LocalStore` 增加 `project_context_path/load_project_context/save_project_context`；服务层在任务执行后刷新 `project_context.md`，记录项目目标、已检索事实、不确定点、产物状态、待确认事项和建议下一步。
+- research 查询优先使用 Director 给出的 `research_query/work_title/author`，`research_intent.md` 和规则抽取退为缺参兜底。
+
+当前边界：
+
+- 飞书 webhook、鉴权、消息去重和后台队列未实现；本轮只完成异步友好服务返回对象。
+- 旧 `build_chat_graph` 与 outline/research graph 仍保留，服务层通过现有节点调度，后续可继续收敛重复 Director 逻辑。
+
+
+## 16. 确认选择模型
+
+已完成：
+
+- `DirectorTurnResult` 增加 `choices`，用于表达可交互选项；当前确认场景返回 `confirm/确认执行/1` 与 `cancel/取消/2`。
+- CLI `chat` 在收到 `choices` 时渲染编号菜单，用户可输入 `1` 确认、`2` 取消，同时继续兼容“确认/取消/yes/no”等文本。
+- 该结构可直接映射到未来飞书按钮或卡片 action，不需要重新解析自然语言确认。

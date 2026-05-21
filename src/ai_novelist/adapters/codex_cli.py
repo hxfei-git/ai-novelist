@@ -187,6 +187,8 @@ class CodexCLIAdapter(AgentAdapter):
             return response("persist_outline", "outline", "approve", "我会保存当前大纲。")
         if any(word in request for word in ("保存", "落盘", "写入文件")):
             return response("persist_outputs", "project", "save", "我会保存当前已经生成的产物。")
+        if any(word in request for word in ("当前获取的信息", "获取的信息", "搜集到的信息", "搜索的信息", "检索信息", "调研信息", "参考简报", "参考信息", "来源列表", "当前信息", "信息或大纲")):
+            return response("show_reference", "project", "status", "我会展示当前已获取的调研信息和大纲状态。")
         if any(word in request for word in ("查看大纲", "当前大纲", "看一下大纲", "展示大纲", "show outline")):
             return response("show_outline", "outline", "status", "我会展示当前大纲正文。")
         if any(word in request for word in ("查看状态", "项目状态", "状态", "进度", "status", "哪里", "在哪", "路径", "位置")):

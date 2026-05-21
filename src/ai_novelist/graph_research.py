@@ -95,8 +95,8 @@ def detect_research_need(data: dict, store: LocalStore, progress: ProgressFunc =
 
 def build_research_queries(data: dict, store: LocalStore, adapter: AgentAdapter | None = None) -> dict:
     state = NovelState.from_dict(data)
-    query = ""
-    if adapter is not None:
+    query = research_query_from_director_args(state)
+    if not query and adapter is not None:
         try:
             output = adapter.complete(build_research_intent_prompt(state), store.project_dir(state.project_id))
             decision = parse_research_intent_output(output)
@@ -111,6 +111,20 @@ def build_research_queries(data: dict, store: LocalStore, adapter: AgentAdapter 
     state.current_stage = "build_research_queries"
     store.save_state(state)
     return state.to_dict()
+
+
+def research_query_from_director_args(state: NovelState) -> str:
+    task_args = state.director_task_args if isinstance(state.director_task_args, dict) else {}
+    for key in ("research_query", "work_title", "author"):
+        value = str(task_args.get(key, "")).strip()
+        if value:
+            return value
+    if state.retrieval_query.strip():
+        return state.retrieval_query.strip()
+    for item in reversed(state.open_decisions):
+        if item.startswith("research_query:"):
+            return item.split(":", 1)[1].strip()
+    return ""
 
 
 def search_sources(data: dict, search_backend: SearchBackend, store: LocalStore, progress: ProgressFunc = noop_progress) -> dict:

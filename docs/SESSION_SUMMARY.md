@@ -295,3 +295,58 @@ sed -n '1,420p' src/ai_novelist/cli.py
 
 
 全量验证：`.venv/bin/python -m pytest`，结果 `68 passed`。
+
+
+## 13. 本轮更新：项目上下文可见性
+
+- chat 启动时会打印项目状态：参考简报、大纲、世界观、章节产物、最近检索和参考简报路径。
+- Director prompt 现在注入已获取参考信息摘要，包括检索查询、关键事实、不确定点、参考简报和来源。
+- 新增 `show_reference` 动作，用于响应“查看当前获取的信息 / 调研信息 / 参考简报 / 信息或大纲”等请求。
+- outline 共创状态下，这类项目上下文请求会回到 chat Director 处理，避免被 `show_outline` 抢走。
+- `show_outline` 在没有大纲但已有参考简报时，会展示参考信息并提示下一步生成方向或大纲。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_graph_writer.py tests/test_research_workflow.py
+```
+
+结果：`40 passed`。
+
+
+## 14. 本轮更新：DirectorService 智能主脑
+
+- 新增 `DirectorService.handle_turn(project_id, user_text, channel)`，CLI `chat` 已改为统一调用服务层。
+- Director prompt 改为优先要求 JSON 决策，保留旧字段格式兼容。
+- 增加 `pending_director_decision` 和 `director_task_args`，确认后复用上一轮结构化决策，不重新猜意图。
+- 新增 `project_context.md` 读写与任务后刷新，记录目标、事实、不确定点、产物状态和下一步建议。
+- research 优先使用 Director 提供的 `research_query/work_title/author`，旧 research intent prompt 仅作缺参兜底。
+- 新增 `tests/test_director_service.py` 覆盖 JSON 决策解析、确认执行 research、直接查看状态；补充 LocalStore 上下文读写测试。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_director_service.py tests/test_local_store.py tests/test_research_workflow.py tests/test_graph_writer.py
+```
+
+结果：聚焦测试 `45 passed`。
+
+全量验证：`.venv/bin/python -m pytest`，结果 `74 passed`。
+
+Smoke 验证：`.venv/bin/python tests/smoke_phase2_chat.py`，结果 `phase2 chat smoke ok`。
+
+
+## 15. 本轮更新：CLI/飞书共用确认选项
+
+- `DirectorTurnResult` 新增 `choices` 字段，确认类动作会返回“确认执行”和“取消”两个结构化选项。
+- CLI `chat` 会把选项显示成编号菜单；输入 `1` 执行 pending decision，输入 `2` 取消。
+- 文本确认仍兼容：`确认/yes` 执行，`取消/no` 放弃。
+- 新增测试覆盖编号确认和编号取消。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_director_service.py tests/test_graph_writer.py tests/test_research_workflow.py
+```
+
+结果：`44 passed`。

@@ -9,6 +9,7 @@ from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
 from ai_novelist.adapters.codex_cli import CodexCLIAdapter
 from ai_novelist.adapters.deepseek import DeepSeekAdapter
 from ai_novelist.config import Settings, load_settings
+from ai_novelist.director_service import DirectorService
 from ai_novelist.graph_minimal import build_minimal_graph
 from ai_novelist.graph_outline import build_outline_collaboration_graph
 from ai_novelist.graph_research import build_research_graph, detect_research_need_text
@@ -26,6 +27,7 @@ from ai_novelist.graph_writer import (
     artifact_status,
     build_chat_graph,
     build_director_prompt,
+    build_reference_summary,
     build_composer_graph,
     build_writer_graph,
     parse_director_decision,
@@ -303,11 +305,15 @@ def run_chat_command(
     effective_timeout = args.timeout or settings.codex_timeout_seconds
     adapter = make_agent_adapter(args, settings, effective_timeout)
     print_real_mode_notice(args.mock, adapter, effective_timeout)
-    chat_graph = build_chat_graph(adapter, store, progress=print_progress)
-    outline_graph = build_outline_collaboration_graph(adapter, store)
-    research_graph = build_research_graph(make_search_backend(args, settings), store, adapter=adapter, progress=print_progress)
+    service = DirectorService(
+        store=store,
+        adapter=adapter,
+        search_backend=make_search_backend(args, settings),
+        progress=print_progress,
+    )
 
     print(f"进入 ai-novelist chat：项目 {state.project_id}。输入 exit/quit/退出 结束。")
+    print_project_startup_context(state, store)
     while True:
         try:
             user_input = input("你> ").strip()
@@ -316,27 +322,31 @@ def run_chat_command(
             break
         if not user_input:
             continue
-        current_state = store.load_state(args.project)
-        if user_input.lower() in {"exit", "quit"} or user_input in {"退出", "结束"}:
-            print("Director> 已结束本次创作对话。")
-            break
 
-        state = current_state
-        state.user_request = user_input
-        append_message(state, "user", user_input)
-        if not state.idea and looks_like_story_idea(user_input):
-            state.idea = user_input
-        store.save_state(state)
-
-        graph = select_chat_graph(state, user_input, research_graph, outline_graph, chat_graph, adapter, store)
-        result = NovelState.from_dict(graph.invoke(state.to_dict()))
-        print_chat_turn_result(result, store)
-        if result.error:
-            print(f"错误：{result.error}", file=sys.stderr)
+        turn = service.handle_turn(args.project, user_input, channel="cli")
+        if turn.immediate_message:
+            print(f"Director> {turn.immediate_message}")
+            print_turn_choices(turn.choices)
+        elif turn.state is not None:
+            print_chat_turn_result(turn.state, store)
+        elif turn.final_message:
+            print(f"Director> {turn.final_message}")
+        if turn.state and turn.state.error:
+            print(f"错误：{turn.state.error}", file=sys.stderr)
             return 1
-        if result.director_action == "stop":
+        if turn.state and turn.state.director_action == "stop":
             break
     return 0
+
+
+def print_turn_choices(choices) -> None:
+    if not choices:
+        return
+    print("请选择：")
+    for index, choice in enumerate(choices, start=1):
+        value = getattr(choice, "value", str(index))
+        label = getattr(choice, "label", str(choice))
+        print(f"  {value}. {label}")
 
 
 def select_chat_graph(
@@ -352,6 +362,8 @@ def select_chat_graph(
         return research_graph
     if should_use_research_graph(state, user_input):
         return research_graph
+    if is_project_context_request(user_input):
+        return chat_graph
     if should_use_outline_graph(state, user_input):
         return outline_graph
     return chat_graph
@@ -382,12 +394,52 @@ def is_project_status_request(text: str) -> bool:
     return lowered in {"status", "show status"} or any(marker in text for marker in ("查看状态", "项目状态", "显示状态"))
 
 
+def is_project_context_request(text: str) -> bool:
+    lowered = text.strip().lower()
+    if lowered in {"reference", "references", "research", "show reference", "show references"}:
+        return True
+    markers = (
+        "当前获取的信息",
+        "获取的信息",
+        "搜集到的信息",
+        "搜索的信息",
+        "检索信息",
+        "调研信息",
+        "参考简报",
+        "参考信息",
+        "来源列表",
+        "当前信息",
+    )
+    return any(marker in text for marker in markers)
+
+
+def print_project_startup_context(state: NovelState, store: LocalStore) -> None:
+    lines = [
+        f"Director> 当前项目状态：{state.project_id}",
+        f"- 参考简报：{'已有' if state.reference_brief.strip() else '暂无'}",
+        f"- 大纲：{'已有' if state.outline.strip() else '暂无'}",
+        f"- 世界观：{'已有' if state.worldbuilding.strip() else '暂无'}",
+        f"- 章节细纲：{'已有' if state.chapter_plan.strip() else '暂无'}",
+        f"- 章节正文：{'已有' if state.chapter_draft.strip() else '暂无'}",
+    ]
+    if state.retrieval_query.strip():
+        lines.append(f"- 最近检索：{state.retrieval_query.strip()}")
+    if state.reference_brief.strip():
+        lines.append(f"- 参考简报路径：{store.reference_brief_path(state.project_id)}")
+        lines.append("你可以说：查看当前获取的信息，或基于这些资料生成大纲。")
+    elif state.outline.strip():
+        lines.append("你可以说：查看大纲、修改大纲、写第 1 章。")
+    else:
+        lines.append("你可以说：调研某本书、给我几个方向、或生成大纲。")
+    print("\n".join(lines))
+
+
 def print_progress(stage: str, message: str) -> None:
     print(f"[{stage}] {message}", flush=True)
 
 
 def print_chat_turn_result(state: NovelState, store: LocalStore) -> None:
-    if state.director_action == "show_outline":
+    if state.director_action in {"show_outline", "show_reference"}:
         print(f"Director> {state.director_message}")
         return
 

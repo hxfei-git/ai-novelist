@@ -49,6 +49,8 @@ class NovelState:
     user_request: str = ""
     director_action: str = ""
     director_message: str = ""
+    director_task_args: dict[str, Any] = field(default_factory=dict)
+    pending_director_decision: dict[str, Any] = field(default_factory=dict)
     pending_question: str = ""
     active_task: str = ""
     review_status: ReviewStatus = "draft"
@@ -97,6 +99,8 @@ class NovelState:
             user_request=str(data.get("user_request", "")),
             director_action=str(data.get("director_action", "")),
             director_message=str(data.get("director_message", "")),
+            director_task_args=normalize_dict(data.get("director_task_args", {})),
+            pending_director_decision=normalize_dict(data.get("pending_director_decision", {})),
             pending_question=str(data.get("pending_question", "")),
             active_task=str(data.get("active_task", "")),
             review_status=data.get("review_status", "draft"),
@@ -140,3 +144,9 @@ def normalize_dict_list(value: Any) -> list[dict]:
     if not isinstance(value, list):
         return []
     return [dict(item) for item in value if isinstance(item, dict)]
+
+
+def normalize_dict(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    return dict(value)
