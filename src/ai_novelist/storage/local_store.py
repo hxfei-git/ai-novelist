@@ -1,0 +1,111 @@
+"""Local file storage for novel projects."""
+
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+
+from ai_novelist.state import NovelState
+
+
+class LocalStoreError(RuntimeError):
+    """Raised when local project data is invalid."""
+
+
+class LocalStore:
+    def __init__(self, root: Path) -> None:
+        self.root = root
+
+    def create_project(self, title: str, project_id: str | None = None) -> NovelState:
+        project_id = project_id or slugify(title)
+        if not project_id:
+            raise LocalStoreError("Project id cannot be empty")
+
+        project_dir = self.project_dir(project_id)
+        project_dir.mkdir(parents=True, exist_ok=True)
+        self.chapters_dir(project_id).mkdir(exist_ok=True)
+
+        state_path = self.state_path(project_id)
+        if state_path.exists():
+            return self.load_state(project_id)
+
+        state = NovelState(project_id=project_id, title=title)
+        self.save_state(state)
+        return state
+
+    def project_dir(self, project_id: str) -> Path:
+        return self.root / project_id
+
+    def chapters_dir(self, project_id: str) -> Path:
+        return self.project_dir(project_id) / "chapters"
+
+    def state_path(self, project_id: str) -> Path:
+        return self.project_dir(project_id) / "state.json"
+
+    def outline_path(self, project_id: str) -> Path:
+        return self.project_dir(project_id) / "outline.md"
+
+    def worldbuilding_path(self, project_id: str) -> Path:
+        return self.project_dir(project_id) / "worldbuilding.md"
+
+    def chapter_plan_path(self, project_id: str) -> Path:
+        return self.project_dir(project_id) / "chapter_plan.md"
+
+    def chapter_path(self, project_id: str, chapter: int) -> Path:
+        return self.chapters_dir(project_id) / f"chapter_{chapter:03d}.md"
+
+    def editor_notes_path(self, project_id: str, chapter: int) -> Path:
+        return self.chapters_dir(project_id) / f"chapter_{chapter:03d}_review.md"
+
+    def load_state(self, project_id: str) -> NovelState:
+        path = self.state_path(project_id)
+        if not path.exists():
+            raise LocalStoreError(f"Project does not exist: {project_id}")
+        with path.open("r", encoding="utf-8") as file:
+            return NovelState.from_dict(json.load(file))
+
+    def save_state(self, state: NovelState) -> None:
+        project_dir = self.project_dir(state.project_id)
+        project_dir.mkdir(parents=True, exist_ok=True)
+        self.chapters_dir(state.project_id).mkdir(exist_ok=True)
+        with self.state_path(state.project_id).open("w", encoding="utf-8") as file:
+            json.dump(state.to_dict(), file, ensure_ascii=False, indent=2)
+            file.write("\n")
+
+    def save_outline(self, state: NovelState) -> Path:
+        return self._write_required(self.outline_path(state.project_id), state.outline, "outline")
+
+    def save_worldbuilding(self, state: NovelState) -> Path:
+        return self._write_required(self.worldbuilding_path(state.project_id), state.worldbuilding, "worldbuilding")
+
+    def save_chapter_plan(self, state: NovelState) -> Path:
+        return self._write_required(self.chapter_plan_path(state.project_id), state.chapter_plan, "chapter plan")
+
+    def save_chapter(self, state: NovelState) -> Path:
+        return self._write_required(
+            self.chapter_path(state.project_id, state.current_chapter),
+            state.chapter_draft,
+            "chapter draft",
+        )
+
+    def save_editor_notes(self, state: NovelState) -> Path:
+        return self._write_required(
+            self.editor_notes_path(state.project_id, state.current_chapter),
+            state.editor_notes,
+            "editor notes",
+        )
+
+    def _write_required(self, path: Path, content: str, label: str) -> Path:
+        if not content.strip():
+            raise LocalStoreError(f"Cannot save empty {label}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as file:
+            file.write(content.rstrip())
+            file.write("\n")
+        return path
+
+
+def slugify(value: str) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9\u4e00-\u9fff_-]+", "-", value.strip()).strip("-")
+    return slug[:64]
