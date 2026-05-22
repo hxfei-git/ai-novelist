@@ -1141,3 +1141,23 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 215 passed
 ```
+
+## 54. 本轮更新：Direction Proposer Prompt 整改
+
+- 完整读取并执行 `10_direction_proposer.md`。
+- `direction_proposer.md` 现在明确三个方向只是候选路线，未确认前不是小说圣经、稳定 canon 或锁定设定。
+- Prompt 要求不违反 `locked_constraints`，且未选方案不会进入稳定设定。
+- 默认禁止具体世界规则、组织流程、亲密机制、章节剧情、审批、备案、绩效、申请表和 KPI。
+- 输出预算固定为 3 个方向、每方向 6 个字段、每字段不超过 60 中文字符，建议选择不超过 120 中文字符。
+- 新增回归测试覆盖候选方向语义和过细机制禁区。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 2 passed
+.venv/bin/python -m pytest tests/test_graph_writer.py tests/test_outline_collaboration.py
+# 69 passed
+.venv/bin/python -m pytest
+# 216 passed
+```

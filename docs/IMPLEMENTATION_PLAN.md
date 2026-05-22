@@ -1403,3 +1403,20 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - 审稿锁定阶段只判断是否可锁定，不重写大纲、不补写新设定、不生成章节卡或正文。
 - 输出结论必须可被下游解析为 pass、revise 或 stop。
+
+## 50. Direction Proposer Prompt 整改
+
+目标：执行 `10_direction_proposer.md`，让创作方向提案保持候选语义，不把未选方向写成稳定 canon，也不在候选里发明过细机制。
+
+已完成：
+
+- `direction_proposer.md` 明确三个方向仅供选择，未被用户确认前不是小说圣经、稳定 canon 或锁定设定。
+- Prompt 要求不得违反 `locked_constraints`，候选与锁定约束冲突时必须改写候选。
+- 每个方向只写宏观路线差异，禁止默认生成具体世界规则、组织流程、亲密机制或章节剧情。
+- 输出固定为 3 个方向，每个方向 6 个字段，每字段不超过 60 中文字符；建议选择不超过 120 中文字符。
+- 新增 prompt loader 回归测试，覆盖候选语义、稳定 canon 禁止、预算和审批/备案/绩效/申请表等过细机制禁区。
+
+当前边界：
+
+- Direction proposer 只给路线候选；未选方向不会进入稳定设定。
+- 用户原文明确要求的具体机制只能作为候选风险或风格边界，不得写成已采纳设定。
