@@ -167,3 +167,20 @@ def test_chapter_card_synthesizer_prompt_marks_unconfirmed_context_pending():
     assert "确认未新增全局设定" in prompt
     for forbidden in ("新增全局设定", "吸收未确认参考资料", "写正式正文", "扩写无关角色关系", "对白", "细场景动作"):
         assert forbidden in prompt
+
+
+def test_scene_breakdown_prompt_only_splits_chapter_card():
+    prompt = load_prompt("scene_breakdown_agent")
+
+    assert "只基于 Chapter Card" in prompt
+    assert "只能拆分 Chapter Card" in prompt
+    assert "不能改变章节目标" in prompt
+    assert "不写正文、对白" in prompt
+    assert "只输出 JSON" in prompt
+    assert "scenes" in prompt
+    assert "必须是 2-5 个" in prompt
+    assert "每个场景字段内容不超过 120 中文字符" in prompt
+    for field in ("purpose", "info_delta", "turn", "entry_state", "exit_state"):
+        assert field in prompt
+    for forbidden in ("新增全局世界观", "新世界规则", "长期人物关系", "章节目标之外的副线"):
+        assert forbidden in prompt

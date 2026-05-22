@@ -1584,3 +1584,22 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Chapter card 是当前章执行卡，不是小说圣经更新。
 - 未确认资料留在待确认，不转为稳定设定。
+
+## 60. Scene Breakdown Agent Prompt 整改
+
+目标：执行 `20_scene_breakdown_agent.md`，让场景拆分只把 Chapter Card 拆成可写场景，不改变章节目标和 canon。
+
+已完成：
+
+- `scene_breakdown_agent.md` 明确只能拆分 Chapter Card，不能改变章节目标、关键冲突、结尾钩子或 canon。
+- 禁止新增全局世界观、新世界规则、长期人物关系或章节目标之外的副线。
+- 禁止正文、对白、心理独白段落和细场景动作。
+- 输出改为 JSON，`scenes` 必须 2-5 个。
+- 每个场景包含 `purpose/info_delta/turn/entry_state/exit_state`，字段内容不超过 120 中文字符。
+- Chapter Card 信息不足时写入 `open_questions`，不补造设定。
+- 新增 prompt loader 回归测试覆盖 JSON schema、场景数量和 no-new-canon 边界。
+
+当前边界：
+
+- Scene breakdown 只做结构拆分，不写正文或对白。
+- 场景不得引入章节卡之外的新设定或长期关系。

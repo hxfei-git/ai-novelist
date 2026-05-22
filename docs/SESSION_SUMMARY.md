@@ -1344,3 +1344,23 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 225 passed
 ```
+
+## 64. 本轮更新：Scene Breakdown Agent Prompt 整改
+
+- 完整读取并执行 `20_scene_breakdown_agent.md`。
+- `scene_breakdown_agent.md` 现在明确只能拆分 Chapter Card，不能改变章节目标、关键冲突、结尾钩子或 canon。
+- 禁止新增全局世界观、新世界规则、长期人物关系或章节目标之外的副线。
+- 输出改为 JSON，`scenes` 必须 2-5 个，每个场景包含 `purpose/info_delta/turn/entry_state/exit_state`。
+- 禁止正文、对白和细场景动作；信息不足进入 `open_questions`。
+- 新增回归测试覆盖场景数量、JSON 字段和 no-new-canon 边界。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 12 passed
+.venv/bin/python -m pytest tests/test_graph_scene.py tests/test_graph_chapter_plan.py
+# 7 passed
+.venv/bin/python -m pytest
+# 226 passed
+```
