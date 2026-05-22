@@ -218,3 +218,21 @@ def test_scene_synthesizer_prompt_requires_inherited_fields_and_scene_local_deta
         assert field in prompt
     for forbidden in ("新增全局地点", "组织", "规则", "未规划人物", "无依据感情机制", "正文", "对白"):
         assert forbidden in prompt
+
+
+def test_chapter_writer_prompt_strictly_follows_cards_and_outputs_only_body():
+    prompt = load_prompt("chapter_writer")
+
+    assert "严格基于章节卡和场景卡" in prompt
+    assert "必须按场景卡顺序推进正文" in prompt
+    assert "不得新增 canon" in prompt
+    assert "不得改变场景顺序" in prompt
+    assert "不得提前泄露后续真相" in prompt
+    assert "场景级感官细节" in prompt
+    assert "动作细节" in prompt
+    assert "不写入小说圣经" in prompt
+    assert "只输出章节内容" in prompt
+    assert "不输出分析、说明、摘要" in prompt
+    assert "2500-4500 中文字" in prompt
+    for forbidden in ("全局设定", "世界观规则", "未规划角色/组织", "人物关系机制", "说明书式设定解释"):
+        assert forbidden in prompt

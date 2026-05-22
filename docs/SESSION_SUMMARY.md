@@ -1405,3 +1405,23 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 228 passed
 ```
+
+## 67. 本轮更新：Chapter Writer Prompt 整改
+
+- 完整读取并执行 `23_chapter_writer.md`。
+- `chapter_writer.md` 现在要求严格按章节卡和场景卡顺序写正文。
+- 禁止新增 canon、全局设定、世界观规则、未规划角色/组织、人物关系机制、改变场景顺序或提前泄露后续真相。
+- 允许新增仅限场景级感官细节、动作细节、环境压力和过渡句，且不写入小说圣经。
+- 输出只包含 Markdown 正文，不输出分析、说明、摘要、计划或自检。
+- 新增回归测试覆盖 scene-card guard、no-new-canon 和正文-only 边界。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 15 passed
+.venv/bin/python -m pytest tests/test_graph_drafting.py tests/test_graph_writer.py
+# 27 passed
+.venv/bin/python -m pytest
+# 229 passed
+```

@@ -1640,3 +1640,22 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Scene synthesizer 只把当前章计划整理成场景卡。
 - 小细节只能是场景局部，不升级为小说圣经设定。
+
+## 63. Chapter Writer Prompt 整改
+
+目标：执行 `23_chapter_writer.md`，让正文写手严格按章节卡和场景卡写作，新增细节只限场景表现，不污染 canon。
+
+已完成：
+
+- `chapter_writer.md` 明确必须严格基于章节卡和场景卡生成章节草稿。
+- 必须按场景卡顺序推进正文，保留关键冲突、人物变化、结尾钩子和连续性约束。
+- 禁止新增 canon、全局设定、世界观规则、未规划角色/组织、人物关系机制、未规划反转或提前泄露后续真相。
+- 允许新增内容仅限场景级感官细节、动作细节、环境压力和过渡句，且不写入小说圣经。
+- 输出只包含 Markdown 正文，不输出分析、说明、摘要、变更记录、写作计划或自检。
+- 无调用方字数配置时建议 2500-4500 中文字。
+- 新增 prompt loader 回归测试覆盖 scene-card guard、no-new-canon 和正文-only 输出边界。
+
+当前边界：
+
+- Chapter writer 负责实现卡片，不负责重新规划故事。
+- 场景表现细节可以写，事实和 canon 不可改。
