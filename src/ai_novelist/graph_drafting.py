@@ -7,6 +7,7 @@ from typing import Protocol
 from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
 from ai_novelist.artifacts import ArtifactRecord, get_latest_artifact, load_artifact_text, load_artifacts, register_artifact
 from ai_novelist.context_builder import build_context
+from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress
 from ai_novelist.prompts import load_prompt
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
@@ -18,39 +19,49 @@ class CompiledGraph(Protocol):
 
 
 class DraftingSequentialGraph:
-    def __init__(self, adapter: AgentAdapter, store: LocalStore) -> None:
+    def __init__(self, adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc = noop_progress) -> None:
         self.adapter = adapter
         self.store = store
+        self.progress = progress
 
     def invoke(self, state: dict) -> dict:
-        current = load_drafting_context_node(state, self.adapter, self.store)
+        emit_progress(self.progress, "Drafting 1/8", "正在准备章节卡、场景卡和写作上下文...")
+        current = load_drafting_context_node(state, self.adapter, self.store, self.progress)
         if NovelState.from_dict(current).review_status == "error":
             return current
+        emit_progress(self.progress, "Drafting 2/8", "正在按场景生成正文草稿...")
         current = draft_scene_batch_node(current, self.adapter, self.store)
+        emit_progress(self.progress, "Drafting 3/8", "正在合并场景草稿...")
         current = merge_scenes_node(current, self.store)
+        emit_progress(self.progress, "Drafting 4/8", "正在增强对白...")
         current = dialogue_enhance_node(current, self.adapter, self.store)
+        emit_progress(self.progress, "Drafting 5/8", "正在增强氛围和感官描写...")
         current = atmosphere_enhance_node(current, self.adapter, self.store)
+        emit_progress(self.progress, "Drafting 6/8", "正在强化章节钩子...")
         current = hook_enhance_node(current, self.adapter, self.store)
+        emit_progress(self.progress, "Drafting 7/8", "正在统一风格...")
         current = style_normalize_node(current, self.adapter, self.store)
+        emit_progress(self.progress, "Drafting 8/8", "正在保存章节草稿...")
         current = save_draft_node(current, self.store)
         return current
 
 
-def build_drafting_graph(adapter: AgentAdapter, store: LocalStore) -> CompiledGraph:
+def build_drafting_graph(adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc | None = None) -> CompiledGraph:
+    progress_func = progress or noop_progress
     try:
         from langgraph.graph import END, StateGraph
     except ModuleNotFoundError:
-        return DraftingSequentialGraph(adapter, store)
+        return DraftingSequentialGraph(adapter, store, progress_func)
 
     graph = StateGraph(dict)
-    graph.add_node("load_drafting_context", lambda data: load_drafting_context_node(data, adapter, store))
-    graph.add_node("draft_scene_batch", lambda data: draft_scene_batch_node(data, adapter, store))
-    graph.add_node("merge_scenes", lambda data: merge_scenes_node(data, store))
-    graph.add_node("dialogue_enhance", lambda data: dialogue_enhance_node(data, adapter, store))
-    graph.add_node("atmosphere_enhance", lambda data: atmosphere_enhance_node(data, adapter, store))
-    graph.add_node("hook_enhance", lambda data: hook_enhance_node(data, adapter, store))
-    graph.add_node("style_normalize", lambda data: style_normalize_node(data, adapter, store))
-    graph.add_node("save_draft", lambda data: save_draft_node(data, store))
+    graph.add_node("load_drafting_context", lambda data: progress_node(progress_func, "Drafting 1/8", "正在准备章节卡、场景卡和写作上下文...", lambda: load_drafting_context_node(data, adapter, store, progress_func)))
+    graph.add_node("draft_scene_batch", lambda data: progress_node(progress_func, "Drafting 2/8", "正在按场景生成正文草稿...", lambda: draft_scene_batch_node(data, adapter, store)))
+    graph.add_node("merge_scenes", lambda data: progress_node(progress_func, "Drafting 3/8", "正在合并场景草稿...", lambda: merge_scenes_node(data, store)))
+    graph.add_node("dialogue_enhance", lambda data: progress_node(progress_func, "Drafting 4/8", "正在增强对白...", lambda: dialogue_enhance_node(data, adapter, store)))
+    graph.add_node("atmosphere_enhance", lambda data: progress_node(progress_func, "Drafting 5/8", "正在增强氛围和感官描写...", lambda: atmosphere_enhance_node(data, adapter, store)))
+    graph.add_node("hook_enhance", lambda data: progress_node(progress_func, "Drafting 6/8", "正在强化章节钩子...", lambda: hook_enhance_node(data, adapter, store)))
+    graph.add_node("style_normalize", lambda data: progress_node(progress_func, "Drafting 7/8", "正在统一风格...", lambda: style_normalize_node(data, adapter, store)))
+    graph.add_node("save_draft", lambda data: progress_node(progress_func, "Drafting 8/8", "正在保存章节草稿...", lambda: save_draft_node(data, store)))
     graph.set_entry_point("load_drafting_context")
     graph.add_conditional_edges("load_drafting_context", route_after_load, {"continue": "draft_scene_batch", "end": END})
     graph.add_edge("draft_scene_batch", "merge_scenes")
@@ -63,11 +74,16 @@ def build_drafting_graph(adapter: AgentAdapter, store: LocalStore) -> CompiledGr
     return graph.compile()
 
 
+def progress_node(progress: ProgressFunc, stage: str, message: str, fn) -> dict:
+    emit_progress(progress, stage, message)
+    return fn()
+
+
 def route_after_load(data: dict) -> str:
     return "end" if data.get("review_status") == "error" else "continue"
 
 
-def load_drafting_context_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
+def load_drafting_context_node(data: dict, adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc = noop_progress) -> dict:
     state = NovelState.from_dict(data)
     chapter = int(state.director_task_args.get("chapter") or state.current_chapter or state.active_chapter or 1)
     state.active_chapter = max(1, chapter)
@@ -77,10 +93,10 @@ def load_drafting_context_node(data: dict, adapter: AgentAdapter, store: LocalSt
     state.active_artifact = "chapter_draft"
     store.save_state(state)
 
-    state = ensure_chapter_card(state, adapter, store)
+    state = ensure_chapter_card(state, adapter, store, progress)
     if state.review_status == "error":
         return state.to_dict()
-    state = ensure_scene_cards(state, adapter, store)
+    state = ensure_scene_cards(state, adapter, store, progress)
     if state.review_status == "error":
         return state.to_dict()
 
@@ -95,21 +111,23 @@ def load_drafting_context_node(data: dict, adapter: AgentAdapter, store: LocalSt
     return state.to_dict()
 
 
-def ensure_chapter_card(state: NovelState, adapter: AgentAdapter, store: LocalStore) -> NovelState:
+def ensure_chapter_card(state: NovelState, adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc = noop_progress) -> NovelState:
     if load_current_chapter_card(state, store).strip():
         return state
     from ai_novelist.graph_chapter_plan import build_chapter_plan_graph
 
-    result = NovelState.from_dict(build_chapter_plan_graph(adapter, store).invoke(state.to_dict()))
+    emit_progress(progress, "Drafting", "缺少章节卡，正在自动补齐...")
+    result = NovelState.from_dict(build_chapter_plan_graph(adapter, store, progress=progress).invoke(state.to_dict()))
     return result
 
 
-def ensure_scene_cards(state: NovelState, adapter: AgentAdapter, store: LocalStore) -> NovelState:
+def ensure_scene_cards(state: NovelState, adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc = noop_progress) -> NovelState:
     if load_current_scene_cards(state, store).strip():
         return state
     from ai_novelist.graph_scene import build_scene_graph
 
-    result = NovelState.from_dict(build_scene_graph(adapter, store).invoke(state.to_dict()))
+    emit_progress(progress, "Drafting", "缺少场景卡，正在自动补齐...")
+    result = NovelState.from_dict(build_scene_graph(adapter, store, progress=progress).invoke(state.to_dict()))
     return result
 
 

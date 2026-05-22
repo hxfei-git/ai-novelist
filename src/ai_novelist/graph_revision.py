@@ -11,6 +11,7 @@ from ai_novelist.artifacts import ArtifactRecord, load_artifacts, register_artif
 from ai_novelist.context_builder import build_context
 from ai_novelist.graph_review import normalize_review_report
 from ai_novelist.graph_writer import parse_editor_review
+from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress
 from ai_novelist.prompts import load_prompt
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
@@ -22,38 +23,47 @@ class CompiledGraph(Protocol):
 
 
 class RevisionSequentialGraph:
-    def __init__(self, adapter: AgentAdapter, store: LocalStore) -> None:
+    def __init__(self, adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc = noop_progress) -> None:
         self.adapter = adapter
         self.store = store
+        self.progress = progress
 
     def invoke(self, state: dict) -> dict:
+        emit_progress(self.progress, "Revision 1/7", "正在读取草稿和审稿任务...")
         current = load_revision_context_node(state, self.store)
         loaded = NovelState.from_dict(current)
         if loaded.review_status in {"error", "stopped"}:
             return current
+        emit_progress(self.progress, "Revision 2/7", "正在生成修订计划...")
         current = build_revision_plan_node(current, self.adapter, self.store)
+        emit_progress(self.progress, "Revision 3/7", "正在定向改写问题段落...")
         current = revise_targeted_sections_node(current, self.adapter, self.store)
+        emit_progress(self.progress, "Revision 4/7", "正在合并修订稿...")
         current = merge_revision_node(current, self.store)
+        emit_progress(self.progress, "Revision 5/7", "正在做修订自检...")
         current = revision_self_check_node(current, self.adapter, self.store)
+        emit_progress(self.progress, "Revision 6/7", "正在保存修订稿...")
         current = save_revised_draft_node(current, self.store)
+        emit_progress(self.progress, "Revision 7/7", "正在更新下一步状态...")
         current = maybe_review_again_node(current, self.store)
         return current
 
 
-def build_revision_graph(adapter: AgentAdapter, store: LocalStore) -> CompiledGraph:
+def build_revision_graph(adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc | None = None) -> CompiledGraph:
+    progress_func = progress or noop_progress
     try:
         from langgraph.graph import END, StateGraph
     except ModuleNotFoundError:
-        return RevisionSequentialGraph(adapter, store)
+        return RevisionSequentialGraph(adapter, store, progress_func)
 
     graph = StateGraph(dict)
-    graph.add_node("load_revision_context", lambda data: load_revision_context_node(data, store))
-    graph.add_node("build_revision_plan", lambda data: build_revision_plan_node(data, adapter, store))
-    graph.add_node("revise_targeted_sections", lambda data: revise_targeted_sections_node(data, adapter, store))
-    graph.add_node("merge_revision", lambda data: merge_revision_node(data, store))
-    graph.add_node("revision_self_check", lambda data: revision_self_check_node(data, adapter, store))
-    graph.add_node("save_revised_draft", lambda data: save_revised_draft_node(data, store))
-    graph.add_node("maybe_review_again", lambda data: maybe_review_again_node(data, store))
+    graph.add_node("load_revision_context", lambda data: progress_node(progress_func, "Revision 1/7", "正在读取草稿和审稿任务...", lambda: load_revision_context_node(data, store)))
+    graph.add_node("build_revision_plan", lambda data: progress_node(progress_func, "Revision 2/7", "正在生成修订计划...", lambda: build_revision_plan_node(data, adapter, store)))
+    graph.add_node("revise_targeted_sections", lambda data: progress_node(progress_func, "Revision 3/7", "正在定向改写问题段落...", lambda: revise_targeted_sections_node(data, adapter, store)))
+    graph.add_node("merge_revision", lambda data: progress_node(progress_func, "Revision 4/7", "正在合并修订稿...", lambda: merge_revision_node(data, store)))
+    graph.add_node("revision_self_check", lambda data: progress_node(progress_func, "Revision 5/7", "正在做修订自检...", lambda: revision_self_check_node(data, adapter, store)))
+    graph.add_node("save_revised_draft", lambda data: progress_node(progress_func, "Revision 6/7", "正在保存修订稿...", lambda: save_revised_draft_node(data, store)))
+    graph.add_node("maybe_review_again", lambda data: progress_node(progress_func, "Revision 7/7", "正在更新下一步状态...", lambda: maybe_review_again_node(data, store)))
     graph.set_entry_point("load_revision_context")
     graph.add_conditional_edges("load_revision_context", route_after_load, {"continue": "build_revision_plan", "end": END})
     graph.add_edge("build_revision_plan", "revise_targeted_sections")
@@ -63,6 +73,11 @@ def build_revision_graph(adapter: AgentAdapter, store: LocalStore) -> CompiledGr
     graph.add_edge("save_revised_draft", "maybe_review_again")
     graph.add_edge("maybe_review_again", END)
     return graph.compile()
+
+
+def progress_node(progress: ProgressFunc, stage: str, message: str, fn) -> dict:
+    emit_progress(progress, stage, message)
+    return fn()
 
 
 def route_after_load(data: dict) -> str:

@@ -95,6 +95,12 @@ class DirectorDecision:
             action = "review_chapter"
         if action == "export":
             action = "export_project"
+        if action in {"run_current_stage", "answer_pending_questions"}:
+            action = "revise_outline"
+        if action == "advance_current_stage":
+            action = "persist_outputs"
+        if action == "show_stage":
+            action = "show_outline"
         if action not in DIRECTOR_ACTIONS:
             action = "ask_user"
         task_args = data.get("task_args") if isinstance(data.get("task_args"), dict) else {}
@@ -213,6 +219,8 @@ class DirectorService:
         if direct is not None:
             return direct
         prompt = build_service_director_prompt(state, self.store, channel)
+        if self.progress:
+            self.progress("Director", "正在理解你的需求...")
         try:
             output = self.adapter.complete(prompt, self.store.project_dir(state.project_id))
         except AgentAdapterError:
@@ -221,6 +229,10 @@ class DirectorService:
 
     def _execute_decision(self, state: NovelState, decision: DirectorDecision, channel: Channel) -> DirectorTurnResult:
         self._apply_decision_metadata(state, decision)
+        if self.progress:
+            plan = execution_plan_message(decision)
+            if plan:
+                self.progress("Plan", plan)
         state.director_task_args = decision.task_args
         state.pending_director_decision = {}
         self.store.save_state(state)
@@ -235,7 +247,7 @@ class DirectorService:
                 if requested_stage in OUTLINE_STAGES:
                     state.outline_stage = requested_stage  # type: ignore[assignment]
                     state.current_stage = requested_stage
-                result_state = NovelState.from_dict(advance_outline_stage_node(state.to_dict(), self.adapter, self.store))
+                result_state = NovelState.from_dict(advance_outline_stage_node(state.to_dict(), self.adapter, self.store, self.progress or noop_progress))
             else:
                 result_state = NovelState.from_dict(persist_available_outputs(state.to_dict(), self.store))
         elif decision.action in {"init_bible", "update_bible"}:
@@ -288,31 +300,33 @@ class DirectorService:
             state.director_action = "update_bible"
             self.store.save_state(state)
             return state
+        if self.progress:
+            self.progress("Bible", "正在更新小说圣经...")
         graph = build_bible_graph(self.adapter, self.store)
         return NovelState.from_dict(graph.invoke(state.to_dict()))
 
     def _run_chapter_plan(self, state: NovelState) -> NovelState:
         from ai_novelist.graph_chapter_plan import build_chapter_plan_graph
 
-        graph = build_chapter_plan_graph(self.adapter, self.store)
+        graph = build_chapter_plan_graph(self.adapter, self.store, progress=self.progress)
         return NovelState.from_dict(graph.invoke(state.to_dict()))
 
     def _run_scene_plan(self, state: NovelState) -> NovelState:
         from ai_novelist.graph_scene import build_scene_graph
 
-        graph = build_scene_graph(self.adapter, self.store)
+        graph = build_scene_graph(self.adapter, self.store, progress=self.progress)
         return NovelState.from_dict(graph.invoke(state.to_dict()))
 
     def _run_finalize(self, state: NovelState) -> NovelState:
         from ai_novelist.graph_finalize import build_finalize_graph
 
-        graph = build_finalize_graph(self.adapter, self.store)
+        graph = build_finalize_graph(self.adapter, self.store, progress=self.progress)
         return NovelState.from_dict(graph.invoke(state.to_dict()))
 
     def _run_export(self, state: NovelState) -> NovelState:
         from ai_novelist.graph_export import build_export_graph
 
-        graph = build_export_graph(self.store)
+        graph = build_export_graph(self.store, progress=self.progress)
         return NovelState.from_dict(graph.invoke(state.to_dict()))
 
     def _run_research(self, state: NovelState) -> NovelState:
@@ -345,6 +359,30 @@ class DirectorService:
 
 
 
+
+def execution_plan_message(decision: DirectorDecision) -> str:
+    chapter = decision.chapter or normalize_chapter(decision.task_args.get("chapter"))
+    if decision.action == "write_chapter":
+        return f"将生成第 {chapter or 1} 章正文；缺少章节卡或场景卡时会先自动补齐。"
+    if decision.action == "review_chapter":
+        return f"将审稿第 {chapter or 1} 章，包含连续性、结构、人物、风格和读者反馈。"
+    if decision.action == "revise_chapter":
+        return f"将按审稿任务修订第 {chapter or 1} 章，并保存新版草稿。"
+    if decision.action == "finalize_chapter":
+        return f"将定稿第 {chapter or 1} 章，生成摘要并更新小说圣经。"
+    if decision.action == "export_project":
+        return "将收集已定稿章节并导出 manuscript、volume 和 novel_bible。"
+    if decision.action == "plan_chapter":
+        return f"将把第 {chapter or 1} 章大纲细化为章节卡。"
+    if decision.action == "plan_scenes":
+        return f"将把第 {chapter or 1} 章章节卡拆成场景卡。"
+    if decision.action in {"init_bible", "update_bible"}:
+        return "将基于当前稳定产物更新小说圣经。"
+    if decision.action == "research":
+        return "将检索参考资料并整理参考简报。"
+    return ""
+
+
 def noop_progress(_stage: str, _message: str) -> None:
     return
 
@@ -363,8 +401,10 @@ def build_service_director_prompt(state: NovelState, store: LocalStore, channel:
     return (
         f"{template.rstrip()}\n\n"
         "## 输出格式\n"
-        "优先输出一个 JSON 对象，不要包裹 Markdown 代码块。字段：action, requires_confirmation, confidence, user_message, task_args, next_steps。\n"
-        "task_args 可包含 research_query, work_title, author, chapter, instruction。\n"
+        "优先输出一个 JSON 对象，不要包裹 Markdown 代码块。字段：action, requires_confirmation, confidence, user_message, task_args, next_steps, intent, instruction, locked_constraints。\n"
+        "task_args 可包含 research_query, work_title, author, chapter, instruction, stage, default_discretion_summary。\n"
+        "大纲共创阶段可用动作语义：run_current_stage（继续重写/补充当前阶段）、advance_current_stage（锁定当前阶段并进入下一阶段）、answer_pending_questions（吸收用户对待确认问题的回答后重跑当前阶段）、show_stage（查看当前或指定阶段）、ask_user（信息不足再追问）。输出时也可使用等价旧动作 revise_outline、persist_outputs、show_outline。\n"
+        "判断大纲阶段意图时必须区分：用户提供新修改意见、用户回答问题、用户把剩余问题交给系统裁量并要求推进、用户只是查看状态。待确认问题不是必须逐项回答的阻塞项；若用户明确交给系统裁量并推进，请选择 advance_current_stage，并在 default_discretion_summary 中写一段简短裁量摘要。\n"
         "如果无法输出 JSON，才使用旧的 ACTION/MESSAGE 字段格式。\n\n"
         "## 当前通道\n"
         f"{channel}\n\n"
@@ -384,7 +424,11 @@ def build_service_director_prompt(state: NovelState, store: LocalStore, channel:
         f"编辑意见：{'已有' if state.editor_notes else '暂无'}\n"
         f"小说圣经：{'已有' if store.novel_bible_markdown_path(state.project_id).exists() else '暂无'}\n"
         f"待确认决策：{'有' if state.pending_director_decision else '无'}\n"
-        f"大纲阶段：{state.outline_stage} / {state.outline_stage_status}\n\n"
+        f"active_workflow：{state.active_workflow or 'none'}\n"
+        f"outline_stage：{state.outline_stage}\n"
+        f"outline_stage_status：{state.outline_stage_status}\n"
+        f"pending_questions：{json.dumps(state.pending_questions, ensure_ascii=False)}\n"
+        f"pending_question：{state.pending_question or '暂无'}\n\n"
         f"## 当前大纲阶段产物（优先于旧对话）\n{outline_stage_context}\n\n"
         f"## 已获取参考信息摘要\n{build_reference_summary(state, max_chars=1200) if state.reference_brief or state.retrieval_context or state.research_sources else '暂无'}\n\n"
         f"## 最近编辑意见和待确认项\n{state.editor_notes[-1800:] if state.editor_notes.strip() else '暂无'}\n\n"
@@ -671,6 +715,10 @@ def deterministic_outline_stage_decision(state: NovelState) -> DirectorDecision 
     text = state.user_request.strip()
     if not text:
         return None
+    view = deterministic_view_decision(state)
+    if view is not None:
+        return view
+
     stage = detect_outline_stage_request(text)
     wants_confirm = any(marker in text for marker in ("确定", "确认", "锁定", "通过", "认可", "定稿"))
     if state.active_workflow == "outline" and stage and wants_confirm:
@@ -683,7 +731,60 @@ def deterministic_outline_stage_decision(state: NovelState) -> DirectorDecision 
             target="outline",
             intent="approve",
         )
-    return deterministic_view_decision(state)
+
+    if state.active_workflow != "outline" or state.outline_stage == "done":
+        return None
+
+    if state.outline_stage_status == "options_ready" and is_simple_outline_stage_confirmation(text):
+        return DirectorDecision(
+            "persist_outputs",
+            requires_confirmation=False,
+            user_message="我会锁定当前大纲阶段，并进入下一阶段。",
+            confidence=96,
+            target="outline",
+            intent="approve",
+        )
+
+    if state.outline_stage_status == "options_ready" and delegates_outline_stage_decision(text):
+        summary = build_default_discretion_summary(state, text)
+        return DirectorDecision(
+            "persist_outputs",
+            requires_confirmation=False,
+            user_message="我会按当前阶段建议作默认裁量，锁定本阶段并进入下一阶段。",
+            confidence=90,
+            task_args={"default_discretion_summary": summary},
+            target="outline",
+            intent="approve",
+            locked_constraints=[summary],
+        )
+
+    if state.pending_questions and answers_pending_outline_questions(text):
+        instruction = build_pending_answer_instruction(state, text)
+        return DirectorDecision(
+            "revise_outline",
+            requires_confirmation=False,
+            user_message="我会吸收你的补充回答，并重跑当前大纲阶段。",
+            confidence=88,
+            task_args={"instruction": instruction},
+            target="outline",
+            intent="answer_pending_questions",
+            instruction=instruction,
+            locked_constraints=[instruction],
+        )
+
+    if looks_like_outline_stage_feedback(text):
+        return DirectorDecision(
+            "revise_outline",
+            requires_confirmation=False,
+            user_message="我会把你的新意见合入当前阶段，并重跑阶段产物。",
+            confidence=82,
+            task_args={"instruction": text},
+            target="outline",
+            intent="run_current_stage",
+            instruction=text,
+        )
+
+    return None
 
 
 def stage_display_name(stage: str) -> str:
@@ -698,6 +799,89 @@ def stage_display_name(stage: str) -> str:
         "review_lock": "审稿锁定",
     }
     return labels.get(stage, stage)
+
+def is_simple_outline_stage_confirmation(text: str) -> bool:
+    return text.strip().lower() in {
+        "确认",
+        "继续",
+        "下一阶段",
+        "进入下一阶段",
+        "确认进入下一阶段",
+        "锁定",
+        "通过",
+        "approve",
+        "confirm",
+        "ok",
+        "yes",
+    }
+
+
+def delegates_outline_stage_decision(text: str) -> bool:
+    markers = (
+        "你决定",
+        "由你决定",
+        "交给你",
+        "系统决定",
+        "系统裁量",
+        "按你建议",
+        "按系统建议",
+        "按当前建议",
+        "默认处理",
+        "你来定",
+        "你看着办",
+        "无需我确认",
+    )
+    wants_advance = any(marker in text for marker in ("下一阶段", "进入", "推进", "继续", "锁定", "确定"))
+    return any(marker in text for marker in markers) and wants_advance
+
+
+def answers_pending_outline_questions(text: str) -> bool:
+    if re.search(r"(^|[\s，,；;])\d+[.、)]", text):
+        return True
+    return any(marker in text for marker in ("回答", "补充", "选择", "选", "采用", "接受", "接收", "同意", "设为", "改成"))
+
+
+def looks_like_outline_stage_feedback(text: str) -> bool:
+    if is_simple_outline_stage_confirmation(text) or delegates_outline_stage_decision(text):
+        return False
+    if any(marker in text for marker in ("查看", "展示", "看一下", "看下", "显示")):
+        return False
+    return bool(text.strip())
+
+
+def build_pending_answer_instruction(state: NovelState, text: str) -> str:
+    questions = [item.strip() for item in state.pending_questions if item.strip()]
+    if not questions:
+        return text
+    numbered_answers = parse_numbered_answers(text)
+    if numbered_answers:
+        parts = []
+        for index, answer in numbered_answers.items():
+            question = questions[index - 1] if 0 < index <= len(questions) else f"问题 {index}"
+            parts.append(f"用户回答：{question} -> {answer}")
+        return "；".join(parts)
+    return "用户补充待确认问题：" + text
+
+
+def parse_numbered_answers(text: str) -> dict[int, str]:
+    matches = list(re.finditer(r"(?:^|[\s，,；;])(?P<index>\d+)[.、)]\s*", text))
+    answers: dict[int, str] = {}
+    for pos, match in enumerate(matches):
+        start = match.end()
+        end = matches[pos + 1].start() if pos + 1 < len(matches) else len(text)
+        answer = text[start:end].strip(" ：:，,。；;\n\t")
+        if answer:
+            answers[int(match.group("index"))] = answer
+    return answers
+
+
+def build_default_discretion_summary(state: NovelState, text: str) -> str:
+    questions = [item.strip() for item in state.pending_questions if item.strip()]
+    if questions:
+        joined = "；".join(questions[:4])
+        return f"用户将待确认问题交由系统按当前阶段产物默认裁量并推进；待裁量问题：{joined}；用户原话：{text}"
+    return f"用户认可当前阶段产物，并将细节交由系统按当前建议默认裁量后推进；用户原话：{text}"
+
 
 def deterministic_view_decision(state: NovelState) -> DirectorDecision | None:
     text = state.user_request.strip()

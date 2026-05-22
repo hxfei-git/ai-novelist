@@ -3,16 +3,69 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
+from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError, AgentCallOptions
 
 
 class DeepSeekAPIError(AgentAdapterError):
     """Raised when DeepSeek API cannot produce a usable response."""
+
+
+THINKING_DISABLED_MEDIUM_AGENTS = frozenset(
+    {
+        "director",
+        "research_intent",
+        "outline_stage_role",
+        "direction_proposer",
+        "version_comparator",
+        "chapter_summarizer",
+        "dialogue_enhancer",
+        "atmosphere_enhancer",
+        "hook_enhancer",
+        "style_normalizer",
+        "revision_self_check",
+        "outline_editor",
+        "chapter_goal_agent",
+        "chapter_conflict_agent",
+        "chapter_hook_agent",
+        "scene_breakdown_agent",
+        "scene_conflict_check_agent",
+        "style_editor",
+        "simulated_reader",
+        "bible_update_extractor",
+    }
+)
+
+THINKING_ENABLED_MEDIUM_AGENTS = frozenset(
+    {
+        "retrieval_context_synthesizer",
+        "outline_stage_synthesizer",
+        "outline_planner",
+        "outline_reviser",
+        "world_builder",
+        "chapter_card_synthesizer",
+        "scene_synthesizer",
+        "chapter_writer",
+        "continuity_editor",
+        "structure_editor",
+        "character_arc_editor",
+        "review_synthesizer",
+        "revision_planner",
+        "targeted_reviser",
+        "bible_conflict_checker",
+        "bible_update_synthesizer",
+        "final_bible_update_extractor",
+    }
+)
+
+THINKING_ENABLED_HIGH_AGENTS = frozenset()
+
+_AGENT_HEADER_RE = re.compile(r"^AGENT:\s*([A-Za-z0-9_\-]+)\s*$")
 
 
 @dataclass
@@ -23,17 +76,12 @@ class DeepSeekAdapter(AgentAdapter):
     timeout_seconds: int = 180
     temperature: float = 0.7
 
-    def complete(self, prompt: str, workspace: Path) -> str:
+    def complete(self, prompt: str, workspace: Path, options: AgentCallOptions | None = None) -> str:
         del workspace
         if not self.api_key.strip():
             raise DeepSeekAPIError("DeepSeek API key is not configured; set DEEPSEEK_API_KEY")
 
-        payload = {
-            "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": False,
-            "temperature": self.temperature,
-        }
+        payload = self._build_payload(prompt, options)
         request = urllib.request.Request(
             self.chat_completions_url(),
             data=json.dumps(payload).encode("utf-8"),
@@ -63,6 +111,40 @@ class DeepSeekAdapter(AgentAdapter):
 
     def chat_completions_url(self) -> str:
         return f"{self.base_url.rstrip('/')}/chat/completions"
+
+    def _build_payload(self, prompt: str, options: AgentCallOptions | None = None) -> dict:
+        payload = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+        }
+        strategy = self._thinking_strategy(self._agent_name(prompt, options))
+        if strategy == "disabled-medium":
+            payload["thinking"] = {"type": "disabled"}
+            payload["temperature"] = self.temperature
+        elif strategy == "enabled-high":
+            payload["thinking"] = {"type": "enabled"}
+            payload["reasoning_effort"] = "high"
+        else:
+            payload["thinking"] = {"type": "enabled"}
+            payload["reasoning_effort"] = "medium"
+        return payload
+
+    def _agent_name(self, prompt: str, options: AgentCallOptions | None = None) -> str:
+        if options and options.agent.strip():
+            return options.agent.strip()
+        first_line = prompt.splitlines()[0] if prompt.splitlines() else ""
+        match = _AGENT_HEADER_RE.match(first_line.strip())
+        return match.group(1) if match else ""
+
+    def _thinking_strategy(self, agent: str) -> str:
+        if agent in THINKING_DISABLED_MEDIUM_AGENTS:
+            return "disabled-medium"
+        if agent in THINKING_ENABLED_MEDIUM_AGENTS:
+            return "enabled-medium"
+        if agent in THINKING_ENABLED_HIGH_AGENTS:
+            return "enabled-high"
+        return "enabled-medium"
 
     def _extract_text(self, body: str) -> str:
         try:

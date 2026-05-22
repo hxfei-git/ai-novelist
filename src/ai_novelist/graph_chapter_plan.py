@@ -7,6 +7,7 @@ from typing import Protocol
 from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
 from ai_novelist.artifacts import ArtifactRecord, load_artifacts, register_artifact
 from ai_novelist.context_builder import build_context
+from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress
 from ai_novelist.prompts import load_prompt
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
@@ -30,37 +31,47 @@ CHAPTER_CARD_SECTIONS = [
 
 
 class ChapterPlanSequentialGraph:
-    def __init__(self, adapter: AgentAdapter, store: LocalStore) -> None:
+    def __init__(self, adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc = noop_progress) -> None:
         self.adapter = adapter
         self.store = store
+        self.progress = progress
 
     def invoke(self, state: dict) -> dict:
+        emit_progress(self.progress, "ChapterPlan 1/8", "正在选择章节...")
         current = select_chapter_node(state, self.store)
+        emit_progress(self.progress, "ChapterPlan 2/8", "正在读取章节大纲、小说圣经和项目上下文...")
         current = load_chapter_context_node(current, self.store)
+        emit_progress(self.progress, "ChapterPlan 3/8", "正在分析本章目标...")
         current = chapter_goal_agent_node(current, self.adapter, self.store)
+        emit_progress(self.progress, "ChapterPlan 4/8", "正在分析本章核心冲突...")
         current = chapter_conflict_agent_node(current, self.adapter, self.store)
+        emit_progress(self.progress, "ChapterPlan 5/8", "正在设计本章钩子...")
         current = chapter_hook_agent_node(current, self.adapter, self.store)
+        emit_progress(self.progress, "ChapterPlan 6/8", "正在汇总章节卡...")
         current = chapter_card_synthesizer_node(current, self.adapter, self.store)
+        emit_progress(self.progress, "ChapterPlan 7/8", "正在校验章节卡必需小节...")
         current = validate_chapter_card_node(current, self.store)
+        emit_progress(self.progress, "ChapterPlan 8/8", "正在保存章节卡...")
         current = save_chapter_card_node(current, self.store)
         return current
 
 
-def build_chapter_plan_graph(adapter: AgentAdapter, store: LocalStore) -> CompiledGraph:
+def build_chapter_plan_graph(adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc | None = None) -> CompiledGraph:
+    progress_func = progress or noop_progress
     try:
         from langgraph.graph import END, StateGraph
     except ModuleNotFoundError:
-        return ChapterPlanSequentialGraph(adapter, store)
+        return ChapterPlanSequentialGraph(adapter, store, progress_func)
 
     graph = StateGraph(dict)
-    graph.add_node("select_chapter", lambda data: select_chapter_node(data, store))
-    graph.add_node("load_chapter_context", lambda data: load_chapter_context_node(data, store))
-    graph.add_node("chapter_goal_agent", lambda data: chapter_goal_agent_node(data, adapter, store))
-    graph.add_node("chapter_conflict_agent", lambda data: chapter_conflict_agent_node(data, adapter, store))
-    graph.add_node("chapter_hook_agent", lambda data: chapter_hook_agent_node(data, adapter, store))
-    graph.add_node("chapter_card_synthesizer", lambda data: chapter_card_synthesizer_node(data, adapter, store))
-    graph.add_node("validate_chapter_card", lambda data: validate_chapter_card_node(data, store))
-    graph.add_node("save_chapter_card", lambda data: save_chapter_card_node(data, store))
+    graph.add_node("select_chapter", lambda data: progress_node(progress_func, "ChapterPlan 1/8", "正在选择章节...", lambda: select_chapter_node(data, store)))
+    graph.add_node("load_chapter_context", lambda data: progress_node(progress_func, "ChapterPlan 2/8", "正在读取章节大纲、小说圣经和项目上下文...", lambda: load_chapter_context_node(data, store)))
+    graph.add_node("chapter_goal_agent", lambda data: progress_node(progress_func, "ChapterPlan 3/8", "正在分析本章目标...", lambda: chapter_goal_agent_node(data, adapter, store)))
+    graph.add_node("chapter_conflict_agent", lambda data: progress_node(progress_func, "ChapterPlan 4/8", "正在分析本章核心冲突...", lambda: chapter_conflict_agent_node(data, adapter, store)))
+    graph.add_node("chapter_hook_agent", lambda data: progress_node(progress_func, "ChapterPlan 5/8", "正在设计本章钩子...", lambda: chapter_hook_agent_node(data, adapter, store)))
+    graph.add_node("chapter_card_synthesizer", lambda data: progress_node(progress_func, "ChapterPlan 6/8", "正在汇总章节卡...", lambda: chapter_card_synthesizer_node(data, adapter, store)))
+    graph.add_node("validate_chapter_card", lambda data: progress_node(progress_func, "ChapterPlan 7/8", "正在校验章节卡必需小节...", lambda: validate_chapter_card_node(data, store)))
+    graph.add_node("save_chapter_card", lambda data: progress_node(progress_func, "ChapterPlan 8/8", "正在保存章节卡...", lambda: save_chapter_card_node(data, store)))
     graph.set_entry_point("select_chapter")
     graph.add_edge("select_chapter", "load_chapter_context")
     graph.add_edge("load_chapter_context", "chapter_goal_agent")
@@ -71,6 +82,11 @@ def build_chapter_plan_graph(adapter: AgentAdapter, store: LocalStore) -> Compil
     graph.add_edge("validate_chapter_card", "save_chapter_card")
     graph.add_edge("save_chapter_card", END)
     return graph.compile()
+
+
+def progress_node(progress: ProgressFunc, stage: str, message: str, fn) -> dict:
+    emit_progress(progress, stage, message)
+    return fn()
 
 
 def select_chapter_node(data: dict, store: LocalStore) -> dict:

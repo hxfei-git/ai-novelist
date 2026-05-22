@@ -168,16 +168,16 @@ def route_after_editor_review(data: dict) -> str:
     return "end"
 
 
-def run_agent_task(data: dict, adapter: AgentAdapter, store: LocalStore, task: AgentTask) -> dict:
+def run_agent_task(data: dict, adapter: AgentAdapter, store: LocalStore, task: AgentTask, progress: ProgressFunc = noop_progress) -> dict:
     state = NovelState.from_dict(data)
     if task == "write_chapter":
         from ai_novelist.graph_drafting import build_drafting_graph
 
-        return build_drafting_graph(adapter, store).invoke(state.to_dict())
+        return build_drafting_graph(adapter, store, progress=progress).invoke(state.to_dict())
     if task == "review":
         from ai_novelist.graph_review import build_review_graph
 
-        return build_review_graph(adapter, store).invoke(state.to_dict())
+        return build_review_graph(adapter, store, progress=progress).invoke(state.to_dict())
 
     spec = TASKS[task]
     prompt = build_task_prompt(state, spec.prompt_name)
@@ -537,7 +537,7 @@ def run_selected_agent(data: dict, adapter: AgentAdapter, store: LocalStore, pro
         state.active_task = "plan_chapter"
         store.save_state(state)
         progress("ChapterPlan", "正在生成章节卡...")
-        result = NovelState.from_dict(build_chapter_plan_graph(adapter, store).invoke(state.to_dict()))
+        result = NovelState.from_dict(build_chapter_plan_graph(adapter, store, progress=progress).invoke(state.to_dict()))
         append_message(result, "assistant", result.director_message)
         store.save_state(result)
         return result.to_dict()
@@ -547,7 +547,7 @@ def run_selected_agent(data: dict, adapter: AgentAdapter, store: LocalStore, pro
         state.active_task = "plan_scenes"
         store.save_state(state)
         progress("SceneDesign", "正在生成场景卡...")
-        result = NovelState.from_dict(build_scene_graph(adapter, store).invoke(state.to_dict()))
+        result = NovelState.from_dict(build_scene_graph(adapter, store, progress=progress).invoke(state.to_dict()))
         append_message(result, "assistant", result.director_message)
         store.save_state(result)
         return result.to_dict()
@@ -557,7 +557,7 @@ def run_selected_agent(data: dict, adapter: AgentAdapter, store: LocalStore, pro
         state.active_task = "revise_chapter"
         store.save_state(state)
         progress("Revision", "正在按审稿任务修订章节...")
-        state = NovelState.from_dict(build_revision_graph(adapter, store).invoke(state.to_dict()))
+        state = NovelState.from_dict(build_revision_graph(adapter, store, progress=progress).invoke(state.to_dict()))
         if state.error:
             state.director_message = summarize_agent_error(state, "write_chapter")
         else:
@@ -570,7 +570,7 @@ def run_selected_agent(data: dict, adapter: AgentAdapter, store: LocalStore, pro
             return state.to_dict()
         state.active_task = task
         progress(*task_progress_message(task))
-        result = run_agent_task(state.to_dict(), adapter, store, task)
+        result = run_agent_task(state.to_dict(), adapter, store, task, progress=progress)
         state = NovelState.from_dict(result)
         if state.error:
             state.director_message = summarize_agent_error(state, task)
@@ -603,11 +603,11 @@ def run_selected_outline_agent(state: NovelState, adapter: AgentAdapter, store: 
         return show_outline_stage_node(state.to_dict(), store)
     if action in {"advance_outline_stage", "persist_outline", "persist_outputs"}:
         progress("OutlineStage", "正在锁定当前大纲阶段...")
-        return advance_outline_stage_node(state.to_dict(), adapter, store)
+        return advance_outline_stage_node(state.to_dict(), adapter, store, progress)
 
     progress("OutlineStage", "正在执行当前大纲共创阶段...")
     state.director_action = "run_outline_stage"
-    result = NovelState.from_dict(run_outline_stage_node(state.to_dict(), adapter, store))
+    result = NovelState.from_dict(run_outline_stage_node(state.to_dict(), adapter, store, progress))
     progress("Done", outline_done_message("run_outline_stage"))
     append_message(result, "assistant", result.director_message)
     store.save_state(result)

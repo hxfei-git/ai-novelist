@@ -48,6 +48,8 @@ export AI_NOVELIST_DEEPSEEK_MODEL=deepseek-chat
 - `AI_NOVELIST_DEEPSEEK_BASE_URL`：默认 `https://api.deepseek.com`。
 - `AI_NOVELIST_CODEX_BIN`、`AI_NOVELIST_CODEX_TIMEOUT`：Codex CLI 路径与超时。
 
+DeepSeek 会按内部 Agent 自动启停 thinking，不需要新增 CLI 参数或环境变量。轻量判断类 Agent 使用 `thinking: {"type": "disabled"}` 并保留 `temperature`；综合、规划、写作和审稿汇总类 Agent 使用 `thinking: {"type": "enabled"}` 与 `reasoning_effort: "medium"`，且不发送 `temperature`。DeepSeek 官方会把 `medium` 映射为 `high`，项目内部仍以 `medium` 表达策略意图。Codex CLI 不受该策略影响，也不会增加 reasoning 配置。
+
 ## 唯一推荐入口：Director Chat
 
 `chat` 是当前主入口。Director Agent 作为主脑管理项目上下文，并会在同一个项目状态里调度 outline collaboration graph、世界观、章节写手、编辑等子工作流。用户不需要单独运行 `outline` 命令来进入大纲共创。

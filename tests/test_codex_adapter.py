@@ -2,6 +2,7 @@ import subprocess
 
 import pytest
 
+from ai_novelist.adapters.base import AgentCallOptions
 from ai_novelist.adapters.codex_cli import CodexCLIAdapter, CodexCLIError
 
 
@@ -12,6 +13,38 @@ def test_mock_adapter_returns_outline(tmp_path):
 
     assert "# 小说大纲" in result
     assert "月球城市" in result
+
+
+def test_adapter_accepts_call_options_in_mock_mode(tmp_path):
+    adapter = CodexCLIAdapter(mock=True)
+
+    result = adapter.complete(
+        "用户创意：月球城市",
+        tmp_path,
+        options=AgentCallOptions(agent="chapter_writer", task="draft", stage="chapter"),
+    )
+
+    assert "# 小说大纲" in result
+
+
+def test_adapter_command_does_not_add_reasoning_config(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        return subprocess.CompletedProcess(command, 0, stdout='{"message":"final"}\n', stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    adapter = CodexCLIAdapter()
+
+    assert adapter.complete(
+        "prompt",
+        tmp_path,
+        options=AgentCallOptions(agent="chapter_writer", task="draft", stage="chapter"),
+    ) == "final"
+    assert "-c" not in captured["command"]
+    assert not any("reasoning" in part for part in captured["command"])
 
 
 def test_adapter_extracts_json_message(monkeypatch, tmp_path):

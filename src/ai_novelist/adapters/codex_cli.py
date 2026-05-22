@@ -8,7 +8,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
+from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError, AgentCallOptions
 
 
 class CodexCLIError(AgentAdapterError):
@@ -21,7 +21,8 @@ class CodexCLIAdapter(AgentAdapter):
     timeout_seconds: int = 180
     mock: bool = False
 
-    def complete(self, prompt: str, workspace: Path) -> str:
+    def complete(self, prompt: str, workspace: Path, options: AgentCallOptions | None = None) -> str:
+        del options
         if self.mock:
             return self._mock_response(prompt)
 

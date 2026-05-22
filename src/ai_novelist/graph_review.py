@@ -10,6 +10,7 @@ from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
 from ai_novelist.artifacts import ArtifactRecord, get_latest_artifact, load_artifact_text, load_artifacts, register_artifact
 from ai_novelist.context_builder import build_context
 from ai_novelist.graph_writer import parse_editor_review
+from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress
 from ai_novelist.prompts import load_prompt
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
@@ -24,46 +25,53 @@ REVIEW_FIELDS = ("decision", "score", "blocking_issues", "issues", "rewrite_task
 
 
 class ReviewSequentialGraph:
-    def __init__(self, adapter: AgentAdapter, store: LocalStore) -> None:
+    def __init__(self, adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc = noop_progress) -> None:
         self.adapter = adapter
         self.store = store
+        self.progress = progress
 
     def invoke(self, state: dict) -> dict:
+        emit_progress(self.progress, "Review 1/8", "正在读取章节草稿和审稿上下文...")
         current = load_review_context_node(state, self.store)
         if NovelState.from_dict(current).review_status == "error":
             return current
-        for prompt_name, field in [
-            ("continuity_editor", "continuity_review"),
-            ("structure_editor", "structure_review"),
-            ("character_arc_editor", "character_arc_review"),
-            ("style_editor", "style_review"),
-            ("simulated_reader", "simulated_reader_review"),
-        ]:
+        steps = [
+            ("Review 2/8", "正在做连续性审稿...", "continuity_editor", "continuity_review"),
+            ("Review 3/8", "正在做结构审稿...", "structure_editor", "structure_review"),
+            ("Review 4/8", "正在检查人物弧光...", "character_arc_editor", "character_arc_review"),
+            ("Review 5/8", "正在检查风格一致性...", "style_editor", "style_review"),
+            ("Review 6/8", "正在模拟读者反馈...", "simulated_reader", "simulated_reader_review"),
+        ]
+        for stage, message, prompt_name, field in steps:
+            emit_progress(self.progress, stage, message)
             current = run_review_agent(current, self.adapter, self.store, prompt_name, field)
             if NovelState.from_dict(current).review_status == "error":
                 return current
+        emit_progress(self.progress, "Review 7/8", "正在汇总审稿结论...")
         current = review_synthesizer_node(current, self.adapter, self.store)
         current = decide_pass_or_revise_node(current, self.store)
+        emit_progress(self.progress, "Review 8/8", "正在保存审稿报告...")
         current = save_review_report_node(current, self.store)
         return current
 
 
-def build_review_graph(adapter: AgentAdapter, store: LocalStore) -> CompiledGraph:
+def build_review_graph(adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc | None = None) -> CompiledGraph:
+    progress_func = progress or noop_progress
     try:
         from langgraph.graph import END, StateGraph
     except ModuleNotFoundError:
-        return ReviewSequentialGraph(adapter, store)
+        return ReviewSequentialGraph(adapter, store, progress_func)
 
     graph = StateGraph(dict)
-    graph.add_node("load_review_context", lambda data: load_review_context_node(data, store))
-    graph.add_node("continuity_review_agent", lambda data: run_review_agent(data, adapter, store, "continuity_editor", "continuity_review"))
-    graph.add_node("structure_review_agent", lambda data: run_review_agent(data, adapter, store, "structure_editor", "structure_review"))
-    graph.add_node("character_arc_review_agent", lambda data: run_review_agent(data, adapter, store, "character_arc_editor", "character_arc_review"))
-    graph.add_node("style_review_agent", lambda data: run_review_agent(data, adapter, store, "style_editor", "style_review"))
-    graph.add_node("simulated_reader_agent", lambda data: run_review_agent(data, adapter, store, "simulated_reader", "simulated_reader_review"))
-    graph.add_node("review_synthesizer", lambda data: review_synthesizer_node(data, adapter, store))
+    graph.add_node("load_review_context", lambda data: progress_node(progress_func, "Review 1/8", "正在读取章节草稿和审稿上下文...", lambda: load_review_context_node(data, store)))
+    graph.add_node("continuity_review_agent", lambda data: progress_node(progress_func, "Review 2/8", "正在做连续性审稿...", lambda: run_review_agent(data, adapter, store, "continuity_editor", "continuity_review")))
+    graph.add_node("structure_review_agent", lambda data: progress_node(progress_func, "Review 3/8", "正在做结构审稿...", lambda: run_review_agent(data, adapter, store, "structure_editor", "structure_review")))
+    graph.add_node("character_arc_review_agent", lambda data: progress_node(progress_func, "Review 4/8", "正在检查人物弧光...", lambda: run_review_agent(data, adapter, store, "character_arc_editor", "character_arc_review")))
+    graph.add_node("style_review_agent", lambda data: progress_node(progress_func, "Review 5/8", "正在检查风格一致性...", lambda: run_review_agent(data, adapter, store, "style_editor", "style_review")))
+    graph.add_node("simulated_reader_agent", lambda data: progress_node(progress_func, "Review 6/8", "正在模拟读者反馈...", lambda: run_review_agent(data, adapter, store, "simulated_reader", "simulated_reader_review")))
+    graph.add_node("review_synthesizer", lambda data: progress_node(progress_func, "Review 7/8", "正在汇总审稿结论...", lambda: review_synthesizer_node(data, adapter, store)))
     graph.add_node("decide_pass_or_revise", lambda data: decide_pass_or_revise_node(data, store))
-    graph.add_node("save_review_report", lambda data: save_review_report_node(data, store))
+    graph.add_node("save_review_report", lambda data: progress_node(progress_func, "Review 8/8", "正在保存审稿报告...", lambda: save_review_report_node(data, store)))
     graph.set_entry_point("load_review_context")
     graph.add_conditional_edges("load_review_context", route_after_load, {"continue": "continuity_review_agent", "end": END})
     graph.add_edge("continuity_review_agent", "structure_review_agent")
@@ -75,6 +83,11 @@ def build_review_graph(adapter: AgentAdapter, store: LocalStore) -> CompiledGrap
     graph.add_edge("decide_pass_or_revise", "save_review_report")
     graph.add_edge("save_review_report", END)
     return graph.compile()
+
+
+def progress_node(progress: ProgressFunc, stage: str, message: str, fn) -> dict:
+    emit_progress(progress, stage, message)
+    return fn()
 
 
 def route_after_load(data: dict) -> str:

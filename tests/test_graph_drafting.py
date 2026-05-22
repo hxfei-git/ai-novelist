@@ -42,3 +42,24 @@ def test_legacy_write_chapter_wrapper_uses_drafting_graph(tmp_path):
     assert result["active_graph"] == "drafting"
     assert store.chapter_draft_path("demo", 2, 1).exists()
     assert store.chapter_path("demo", 2).exists()
+
+def test_drafting_reports_progress_events(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.current_chapter = 1
+    store.save_state(state)
+    events = []
+
+    result = NovelState.from_dict(
+        build_drafting_graph(
+            CodexCLIAdapter(mock=True),
+            store,
+            progress=lambda stage, message: events.append((stage, message)),
+        ).invoke(state.to_dict())
+    )
+
+    assert result.active_graph == "drafting"
+    assert any(stage == "Drafting 1/8" for stage, _message in events)
+    assert any(stage == "ChapterPlan 1/8" for stage, _message in events)
+    assert any(stage == "SceneDesign 1/6" for stage, _message in events)
+    assert any(stage == "Drafting 8/8" for stage, _message in events)

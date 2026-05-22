@@ -10,6 +10,7 @@ from typing import Protocol
 
 from ai_novelist.artifacts import ArtifactRecord, load_artifacts, register_artifact
 from ai_novelist.context_builder import build_context
+from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
 
@@ -27,34 +28,42 @@ class FinalChapter:
 
 
 class ExportSequentialGraph:
-    def __init__(self, store: LocalStore) -> None:
+    def __init__(self, store: LocalStore, progress: ProgressFunc = noop_progress) -> None:
         self.store = store
+        self.progress = progress
 
     def invoke(self, state: dict) -> dict:
+        emit_progress(self.progress, "Export 1/6", "正在收集已定稿章节...")
         current = collect_final_chapters_node(state, self.store)
         if NovelState.from_dict(current).review_status == "error":
             return current
+        emit_progress(self.progress, "Export 2/6", "正在整理章节格式...")
         current = normalize_format_node(current, self.store)
+        emit_progress(self.progress, "Export 3/6", "正在生成整本手稿...")
         current = build_manuscript_node(current, self.store)
+        emit_progress(self.progress, "Export 4/6", "正在生成分卷稿...")
         current = build_volume_node(current, self.store)
+        emit_progress(self.progress, "Export 5/6", "正在复制小说圣经导出副本...")
         current = copy_bible_export_node(current, self.store)
+        emit_progress(self.progress, "Export 6/6", "正在保存导出文件...")
         current = save_export_node(current, self.store)
         return current
 
 
-def build_export_graph(store: LocalStore) -> CompiledGraph:
+def build_export_graph(store: LocalStore, progress: ProgressFunc | None = None) -> CompiledGraph:
+    progress_func = progress or noop_progress
     try:
         from langgraph.graph import END, StateGraph
     except ModuleNotFoundError:
-        return ExportSequentialGraph(store)
+        return ExportSequentialGraph(store, progress_func)
 
     graph = StateGraph(dict)
-    graph.add_node("collect_final_chapters", lambda data: collect_final_chapters_node(data, store))
-    graph.add_node("normalize_format", lambda data: normalize_format_node(data, store))
-    graph.add_node("build_manuscript", lambda data: build_manuscript_node(data, store))
-    graph.add_node("build_volume", lambda data: build_volume_node(data, store))
-    graph.add_node("copy_bible_export", lambda data: copy_bible_export_node(data, store))
-    graph.add_node("save_export", lambda data: save_export_node(data, store))
+    graph.add_node("collect_final_chapters", lambda data: progress_node(progress_func, "Export 1/6", "正在收集已定稿章节...", lambda: collect_final_chapters_node(data, store)))
+    graph.add_node("normalize_format", lambda data: progress_node(progress_func, "Export 2/6", "正在整理章节格式...", lambda: normalize_format_node(data, store)))
+    graph.add_node("build_manuscript", lambda data: progress_node(progress_func, "Export 3/6", "正在生成整本手稿...", lambda: build_manuscript_node(data, store)))
+    graph.add_node("build_volume", lambda data: progress_node(progress_func, "Export 4/6", "正在生成分卷稿...", lambda: build_volume_node(data, store)))
+    graph.add_node("copy_bible_export", lambda data: progress_node(progress_func, "Export 5/6", "正在复制小说圣经导出副本...", lambda: copy_bible_export_node(data, store)))
+    graph.add_node("save_export", lambda data: progress_node(progress_func, "Export 6/6", "正在保存导出文件...", lambda: save_export_node(data, store)))
     graph.set_entry_point("collect_final_chapters")
     graph.add_conditional_edges("collect_final_chapters", route_after_collect, {"continue": "normalize_format", "end": END})
     graph.add_edge("normalize_format", "build_manuscript")
@@ -63,6 +72,11 @@ def build_export_graph(store: LocalStore) -> CompiledGraph:
     graph.add_edge("copy_bible_export", "save_export")
     graph.add_edge("save_export", END)
     return graph.compile()
+
+
+def progress_node(progress: ProgressFunc, stage: str, message: str, fn) -> dict:
+    emit_progress(progress, stage, message)
+    return fn()
 
 
 def route_after_collect(data: dict) -> str:

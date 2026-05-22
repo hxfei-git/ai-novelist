@@ -781,6 +781,8 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 # outline collaboration smoke ok
 .venv/bin/python tests/smoke_phase2_chat.py
 # phase2 chat smoke ok
+.venv/bin/python tests/smoke_phase2.py
+# phase2 smoke ok
 ```
 
 ## 28. Phase 6+7：章节卡与场景卡管线
@@ -906,3 +908,100 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 .venv/bin/python tests/smoke_phase2_compose.py
 # phase2 compose smoke ok
 ```
+
+## 31. Chat 长任务进度可见性优化
+
+本轮按“小步快改”优化 chat 等待体验，不改变核心工作流、不引入后台队列，也不展示模型私有推理链。
+
+已完成：
+
+- 新增 `src/ai_novelist/progress.py`，提供统一 `ProgressFunc`、`emit_progress` 和安全 no-op 兜底。
+- `DirectorService` 在真实执行长任务前输出执行计划事件，例如写章会提示将自动补齐章节卡/场景卡。
+- `DirectorService` 调用章节卡、场景卡、定稿和导出图时传入进度回调；research 保持既有进度输出。
+- `graph_writer.run_agent_task` 将进度回调继续传给 Drafting Graph 和 Review Graph；直接修订、章节卡、场景卡 wrapper 也继续透传。
+- Chapter Planning、Scene Design、Drafting、Review、Revision、Finalize、Export 图均增加阶段级进度事件，CLI 会显示 `[Stage] 正在...`。
+- Drafting Graph 自动补齐缺失章节卡/场景卡时，会把子图进度继续输出，避免“写第 N 章”长时间无反馈。
+- 进度回调异常会被吞掉，不影响实际写作流程。
+
+当前边界：
+
+- 本轮只展示可审计的任务阶段，不展示模型 chain-of-thought。
+- Codex CLI 和 DeepSeek 适配器仍是阻塞式完整响应；流式 token 输出留待后续 adapter 接口扩展。
+- 大纲阶段角色 Agent 和多编辑审稿仍串行执行；后续可评估并行化，但本轮优先保持行为稳定。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_graph_drafting.py tests/test_graph_review.py tests/test_graph_revision.py tests/test_finalize_chapter.py tests/test_graph_export.py tests/test_director_service.py
+# 28 passed
+.venv/bin/python -m pytest
+# 150 passed
+.venv/bin/python tests/smoke_full_workflow_mock.py
+# full workflow mock smoke passed
+```
+
+
+## 32. DeepSeek Agent Thinking 策略
+
+本轮为模型 adapter 增加通用调用元数据和 DeepSeek 内部 thinking 策略，Codex 行为保持不变。
+
+已完成：
+
+- `AgentCallOptions(agent="", task="", stage="")` 成为 adapter 通用可选参数；旧调用无需传入 options。
+- `DeepSeekAdapter.complete(prompt, workspace, options=None)` 会优先读取 `options.agent`，否则从 prompt 第一行 `AGENT: xxx` 自动识别 Agent。无 `AGENT:` 的未知任务默认使用 `enabled-medium`，避免质量下降。
+- DeepSeek 内部固定三档策略：`disabled-medium`、`enabled-medium`、`enabled-high`；当前没有 Agent 默认分配到 high 档。
+- `disabled-medium` 请求发送 `thinking: {"type": "disabled"}` 和 `temperature`，不发送 `reasoning_effort`。
+- `enabled-medium` 请求发送 `thinking: {"type": "enabled"}` 和 `reasoning_effort: "medium"`，不发送 `temperature`。DeepSeek 官方会把 `medium` 映射为 `high`，但系统内部仍按 medium 档表达策略意图。
+- `enabled-high` 请求发送 `thinking: {"type": "enabled"}` 和 `reasoning_effort: "high"`，不发送 `temperature`；目前保留为空策略表。
+- `CodexCLIAdapter.complete(prompt, workspace, options=None)` 接受 options 但忽略它，不新增 `-c` 或任何 reasoning 配置。
+- DeepSeek 响应中的 `reasoning_content` 不展示、不保存、不拼接；adapter 仍只返回 `message.content`。
+
+当前默认策略：
+
+- thinking disabled medium：`director`、`research_intent`、`outline_stage_role`、`direction_proposer`、`version_comparator`、`chapter_summarizer`、`dialogue_enhancer`、`atmosphere_enhancer`、`hook_enhancer`、`style_normalizer`、`revision_self_check`、`outline_editor`、`chapter_goal_agent`、`chapter_conflict_agent`、`chapter_hook_agent`、`scene_breakdown_agent`、`scene_conflict_check_agent`、`style_editor`、`simulated_reader`、`bible_update_extractor`。
+- thinking enabled medium：`retrieval_context_synthesizer`、`outline_stage_synthesizer`、`outline_planner`、`outline_reviser`、`world_builder`、`chapter_card_synthesizer`、`scene_synthesizer`、`chapter_writer`、`continuity_editor`、`structure_editor`、`character_arc_editor`、`review_synthesizer`、`revision_planner`、`targeted_reviser`、`bible_conflict_checker`、`bible_update_synthesizer`、`final_bible_update_extractor`。
+- thinking enabled high：暂无默认 Agent。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_deepseek_adapter.py tests/test_codex_adapter.py
+# 17 passed
+.venv/bin/python -m pytest
+# 160 passed
+```
+
+
+## 33. 大纲阶段 Director 判断与进度可见性
+
+本轮优化阶段化大纲共创的路由语义，重点解决 `options_ready` 阶段中“继续改当前阶段”与“接受并推进下一阶段”的判断。
+
+已完成：
+
+- `DirectorService` 增加大纲阶段专用确定性分类：查看阶段、极短确认推进、回答待确认问题、提供新修改意见、将剩余问题交由系统裁量并推进。
+- Director JSON prompt 增补 `active_workflow`、`outline_stage`、`outline_stage_status`、`pending_questions`、`pending_question` 和最新用户输入，并说明大纲阶段动作语义：`run_current_stage`、`advance_current_stage`、`answer_pending_questions`、`show_stage`、`ask_user`。
+- `DirectorDecision.from_dict` 支持把上述语义动作映射到现有执行动作，避免下游图大规模改名。
+- 待确认问题不再被视为必须逐项回答的阻塞项；用户可逐条补充，也可明确交给系统按当前建议默认裁量后推进。默认裁量摘要会写入 `locked_constraints`、`director_task_args.default_discretion_summary` 和锁定阶段 artifact。
+- `graph_outline` 直接入口同步支持当前阶段查看、默认裁量推进和 JSON Director 输出解析；阶段提示文案从“必须确认”改为“可补充确认”。
+- `build_outline_collaboration_graph(adapter, store, progress=None)` 新增可选进度回调；阶段生成会输出准备上下文、3 个角色 Agent、汇总 Agent、保存产物；阶段推进会输出锁定、进入下一阶段、最终合并和 Bible 更新事件。
+- CLI `outline`、`plan-outline`、`compose` 路径传入同一 `[Stage] message` 进度回调；`DirectorService`/chat/飞书执行 outline 推进时也透传进度。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_director_service.py tests/test_outline_collaboration.py tests/test_graph_writer.py
+# 67 passed
+.venv/bin/python -m pytest
+# 167 passed
+.venv/bin/python tests/smoke_outline_collaboration.py
+# outline collaboration smoke ok
+.venv/bin/python tests/smoke_phase2_chat.py
+# phase2 chat smoke ok
+.venv/bin/python tests/smoke_phase2.py
+# phase2 smoke ok
+```
+
+剩余限制：
+
+- 阶段角色 Agent 仍串行执行。
+- 默认裁量摘要当前记录用户交托意图和待裁量问题，不额外调用模型生成更长解释。

@@ -351,3 +351,39 @@ def test_direction_stage_markdown_integrates_without_feedback_dump():
     assert "## 用户本轮反馈" not in markdown
     assert "师傅暗中吞噬主角气运" not in markdown
     assert "整理后的方向定位" in markdown
+
+
+def test_outline_stage_generation_emits_progress_events(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.idea = "月球城市失忆工程师"
+    events = []
+    graph = build_outline_collaboration_graph(CodexCLIAdapter(mock=True), store, progress=lambda stage, message: events.append((stage, message)))
+
+    state = run_outline_turn(graph, state, store, "生成大纲")
+
+    assert state.outline_stage == "direction"
+    assert any(stage == "OutlineStage" and "准备" in message for stage, message in events)
+    assert any(stage == "类型定位 Agent" for stage, _message in events)
+    assert any(stage == "主题卖点 Agent" for stage, _message in events)
+    assert any(stage == "风险编辑 Agent" for stage, _message in events)
+    assert any(stage == "大纲汇总 Agent" for stage, _message in events)
+    assert any(stage == "OutlineStage" and "保存" in message for stage, message in events)
+
+
+def test_outline_stage_advance_emits_progress_events(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.idea = "月球城市失忆工程师"
+    events = []
+    graph = build_outline_collaboration_graph(CodexCLIAdapter(mock=True), store, progress=lambda stage, message: events.append((stage, message)))
+
+    state = run_outline_turn(graph, state, store, "生成大纲")
+    events.clear()
+    state = run_outline_turn(graph, state, store, "确认进入下一阶段")
+
+    assert state.outline_stage == "concept"
+    assert any(stage == "OutlineStage" and "锁定" in message for stage, message in events)
+    assert any(stage == "OutlineStage" and "进入" in message for stage, message in events)
+    assert any(stage == "故事概念 Agent" for stage, _message in events)
+    assert any(stage == "大纲汇总 Agent" for stage, _message in events)

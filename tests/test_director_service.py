@@ -365,3 +365,111 @@ def test_director_service_update_bible_runs_graph(tmp_path):
     assert result.state.director_action == "update_bible"
     assert store.novel_bible_markdown_path("demo").exists()
     assert "小说圣经已更新" in result.final_message
+
+def test_director_service_reports_execution_plan_for_write_chapter(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.current_chapter = 1
+    store.save_state(state)
+    events = []
+    service = DirectorService(
+        store,
+        CodexCLIAdapter(mock=True),
+        MockSearchBackend(),
+        progress=lambda stage, message: events.append((stage, message)),
+    )
+
+    result = service.handle_turn("demo", "写第 1 章", channel="cli")
+
+    assert result.state.director_action == "write_chapter"
+    assert ("Plan", "将生成第 1 章正文；缺少章节卡或场景卡时会先自动补齐。") in events
+    assert any(stage == "Drafting 1/8" for stage, _message in events)
+
+
+def make_characters_options_ready_state(store: LocalStore) -> NovelState:
+    state = store.create_project("Demo", "demo")
+    state.idea = "重生魔门悬疑智斗"
+    state.active_workflow = "outline"
+    state.outline_stage = "characters"
+    state.outline_stage_status = "options_ready"
+    state.outline_stage_artifacts["characters"] = {
+        "stage": "characters",
+        "label": "人物关系",
+        "status": "options_ready",
+        "synthesis": "## Director 汇总\n主角、魔宗圣女、剑宗天才少女构成三角压力。",
+        "role_reviews": [],
+    }
+    state.pending_questions = [
+        "魔宗圣女的保守来源是心魔誓约还是派系规则？",
+        "剑宗天才少女首次审判是否发生在葬魂谷？",
+    ]
+    state.pending_question = "\n".join(f"{i}. {q}" for i, q in enumerate(state.pending_questions, 1))
+    store.save_state(state)
+    return state
+
+
+def test_outline_stage_delegated_discretion_advances(tmp_path):
+    store = LocalStore(tmp_path)
+    make_characters_options_ready_state(store)
+    service = DirectorService(store, CodexCLIAdapter(mock=True), MockSearchBackend())
+
+    result = service.handle_turn("demo", "这些由你决定，按当前建议处理并进入下一阶段", channel="cli")
+
+    assert result.state.outline_stage == "story_flow"
+    assert result.state.outline_stage_status == "options_ready"
+    assert result.state.outline_stage_artifacts["characters"]["status"] == "locked"
+    assert "default_discretion_summary" in result.state.outline_stage_artifacts["characters"]
+    assert "story_flow" in result.state.outline_stage_artifacts
+    assert result.decision.action == "persist_outputs"
+
+
+def test_outline_stage_specific_feedback_reruns_current_stage(tmp_path):
+    store = LocalStore(tmp_path)
+    make_characters_options_ready_state(store)
+    service = DirectorService(store, CodexCLIAdapter(mock=True), MockSearchBackend())
+
+    result = service.handle_turn("demo", "补充人物设定：魔宗圣女表面诱惑，实际受心魔誓约限制", channel="cli")
+
+    assert result.state.director_action == "run_outline_stage"
+    assert result.state.outline_stage == "characters"
+    assert result.state.outline_stage_status == "options_ready"
+    assert result.decision.action == "revise_outline"
+    assert "心魔誓约" in result.decision.instruction
+
+
+def test_outline_stage_numbered_answers_rerun_current_stage(tmp_path):
+    store = LocalStore(tmp_path)
+    make_characters_options_ready_state(store)
+    service = DirectorService(store, CodexCLIAdapter(mock=True), MockSearchBackend())
+
+    result = service.handle_turn("demo", "1. 心魔誓约 2. 葬魂谷", channel="cli")
+
+    assert result.state.director_action == "run_outline_stage"
+    assert result.state.outline_stage == "characters"
+    assert result.decision.intent == "answer_pending_questions"
+    assert "心魔誓约" in result.decision.instruction
+    assert "葬魂谷" in result.decision.instruction
+
+
+def test_outline_stage_view_current_does_not_advance(tmp_path):
+    store = LocalStore(tmp_path)
+    make_characters_options_ready_state(store)
+    service = DirectorService(store, CodexCLIAdapter(mock=True), MockSearchBackend())
+
+    result = service.handle_turn("demo", "查看当前阶段", channel="cli")
+
+    assert result.state.director_action == "show_outline"
+    assert result.state.outline_stage == "characters"
+    assert result.state.outline_stage_artifacts["characters"]["status"] == "options_ready"
+    assert "人物关系" in result.final_message
+
+
+def test_outline_stage_simple_confirmation_advances(tmp_path):
+    store = LocalStore(tmp_path)
+    make_characters_options_ready_state(store)
+    service = DirectorService(store, CodexCLIAdapter(mock=True), MockSearchBackend())
+
+    result = service.handle_turn("demo", "继续", channel="cli")
+
+    assert result.state.outline_stage == "story_flow"
+    assert result.state.outline_stage_artifacts["characters"]["status"] == "locked"

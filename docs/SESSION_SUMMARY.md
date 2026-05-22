@@ -261,6 +261,8 @@ worldbuild
 # outline collaboration smoke ok
 .venv/bin/python tests/smoke_phase2_chat.py
 # phase2 chat smoke ok
+.venv/bin/python tests/smoke_phase2.py
+# phase2 smoke ok
 ```
 
 当前验证结果：全量 `.venv/bin/python -m pytest` 为 `134 passed`；新增 Phase 6+7 相关回归 `tests/test_graph_chapter_plan.py tests/test_graph_scene.py tests/test_director_service.py tests/test_graph_writer.py` 为 `46 passed`。
@@ -564,6 +566,8 @@ Smoke 验证：`.venv/bin/python tests/smoke_phase2_chat.py`，结果 `phase2 ch
 # outline collaboration smoke ok
 .venv/bin/python tests/smoke_phase2_chat.py
 # phase2 chat smoke ok
+.venv/bin/python tests/smoke_phase2.py
+# phase2 smoke ok
 ```
 
 
@@ -585,6 +589,8 @@ Smoke 验证：`.venv/bin/python tests/smoke_phase2_chat.py`，结果 `phase2 ch
 # outline collaboration smoke ok
 .venv/bin/python tests/smoke_phase2_chat.py
 # phase2 chat smoke ok
+.venv/bin/python tests/smoke_phase2.py
+# phase2 smoke ok
 ```
 
 
@@ -659,3 +665,75 @@ Smoke 验证：`.venv/bin/python tests/smoke_phase2_chat.py`，结果 `phase2 ch
 - 导出目前只生成 Markdown。
 - `final.md`、`summary.md` 和 exports 重复运行会覆盖固定路径，历史版本以 artifact registry 为准。
 - 全书多卷拆分仍使用单卷 `volume_001.md`，后续可基于大纲卷信息扩展。
+
+## 32. 本轮更新：Chat 长任务进度可见性
+
+- 新增统一进度辅助 `progress.py`，各图通过可选 `progress` 参数输出阶段事件，默认 no-op 保持旧调用兼容。
+- `DirectorService` 在执行写章、审稿、修订、定稿、导出、章节卡、场景卡等长任务前输出执行计划，让 CLI 立即显示下一步会做什么。
+- 章节卡、场景卡、正文草稿、审稿、修订、定稿和导出图均补充阶段级提示；`write_chapter` 自动补齐章节卡/场景卡时会继续透传子图进度。
+- 本轮不展示模型私有推理链，也不改成流式 adapter；Codex/DeepSeek 仍等待完整模型响应，但用户可看到工作流进度。
+- 新增回归测试覆盖 Drafting Graph 进度事件和 Director 写章执行计划。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_graph_drafting.py tests/test_graph_review.py tests/test_graph_revision.py tests/test_finalize_chapter.py tests/test_graph_export.py tests/test_director_service.py
+# 28 passed
+.venv/bin/python -m pytest
+# 150 passed
+.venv/bin/python tests/smoke_full_workflow_mock.py
+# full workflow mock smoke passed
+```
+
+剩余限制：
+
+- 真实 token 流式输出尚未实现。
+- 大纲阶段角色 Agent、多编辑审稿 Agent 仍串行执行，后续可在不破坏产物顺序的前提下评估并行化。
+
+## 33. 本轮更新：DeepSeek Agent Thinking 策略
+
+- 新增 `AgentCallOptions`，adapter 的 `complete` 接口可接收 `options=None`，旧调用保持兼容。
+- DeepSeek 根据 `options.agent` 或 prompt 第一行 `AGENT:` 自动选择 thinking 策略；未知 Agent 默认 `enabled-medium`。
+- DeepSeek 轻量 Agent 使用 thinking disabled 并保留 `temperature`；综合、规划、写作和汇总类 Agent 使用 thinking enabled + `reasoning_effort=medium`，不发送 `temperature`。DeepSeek 官方会把 `medium` 映射为 `high`，项目内部仍以 medium 表达策略意图。
+- 当前没有 Agent 默认使用 `enabled-high`；保留策略表用于后续显式提升。
+- Codex CLI adapter 只兼容新 options 参数，忽略 options，不新增 reasoning 配置，mock 输出保持不变。
+- DeepSeek 返回 `reasoning_content` 时仍只取 `message.content`。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_deepseek_adapter.py tests/test_codex_adapter.py
+# 17 passed
+.venv/bin/python -m pytest
+# 160 passed
+```
+
+
+## 34. 本轮更新：大纲阶段 Director 判断与进度可见性
+
+- 优化 `options_ready` 大纲阶段的 Director 判断：简单确认直接推进，具体补充或编号回答会重跑当前阶段，查看请求只展示阶段，用户把剩余问题交给系统裁量时会锁定当前阶段并推进。
+- 新增默认裁量摘要记录，随阶段锁定写入 artifact 和锁定约束，避免待确认问题把流程卡死。
+- Director prompt 现在显式提供 active workflow、当前 outline stage/status、pending questions 和最新输入，并声明阶段动作语义。
+- 大纲图新增可选 progress 回调；阶段生成会显示角色 Agent、汇总 Agent 和保存产物，阶段推进会显示锁定、进入下一阶段、最终合并和 Bible 更新。
+- CLI outline、plan-outline、compose 入口以及 chat/飞书服务执行 outline 阶段时都会透传同一进度输出。
+- 新增回归测试覆盖系统裁量推进、具体人物补充、编号回答、查看当前阶段、简单确认，以及大纲阶段生成/推进进度事件。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_director_service.py tests/test_outline_collaboration.py tests/test_graph_writer.py
+# 67 passed
+.venv/bin/python -m pytest
+# 167 passed
+.venv/bin/python tests/smoke_outline_collaboration.py
+# outline collaboration smoke ok
+.venv/bin/python tests/smoke_phase2_chat.py
+# phase2 chat smoke ok
+.venv/bin/python tests/smoke_phase2.py
+# phase2 smoke ok
+```
+
+剩余限制：
+
+- 本轮不新增 CLI 参数，也不做终端动画进度条。
+- 真实模型的具体裁量仍依赖当前阶段产物；默认裁量摘要只记录推进依据，不展开成新的长篇设定。

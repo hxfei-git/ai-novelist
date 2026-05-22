@@ -11,6 +11,7 @@ from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
 from ai_novelist.artifacts import ArtifactRecord, get_latest_artifact, load_artifact_text, load_artifacts, register_artifact
 from ai_novelist.bible import bible_to_dict, load_bible, merge_bible_updates, save_bible
 from ai_novelist.context_builder import build_context
+from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress
 from ai_novelist.prompts import load_prompt
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
@@ -22,35 +23,43 @@ class CompiledGraph(Protocol):
 
 
 class FinalizeSequentialGraph:
-    def __init__(self, adapter: AgentAdapter, store: LocalStore) -> None:
+    def __init__(self, adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc = noop_progress) -> None:
         self.adapter = adapter
         self.store = store
+        self.progress = progress
 
     def invoke(self, state: dict) -> dict:
+        emit_progress(self.progress, "Finalize 1/6", "正在读取最新章节草稿...")
         current = load_latest_draft_node(state, self.store)
         if NovelState.from_dict(current).review_status == "error":
             return current
+        emit_progress(self.progress, "Finalize 2/6", "正在保存定稿章节...")
         current = save_final_chapter_node(current, self.store)
+        emit_progress(self.progress, "Finalize 3/6", "正在生成章节摘要...")
         current = summarize_chapter_node(current, self.adapter, self.store)
+        emit_progress(self.progress, "Finalize 4/6", "正在保存章节摘要...")
         current = save_chapter_summary_node(current, self.store)
+        emit_progress(self.progress, "Finalize 5/6", "正在抽取小说圣经更新...")
         current = extract_bible_updates_from_final_node(current, self.adapter, self.store)
+        emit_progress(self.progress, "Finalize 6/6", "正在写回小说圣经...")
         current = update_bible_from_final_node(current, self.store)
         return current
 
 
-def build_finalize_graph(adapter: AgentAdapter, store: LocalStore) -> CompiledGraph:
+def build_finalize_graph(adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc | None = None) -> CompiledGraph:
+    progress_func = progress or noop_progress
     try:
         from langgraph.graph import END, StateGraph
     except ModuleNotFoundError:
-        return FinalizeSequentialGraph(adapter, store)
+        return FinalizeSequentialGraph(adapter, store, progress_func)
 
     graph = StateGraph(dict)
-    graph.add_node("load_latest_draft", lambda data: load_latest_draft_node(data, store))
-    graph.add_node("save_final_chapter", lambda data: save_final_chapter_node(data, store))
-    graph.add_node("summarize_chapter", lambda data: summarize_chapter_node(data, adapter, store))
-    graph.add_node("save_chapter_summary", lambda data: save_chapter_summary_node(data, store))
-    graph.add_node("extract_bible_updates_from_final", lambda data: extract_bible_updates_from_final_node(data, adapter, store))
-    graph.add_node("update_bible", lambda data: update_bible_from_final_node(data, store))
+    graph.add_node("load_latest_draft", lambda data: progress_node(progress_func, "Finalize 1/6", "正在读取最新章节草稿...", lambda: load_latest_draft_node(data, store)))
+    graph.add_node("save_final_chapter", lambda data: progress_node(progress_func, "Finalize 2/6", "正在保存定稿章节...", lambda: save_final_chapter_node(data, store)))
+    graph.add_node("summarize_chapter", lambda data: progress_node(progress_func, "Finalize 3/6", "正在生成章节摘要...", lambda: summarize_chapter_node(data, adapter, store)))
+    graph.add_node("save_chapter_summary", lambda data: progress_node(progress_func, "Finalize 4/6", "正在保存章节摘要...", lambda: save_chapter_summary_node(data, store)))
+    graph.add_node("extract_bible_updates_from_final", lambda data: progress_node(progress_func, "Finalize 5/6", "正在抽取小说圣经更新...", lambda: extract_bible_updates_from_final_node(data, adapter, store)))
+    graph.add_node("update_bible", lambda data: progress_node(progress_func, "Finalize 6/6", "正在写回小说圣经...", lambda: update_bible_from_final_node(data, store)))
     graph.set_entry_point("load_latest_draft")
     graph.add_conditional_edges("load_latest_draft", route_after_load, {"continue": "save_final_chapter", "end": END})
     graph.add_edge("save_final_chapter", "summarize_chapter")
@@ -59,6 +68,11 @@ def build_finalize_graph(adapter: AgentAdapter, store: LocalStore) -> CompiledGr
     graph.add_edge("extract_bible_updates_from_final", "update_bible")
     graph.add_edge("update_bible", END)
     return graph.compile()
+
+
+def progress_node(progress: ProgressFunc, stage: str, message: str, fn) -> dict:
+    emit_progress(progress, stage, message)
+    return fn()
 
 
 def route_after_load(data: dict) -> str:

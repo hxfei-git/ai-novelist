@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import UTC, datetime
 from typing import Protocol
 
 from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
 from ai_novelist.artifacts import ArtifactRecord, register_artifact
+from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress
 from ai_novelist.prompts import load_prompt
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
@@ -69,11 +71,12 @@ STAGE_ROLES = {
 }
 
 
-def build_outline_collaboration_graph(adapter: AgentAdapter, store: LocalStore) -> CompiledGraph:
+def build_outline_collaboration_graph(adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc | None = None) -> CompiledGraph:
+    progress_func = progress or noop_progress
     try:
         from langgraph.graph import END, StateGraph
     except ModuleNotFoundError:
-        return OutlineSequentialGraph(adapter, store)
+        return OutlineSequentialGraph(adapter, store, progress_func)
 
     graph = StateGraph(dict)
     graph.add_node("director", lambda data: outline_director_node(data, adapter, store))
@@ -88,8 +91,8 @@ def build_outline_collaboration_graph(adapter: AgentAdapter, store: LocalStore) 
     graph.add_node("persist_outline", lambda data: persist_outline_node(data, store))
     graph.add_node("show_status", lambda data: outline_show_status_node(data, store))
     graph.add_node("show_outline", lambda data: outline_show_outline_node(data, store))
-    graph.add_node("run_outline_stage", lambda data: run_outline_stage_node(data, adapter, store))
-    graph.add_node("advance_outline_stage", lambda data: advance_outline_stage_node(data, adapter, store))
+    graph.add_node("run_outline_stage", lambda data: run_outline_stage_node(data, adapter, store, progress_func))
+    graph.add_node("advance_outline_stage", lambda data: advance_outline_stage_node(data, adapter, store, progress_func))
     graph.add_node("show_outline_stage", lambda data: show_outline_stage_node(data, store))
 
     graph.set_entry_point("director")
@@ -141,9 +144,10 @@ def build_outline_collaboration_graph(adapter: AgentAdapter, store: LocalStore) 
 
 
 class OutlineSequentialGraph:
-    def __init__(self, adapter: AgentAdapter, store: LocalStore) -> None:
+    def __init__(self, adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc = noop_progress) -> None:
         self.adapter = adapter
         self.store = store
+        self.progress = progress
 
     def invoke(self, state: dict) -> dict:
         current = outline_director_node(state, self.adapter, self.store)
@@ -179,9 +183,9 @@ class OutlineSequentialGraph:
         if route == "show_outline":
             return outline_show_outline_node(current, self.store)
         if route == "run_outline_stage":
-            return run_outline_stage_node(current, self.adapter, self.store)
+            return run_outline_stage_node(current, self.adapter, self.store, self.progress)
         if route == "advance_outline_stage":
-            return advance_outline_stage_node(current, self.adapter, self.store)
+            return advance_outline_stage_node(current, self.adapter, self.store, self.progress)
         if route == "show_outline_stage":
             return show_outline_stage_node(current, self.store)
         return current
@@ -220,7 +224,19 @@ def outline_director_node(data: dict, adapter: AgentAdapter, store: LocalStore) 
             state.director_intent = "status"
             state.director_task_args = {"stage": explicit_stage}
             state.director_message = f"我会展示{STAGE_LABELS[explicit_stage]}阶段产物。"
-        elif is_stage_confirmation(user_text):
+        elif is_stage_view_request(user_text) and any(marker in user_text for marker in ("当前阶段", "阶段内容", "阶段产物", "当前产物")):
+            state.director_action = "show_outline_stage"
+            state.director_intent = "status"
+            state.director_task_args = {"stage": state.outline_stage}
+            state.director_message = f"我会展示{STAGE_LABELS[state.outline_stage]}阶段产物。"
+        elif state.outline_stage_status == "options_ready" and delegates_stage_decision(user_text):
+            summary = build_stage_default_discretion_summary(state, user_text)
+            state.director_action = "advance_outline_stage"
+            state.director_intent = "approve"
+            state.director_task_args = {"default_discretion_summary": summary}
+            add_unique_items(state.locked_constraints, [summary])
+            state.director_message = "我会按当前阶段建议作默认裁量，锁定本阶段并进入下一阶段。"
+        elif state.outline_stage_status == "options_ready" and is_short_stage_confirmation(user_text):
             state.director_action = "advance_outline_stage"
             state.director_intent = "approve"
             state.director_message = "我会锁定当前阶段，并进入下一阶段。"
@@ -375,7 +391,7 @@ def compare_outline_versions_node(data: dict, adapter: AgentAdapter, store: Loca
     return state.to_dict()
 
 
-def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
+def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc = noop_progress) -> dict:
     state = NovelState.from_dict(data)
     ensure_outline_stage(state)
     stage = state.outline_stage
@@ -385,8 +401,11 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore)
         store.save_state(state)
         return state.to_dict()
 
+    label = STAGE_LABELS[stage]
+    emit_progress(progress, "OutlineStage", f"正在准备第 {stage_number(stage)} 阶段「{label}」上下文...")
     role_reviews: list[dict[str, str]] = []
     for role in STAGE_ROLES[stage]:
+        emit_progress(progress, role, f"正在生成「{label}」角色短评...")
         try:
             output = adapter.complete(build_outline_stage_role_prompt(state, stage, role), store.project_dir(state.project_id))
         except AgentAdapterError as exc:
@@ -396,6 +415,7 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore)
             return state.to_dict()
         role_reviews.append({"role": role, "content": output})
 
+    emit_progress(progress, "大纲汇总 Agent", f"正在汇总「{label}」阶段产物...")
     try:
         synthesis = adapter.complete(build_outline_stage_synthesizer_prompt(state, stage, role_reviews), store.project_dir(state.project_id))
     except AgentAdapterError as exc:
@@ -429,15 +449,17 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore)
         state.pending_question = f"请确认是否锁定{STAGE_LABELS[stage]}并进入下一阶段，或继续提出修改。"
         state.pending_questions = [state.pending_question]
     record_stage_history(state, "run", stage, state.user_request)
+    emit_progress(progress, "OutlineStage", f"正在保存「{label}」阶段产物...")
     save_outline_stage_outputs(state, stage, format_stage_markdown(artifact), store)
     store.save_state(state)
     return state.to_dict()
 
 
-def advance_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
+def advance_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc = noop_progress) -> dict:
     state = NovelState.from_dict(data)
     ensure_outline_stage(state)
     stage = state.outline_stage
+    emit_progress(progress, "OutlineStage", f"正在锁定第 {stage_number(stage)} 阶段「{STAGE_LABELS.get(stage, stage)}」...")
     hydrate_stage_artifact_from_legacy_fields(state, stage, store)
     lock_previous_stage_artifacts(state, stage)
     if stage == "done":
@@ -448,22 +470,27 @@ def advance_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalSt
         state.director_action = "run_outline_stage"
         state.director_message = f"当前第 {stage_number(stage)} 阶段还没有可锁定产物，我先生成{STAGE_LABELS[stage]}。"
         store.save_state(state)
-        return run_outline_stage_node(state.to_dict(), adapter, store)
+        return run_outline_stage_node(state.to_dict(), adapter, store, progress)
 
     artifact = dict(state.outline_stage_artifacts[stage])
+    default_summary = str(state.director_task_args.get("default_discretion_summary") or "").strip()
+    if default_summary:
+        artifact["default_discretion_summary"] = default_summary
     artifact["status"] = "locked"
     artifact["locked_at"] = datetime.now(UTC).isoformat(timespec="seconds")
     state.outline_stage_artifacts[stage] = artifact
-    record_stage_history(state, "lock", stage, state.user_request)
+    record_stage_history(state, "lock", stage, default_summary or state.user_request)
 
     next_stage = next_outline_stage(stage)
     if next_stage is None:
+        emit_progress(progress, "OutlineStage", "正在合并八阶段产物并保存最终大纲...")
         finalize_locked_outline(state, store)
         store.save_state(state)
         outline_message = state.director_message
         try:
             from ai_novelist.graph_bible import build_bible_graph
 
+            emit_progress(progress, "Bible", "正在基于锁定大纲更新小说圣经...")
             bible_state = NovelState.from_dict(build_bible_graph(adapter, store).invoke(state.to_dict()))
             bible_state.director_action = "advance_outline_stage"
             bible_state.director_message = outline_message + "\n" + bible_state.director_message
@@ -475,6 +502,7 @@ def advance_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalSt
             store.save_state(state)
             return state.to_dict()
 
+    emit_progress(progress, "OutlineStage", f"正在进入第 {stage_number(next_stage)} 阶段「{STAGE_LABELS[next_stage]}」...")
     state.outline_stage = next_stage  # type: ignore[assignment]
     state.outline_stage_status = "collecting"
     state.current_stage = next_stage
@@ -483,7 +511,7 @@ def advance_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalSt
     state.pending_question = f"请确认是否锁定{STAGE_LABELS[next_stage]}并进入下一阶段，或继续提出修改。"
     state.pending_questions = [state.pending_question]
     store.save_state(state)
-    return run_outline_stage_node(state.to_dict(), adapter, store)
+    return run_outline_stage_node(state.to_dict(), adapter, store, progress)
 
 
 
@@ -607,6 +635,23 @@ def is_stage_confirmation(text: str) -> bool:
     return any(marker in text for marker in ("确认进入下一阶段", "锁定并进入", "进入下一阶段", "推进到下一阶段"))
 
 
+
+def is_short_stage_confirmation(text: str) -> bool:
+    return text.strip().lower() in {"确认", "继续", "下一阶段", "进入下一阶段", "确认进入下一阶段", "锁定", "通过", "ok", "yes", "approve", "confirm"}
+
+
+def delegates_stage_decision(text: str) -> bool:
+    markers = ("你决定", "由你决定", "交给你", "系统决定", "系统裁量", "按你建议", "按系统建议", "按当前建议", "默认处理", "你来定", "你看着办")
+    wants_advance = any(marker in text for marker in ("下一阶段", "进入", "推进", "继续", "锁定", "确定"))
+    return any(marker in text for marker in markers) and wants_advance
+
+
+def build_stage_default_discretion_summary(state: NovelState, text: str) -> str:
+    questions = [item.strip() for item in state.pending_questions if item.strip()]
+    if questions:
+        return f"用户将待确认问题交由系统按当前阶段产物默认裁量并推进；待裁量问题：{'；'.join(questions[:4])}；用户原话：{text}"
+    return f"用户认可当前阶段产物，并将细节交由系统按当前建议默认裁量后推进；用户原话：{text}"
+
 def is_revision_request(text: str) -> bool:
     return any(marker in text for marker in ("修改", "调整", "重做", "重新", "不要", "更", "太", "强化", "补充"))
 
@@ -647,7 +692,7 @@ def stage_action_from_director(action: str, user_text: str, state: NovelState) -
         return "advance_outline_stage" if state.outline_stage != "done" else "persist_outline"
     if action == "show_outline":
         return "show_outline_stage" if state.active_workflow == "outline" and not state.outline.strip() else "show_outline"
-    if is_stage_confirmation(user_text):
+    if is_short_stage_confirmation(user_text) or delegates_stage_decision(user_text):
         return "advance_outline_stage"
     return action
 
@@ -827,9 +872,9 @@ def stage_ready_message(stage: str, questions: list[str] | None = None) -> str:
         question_lines = "\n".join(f"{index}. {question}" for index, question in enumerate(questions, start=1))
         return (
             message
-            + "\n\n本阶段还有这些需要你确认的问题：\n"
+            + "\n\n本阶段有这些可补充确认的问题：\n"
             + question_lines
-            + "\n\n你可以直接逐条回答；如果认可当前设定，也可以说“确认进入下一阶段”。"
+            + "\n\n你可以逐条补充；也可以明确说按当前建议处理并进入下一阶段。"
         )
     return message + "你可以继续反馈修改，或明确说“确认进入下一阶段”来锁定。"
 
@@ -965,6 +1010,9 @@ def build_outline_director_prompt(state: NovelState) -> str:
     history = "\n".join(f"{msg['role']}: {msg['content']}" for msg in state.messages[-12:])
     return (
         f"{template.rstrip()}\n\n"
+        "## 输出格式\n"
+        "优先输出 JSON：action, intent, target, user_message, instruction, task_args, locked_constraints。大纲阶段动作可用 run_current_stage、advance_current_stage、answer_pending_questions、show_stage、ask_user。\n"
+        "请明确区分：新增修改意见、回答待确认问题、把剩余问题交给系统裁量并推进、仅查看状态。待确认问题不是必须逐项回答的阻塞项。\n\n"
         "## 当前大纲共创状态\n"
         f"项目：{state.project_id}\n"
         f"标题：{state.title}\n"
@@ -980,7 +1028,11 @@ def build_outline_director_prompt(state: NovelState) -> str:
         f"修订要求：{state.revision_instruction or '暂无'}\n"
         f"编辑结论：{state.editor_decision}\n"
         f"质量分：{state.quality_score}\n"
-        f"大纲阶段：{state.outline_stage} / {state.outline_stage_status}\n\n"
+        f"active_workflow：{state.active_workflow or 'none'}\n"
+        f"outline_stage：{state.outline_stage}\n"
+        f"outline_stage_status：{state.outline_stage_status}\n"
+        f"pending_questions：{json.dumps(state.pending_questions, ensure_ascii=False)}\n"
+        f"pending_question：{state.pending_question or '暂无'}\n\n"
         f"## 最近对话\n{history or '暂无'}\n\n"
         f"最新用户输入：{state.user_request}\n"
     )
@@ -1027,11 +1079,24 @@ def format_retrieval_sources(sources: list[dict]) -> str:
 
 
 def parse_outline_director_output(output: str) -> dict:
+    parsed = parse_outline_json_object(output)
+    if parsed:
+        action = str(parsed.get("action") or "ask_user").strip().lower()
+        action = normalize_outline_director_action(action)
+        task_args = parsed.get("task_args") if isinstance(parsed.get("task_args"), dict) else {}
+        return {
+            "action": action,
+            "target": str(parsed.get("target") or "outline").strip().lower(),
+            "intent": str(parsed.get("intent") or "answer").strip().lower(),
+            "message": str(parsed.get("user_message") or parsed.get("message") or "我会继续推进大纲共创。").strip(),
+            "instruction": str(parsed.get("instruction") or task_args.get("instruction") or "").strip(),
+            "locked_constraints": normalize_outline_str_list(parsed.get("locked_constraints", [])),
+            "style_preferences": normalize_outline_str_list(parsed.get("style_preferences", [])),
+            "chapter": None,
+        }
+
     action = field_value(output, "ACTION").lower() or "ask_user"
-    if action == "plan_outline":
-        action = "generate_outline"
-    if action not in OUTLINE_ACTIONS:
-        action = "ask_user"
+    action = normalize_outline_director_action(action)
     intent = field_value(output, "INTENT").lower() or "answer"
     target = field_value(output, "TARGET").lower() or "unknown"
     chapter = None
@@ -1050,6 +1115,46 @@ def parse_outline_director_output(output: str) -> dict:
         "style_preferences": split_csv(field_value(output, "STYLE_PREFERENCES")),
         "chapter": chapter,
     }
+
+
+def normalize_outline_director_action(action: str) -> str:
+    if action == "plan_outline":
+        action = "generate_outline"
+    if action in {"run_current_stage", "answer_pending_questions"}:
+        action = "revise_outline"
+    if action == "advance_current_stage":
+        action = "advance_outline_stage"
+    if action == "show_stage":
+        action = "show_outline_stage"
+    return action if action in OUTLINE_ACTIONS else "ask_user"
+
+
+def parse_outline_json_object(output: str) -> dict:
+    text = output.strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start < 0 or end <= start:
+            return {}
+        try:
+            value = json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            return {}
+    return value if isinstance(value, dict) else {}
+
+
+def normalize_outline_str_list(value) -> list[str]:
+    if isinstance(value, str):
+        return split_csv(value)
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
 
 
 def field_value(output: str, name: str) -> str:

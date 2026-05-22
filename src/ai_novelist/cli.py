@@ -203,7 +203,7 @@ def generate_project_outline(
     effective_timeout = args.timeout or settings.codex_timeout_seconds
     adapter = make_agent_adapter(args, settings, effective_timeout)
     print_real_mode_notice(args.mock, adapter, effective_timeout)
-    graph = build_outline_collaboration_graph(adapter, store)
+    graph = build_outline_collaboration_graph(adapter, store, progress=print_progress)
     result = NovelState.from_dict(graph.invoke(state.to_dict()))
     print_outline_turn_result(result, store)
 
@@ -312,7 +312,7 @@ def run_compose_command(
         state.active_workflow = "outline"
         append_message(state, "user", state.user_request)
         store.save_state(state)
-        graph = build_outline_collaboration_graph(adapter, store)
+        graph = build_outline_collaboration_graph(adapter, store, progress=print_progress)
         result = NovelState.from_dict(graph.invoke(state.to_dict()))
         print_outline_turn_result(result, store)
         if args.auto_approve and result.outline_stage_status == "options_ready" and result.outline_stage != "done":
@@ -604,7 +604,7 @@ def run_writer_command(
         state.active_workflow = "outline"
         append_message(state, "user", state.user_request)
         store.save_state(state)
-        graph = build_outline_collaboration_graph(adapter, store)
+        graph = build_outline_collaboration_graph(adapter, store, progress=print_progress)
         result = NovelState.from_dict(graph.invoke(state.to_dict()))
         print_outline_turn_result(result, store)
         if args.auto_approve and result.outline_stage_status == "options_ready" and result.outline_stage != "done":
