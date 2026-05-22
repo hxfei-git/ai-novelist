@@ -1222,3 +1222,24 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 219 passed
 ```
+
+## 58. 本轮更新：Outline Reviser Prompt 整改
+
+- 完整读取并执行 `14_outline_reviser.md`。
+- `outline_reviser.md` 现在默认做最小必要修订，不重写完整大纲。
+- 修订只回应 `revision_instruction`、用户修订意见和编辑意见覆盖的区块。
+- `locked_constraints` 必须原样保留；未被修订指令覆盖的内容保持原意与顺序。
+- 禁止新增无关 canon、无依据大改、重写锁定约束和扩写正文。
+- 输出预算为变更项最多 8 条、每条不超过 100 中文字符、待确认最多 3 条。
+- 新增回归测试覆盖最小修订、修订摘要和锁定约束边界。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 6 passed
+.venv/bin/python -m pytest tests/test_graph_writer.py tests/test_outline_collaboration.py
+# 69 passed
+.venv/bin/python -m pytest
+# 220 passed
+```

@@ -64,3 +64,22 @@ def test_outline_editor_prompt_keeps_parseable_status_and_review_boundary():
     assert "不得把建议写成新的稳定设定" in prompt
     for forbidden in ("完整重写大纲", "新增世界观", "人物关系新机制", "章节正文", "长篇分析过程"):
         assert forbidden in prompt
+
+
+def test_outline_reviser_prompt_defaults_to_minimal_revision():
+    prompt = load_prompt("outline_reviser")
+
+    assert "做最小必要修订" in prompt
+    assert "默认不要重写完整大纲" in prompt
+    assert "只回应 revision_instruction" in prompt
+    assert "locked_constraints 必须原样保留" in prompt
+    assert "未被修订指令覆盖" in prompt
+    assert "不得新增与 revision_instruction 无关的 canon" in prompt
+    assert "只有调用方明确要求" in prompt
+    assert "变更项最多 8 条" in prompt
+    assert "每条不超过 100 中文字符" in prompt
+    assert "待确认最多 3 条" in prompt
+    assert "修订摘要" in prompt
+    assert "保留约束" in prompt
+    for forbidden in ("无依据大改", "重写锁定约束", "改动未被要求的世界观/人物关系", "扩写正文"):
+        assert forbidden in prompt

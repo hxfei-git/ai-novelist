@@ -1474,3 +1474,22 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Outline editor 只产出审稿判断和可路由修复建议。
 - 建议不能变成替代大纲或新的稳定设定。
+
+## 54. Outline Reviser Prompt 整改
+
+目标：执行 `14_outline_reviser.md`，将大纲修订从默认完整重写改为最小必要修订，只回应用户修订意见和编辑意见。
+
+已完成：
+
+- `outline_reviser.md` 明确默认不重写完整大纲，只修订 `revision_instruction`、用户修订意见和编辑意见覆盖的区块。
+- `locked_constraints` 必须原样保留，不得改写、弱化或替换。
+- 未被修订指令覆盖的世界观、人物关系、主线结构和伏笔保持原意与顺序。
+- 禁止新增与 `revision_instruction` 无关的 canon、无依据大改、重写锁定约束和扩写正文。
+- 只有调用方明确要求完整大纲时才输出完整稿，且需要标注变更处。
+- 输出预算限制为变更项最多 8 条、每条不超过 100 中文字符、待确认最多 3 条。
+- 新增 prompt loader 回归测试覆盖最小修订、锁定约束原样保留、修订摘要和禁止项。
+
+当前边界：
+
+- Outline reviser 是局部修订器，不是重新规划器。
+- 未涉及内容保持原意与顺序；锁定约束按原文保留。
