@@ -200,3 +200,21 @@ def test_scene_conflict_check_prompt_outputs_json_minimal_fixes():
     assert "保持场景数量" in prompt
     for forbidden in ("新增场景", "新人物关系", "新世界规则", "新 canon", "大幅重写", "正文"):
         assert forbidden in prompt
+
+
+def test_scene_synthesizer_prompt_requires_inherited_fields_and_scene_local_details():
+    prompt = load_prompt("scene_synthesizer")
+
+    assert "只输出 JSON" in prompt
+    assert "scenes" in prompt
+    assert "必须是 2-5 个" in prompt
+    assert "每场固定 9 个核心字段" in prompt
+    assert "每字段不超过 60 中文字符" in prompt
+    assert "必须从章节卡、场景拆分报告、冲突检查报告和已有 canon 继承" in prompt
+    assert "detail_scope: scene-local" in prompt
+    assert "不得写入小说圣经" in prompt
+    assert "source_hint" in prompt
+    for field in ("location", "characters", "purpose", "character_goal", "conflict_target", "key_information", "emotional_shift", "turn", "exit_state"):
+        assert field in prompt
+    for forbidden in ("新增全局地点", "组织", "规则", "未规划人物", "无依据感情机制", "正文", "对白"):
+        assert forbidden in prompt

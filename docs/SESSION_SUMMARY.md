@@ -1384,3 +1384,24 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 227 passed
 ```
+
+## 66. 本轮更新：Scene Synthesizer Prompt 整改
+
+- 完整读取并执行 `22_scene_synthesizer.md`。
+- `scene_synthesizer.md` 现在只输出 JSON，`scenes` 必须 2-5 个。
+- 场景字段必须从章节卡、场景拆分报告、冲突检查报告和已有 canon 继承。
+- 必须补充的小细节标记 `detail_scope: scene-local`，且不得写入小说圣经。
+- 禁止新增全局地点、组织、规则、未规划人物、无依据感情机制、正文和对白。
+- 每场固定 9 个核心字段，每字段不超过 60 中文字符，并带 `source_hint`。
+- 新增回归测试覆盖字段继承、scene-local 标记和 no-new-canon 边界。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 14 passed
+.venv/bin/python -m pytest tests/test_graph_scene.py tests/test_graph_chapter_plan.py
+# 7 passed
+.venv/bin/python -m pytest
+# 228 passed
+```

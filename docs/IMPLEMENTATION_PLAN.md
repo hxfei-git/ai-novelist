@@ -1621,3 +1621,22 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Scene conflict check 只做校验和最小修正。
 - 不通过新增场景或新增设定解决问题。
+
+## 62. Scene Synthesizer Prompt 整改
+
+目标：执行 `22_scene_synthesizer.md`，让场景卡字段从章节卡和拆分报告继承，必要小细节标记为 scene-local，不改变 canon。
+
+已完成：
+
+- `scene_synthesizer.md` 改为 JSON-only，`scenes` 必须 2-5 个。
+- 场景字段必须从章节卡、场景拆分报告、冲突检查报告和已有 canon 继承。
+- 地点、出场人物、冲突对象优先来自章节卡和已有 canon。
+- 必须补充的小细节标记 `detail_scope: scene-local`，不得写入小说圣经。
+- 禁止新增全局地点、组织、规则、未规划人物、无依据感情机制、正文和对白。
+- 每场固定 9 个核心字段，每字段不超过 60 中文字符，并带 `source_hint`。
+- 新增 prompt loader 回归测试覆盖字段继承、scene-local 标记、字段长度和 no-new-canon 边界。
+
+当前边界：
+
+- Scene synthesizer 只把当前章计划整理成场景卡。
+- 小细节只能是场景局部，不升级为小说圣经设定。
