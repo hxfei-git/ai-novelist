@@ -1603,3 +1603,21 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Scene breakdown 只做结构拆分，不写正文或对白。
 - 场景不得引入章节卡之外的新设定或长期关系。
+
+## 61. Scene Conflict Check Agent Prompt 整改
+
+目标：执行 `21_scene_conflict_check_agent.md`，让场景冲突检查只检查已有场景卡问题，输出 JSON，并给最小修正建议。
+
+已完成：
+
+- `scene_conflict_check_agent.md` 改为 JSON-only，不输出 Markdown。
+- 只检查冲突重复、动机断裂、信息提前泄露、连续性违背或与 Chapter Card 不一致。
+- 禁止新增场景、新人物关系、新世界规则、新 canon、大幅重写或正文。
+- 修正建议必须保持场景数量、章节目标和已确立 canon 不变。
+- `issues` 最多 5 个，每个建议不超过 80 中文字符；必须补信息时写入 `needs_confirmation`。
+- 新增 prompt loader 回归测试覆盖 JSON 输出、issue 数量、最小修正和 no-new-canon 边界。
+
+当前边界：
+
+- Scene conflict check 只做校验和最小修正。
+- 不通过新增场景或新增设定解决问题。

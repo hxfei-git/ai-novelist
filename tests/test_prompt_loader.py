@@ -184,3 +184,19 @@ def test_scene_breakdown_prompt_only_splits_chapter_card():
         assert field in prompt
     for forbidden in ("新增全局世界观", "新世界规则", "长期人物关系", "章节目标之外的副线"):
         assert forbidden in prompt
+
+
+def test_scene_conflict_check_prompt_outputs_json_minimal_fixes():
+    prompt = load_prompt("scene_conflict_check_agent")
+
+    assert "只输出 JSON，不要 Markdown" in prompt
+    assert "issues" in prompt
+    assert "最多 5 个" in prompt
+    assert "每个建议不超过 80 中文字符" in prompt
+    assert "minimal_fix" in prompt
+    assert "needs_confirmation" in prompt
+    assert "只检查已有场景拆分问题" in prompt
+    assert "给最小修正建议" in prompt
+    assert "保持场景数量" in prompt
+    for forbidden in ("新增场景", "新人物关系", "新世界规则", "新 canon", "大幅重写", "正文"):
+        assert forbidden in prompt

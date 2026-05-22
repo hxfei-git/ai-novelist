@@ -1364,3 +1364,23 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 226 passed
 ```
+
+## 65. 本轮更新：Scene Conflict Check Agent Prompt 整改
+
+- 完整读取并执行 `21_scene_conflict_check_agent.md`。
+- `scene_conflict_check_agent.md` 现在只输出 JSON，不输出 Markdown。
+- 只检查已有场景拆分中的冲突重复、动机断裂、信息泄露、连续性违背或 Chapter Card 不一致。
+- 禁止新增场景、新人物关系、新世界规则、新 canon、大幅重写或正文。
+- `issues` 最多 5 个，每个 `minimal_fix` 不超过 80 中文字符；必须补信息时写入 `needs_confirmation`。
+- 新增回归测试覆盖 JSON 输出、最小修正和 no-new-canon 边界。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 13 passed
+.venv/bin/python -m pytest tests/test_graph_scene.py tests/test_graph_chapter_plan.py
+# 7 passed
+.venv/bin/python -m pytest
+# 227 passed
+```
