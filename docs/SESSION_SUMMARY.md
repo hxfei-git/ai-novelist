@@ -499,3 +499,24 @@ Smoke 验证：`.venv/bin/python tests/smoke_phase2_chat.py`，结果 `phase2 ch
 
 最终验证：`.venv/bin/python -m pytest` 为 `121 passed`；`.venv/bin/python tests/smoke_outline_collaboration.py` 输出 `outline collaboration smoke ok`；`.venv/bin/python tests/smoke_phase2_chat.py` 输出 `phase2 chat smoke ok`。
 
+
+
+## 28. 本轮更新：Phase 4 八阶段大纲与 Artifact 注册
+
+- 按计划只实现 Phase 4，未改动 `plan.md`，未接入 Bible Graph 或新章节写作管线。
+- 大纲阶段扩展为八阶段：方向定位、故事概念、世界观设定、人物关系、故事流程、分卷大纲、章节大纲、审稿锁定。
+- 旧 `outline_draft` 状态和旧 artifact 会在加载/运行时兼容到 `volume_outline`。
+- 每个阶段产物现在同时写入 `outline_stages/<stage>.md` 与 `outline/<stage>.md`，并注册到 `artifacts.json`，供后续全量工作流读取。
+- Mock adapter 已覆盖新增阶段，测试可在 `--mock` 下稳定推进到最终 `done`。
+- 最终 `outline.md` 仍只在审稿锁定确认后生成，并按八阶段顺序合并。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest
+# 122 passed
+.venv/bin/python tests/smoke_outline_collaboration.py
+# outline collaboration smoke ok
+.venv/bin/python tests/smoke_phase2_chat.py
+# phase2 chat smoke ok
+```

@@ -508,10 +508,12 @@ def deterministic_outline_stage_decision(state: NovelState) -> DirectorDecision 
 def stage_display_name(stage: str) -> str:
     labels = {
         "direction": "方向定位",
+        "concept": "故事概念",
         "worldbuilding": "世界观设定",
         "characters": "人物关系",
         "story_flow": "故事流程",
-        "outline_draft": "总大纲草案",
+        "volume_outline": "分卷大纲",
+        "chapter_outline": "章节大纲",
         "review_lock": "审稿锁定",
     }
     return labels.get(stage, stage)
@@ -544,10 +546,12 @@ def deterministic_view_decision(state: NovelState) -> DirectorDecision | None:
 def detect_outline_stage_request(text: str) -> str:
     stage_markers = {
         "direction": ("方向定位", "创作方向", "方向阶段"),
+        "concept": ("故事概念", "概念阶段", "核心冲突", "反转机制"),
         "worldbuilding": ("世界观", "世界观设定", "世界观阶段"),
         "characters": ("人物关系", "人物阶段", "角色关系"),
         "story_flow": ("故事流程", "流程阶段", "剧情流程"),
-        "outline_draft": ("总大纲草案", "大纲草案"),
+        "volume_outline": ("分卷大纲", "分卷阶段", "总大纲草案", "大纲草案"),
+        "chapter_outline": ("章节大纲", "章节阶段", "章节拆分", "章节钩子"),
         "review_lock": ("审稿锁定", "终审阶段"),
     }
     for stage, markers in stage_markers.items():

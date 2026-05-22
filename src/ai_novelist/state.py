@@ -10,10 +10,12 @@ EditorDecision = Literal["unknown", "pass", "revise", "stop"]
 NextAction = Literal["continue", "rewrite_chapter", "human_review", "persist", "stop"]
 OutlineStage = Literal[
     "direction",
+    "concept",
     "worldbuilding",
     "characters",
     "story_flow",
-    "outline_draft",
+    "volume_outline",
+    "chapter_outline",
     "review_lock",
     "done",
 ]
@@ -149,7 +151,7 @@ class NovelState:
             active_task=str(data.get("active_task", "")),
             outline_stage=normalize_outline_stage(data.get("outline_stage", "direction")),
             outline_stage_status=normalize_outline_stage_status(data.get("outline_stage_status", "collecting")),
-            outline_stage_artifacts=normalize_dict(data.get("outline_stage_artifacts", {})),
+            outline_stage_artifacts=normalize_outline_stage_artifacts(data.get("outline_stage_artifacts", {})),
             outline_stage_history=normalize_dict_list(data.get("outline_stage_history", [])),
             review_status=data.get("review_status", "draft"),
             error=str(data.get("error", "")),
@@ -202,7 +204,19 @@ def normalize_dict(value: Any) -> dict[str, Any]:
 
 def normalize_outline_stage(value: Any) -> OutlineStage:
     stage = str(value or "direction").strip()
-    allowed = {"direction", "worldbuilding", "characters", "story_flow", "outline_draft", "review_lock", "done"}
+    if stage == "outline_draft":
+        stage = "volume_outline"
+    allowed = {
+        "direction",
+        "concept",
+        "worldbuilding",
+        "characters",
+        "story_flow",
+        "volume_outline",
+        "chapter_outline",
+        "review_lock",
+        "done",
+    }
     return stage if stage in allowed else "direction"  # type: ignore[return-value]
 
 
@@ -216,3 +230,18 @@ def normalize_str_dict(value: Any) -> dict[str, str]:
     if not isinstance(value, dict):
         return {}
     return {str(key): str(item) for key, item in value.items()}
+
+
+def normalize_outline_stage_artifacts(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    artifacts: dict[str, Any] = {}
+    for raw_key, raw_item in value.items():
+        key = normalize_outline_stage(raw_key)
+        item = dict(raw_item) if isinstance(raw_item, dict) else raw_item
+        if isinstance(item, dict):
+            item["stage"] = key
+            if item.get("label") == "总大纲草案":
+                item["label"] = "分卷大纲"
+        artifacts[key] = item
+    return artifacts

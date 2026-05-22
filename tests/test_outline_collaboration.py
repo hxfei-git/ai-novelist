@@ -1,4 +1,5 @@
 from ai_novelist.adapters.codex_cli import CodexCLIAdapter
+from ai_novelist.artifacts import load_artifacts
 from ai_novelist.graph_outline import build_outline_stage_role_prompt, build_outline_stage_synthesizer_prompt, extract_stage_confirmation_questions, format_stage_markdown, append_message, build_outline_collaboration_graph, build_outline_prompt
 from ai_novelist.graph_writer import build_chat_graph
 from ai_novelist.state import NovelState
@@ -28,6 +29,9 @@ def test_outline_collaboration_generates_only_first_stage(tmp_path):
     assert not state.outline
     assert not store.outline_path("demo").exists()
     assert store.outline_stage_path("demo", "direction").exists()
+    assert store.outline_artifact_path("demo", "direction").exists()
+    records = load_artifacts(store.project_dir("demo"))
+    assert any(item.type == "direction" and item.stage == "direction" and item.path == "outline/direction.md" for item in records)
 
 
 def test_outline_confirmation_advances_one_stage(tmp_path):
@@ -39,10 +43,11 @@ def test_outline_confirmation_advances_one_stage(tmp_path):
     state = run_outline_turn(graph, state, store, "请生成大纲")
     state = run_outline_turn(graph, state, store, "确认进入下一阶段")
 
-    assert state.outline_stage == "worldbuilding"
+    assert state.outline_stage == "concept"
     assert state.outline_stage_status == "options_ready"
     assert state.outline_stage_artifacts["direction"]["status"] == "locked"
-    assert "worldbuilding" in state.outline_stage_artifacts
+    assert "concept" in state.outline_stage_artifacts
+    assert store.outline_artifact_path("demo", "concept").exists()
     assert not store.outline_path("demo").exists()
 
 
@@ -75,21 +80,39 @@ def test_outline_collaboration_lock_persists_constraints(tmp_path):
     assert "失忆工程师" in state.locked_constraints[0]
 
 
-def test_six_stage_confirmation_persists_final_outline(tmp_path):
+def test_eight_stage_confirmation_persists_final_outline_and_artifacts(tmp_path):
     store = LocalStore(tmp_path)
     state = store.create_project("Demo", "demo")
     state.idea = "月球城市失忆工程师"
     graph = build_outline_collaboration_graph(CodexCLIAdapter(mock=True), store)
 
     state = run_outline_turn(graph, state, store, "生成大纲")
-    for _ in range(6):
+    expected_stages = [
+        "direction",
+        "concept",
+        "worldbuilding",
+        "characters",
+        "story_flow",
+        "volume_outline",
+        "chapter_outline",
+        "review_lock",
+    ]
+    for _ in range(8):
         state = run_outline_turn(graph, state, store, "确认进入下一阶段")
 
     assert state.outline_stage == "done"
     assert state.outline_stage_status == "done"
     assert state.review_status == "approved"
     assert "最终锁定总大纲" in state.outline
+    assert "故事概念" in state.outline
+    assert "分卷大纲" in state.outline
+    assert "章节大纲" in state.outline
     assert store.outline_path("demo").exists()
+    records = load_artifacts(store.project_dir("demo"))
+    for stage in expected_stages:
+        assert store.outline_stage_path("demo", stage).exists()
+        assert store.outline_artifact_path("demo", stage).exists()
+        assert any(item.type == stage and item.stage == stage and item.graph == "outline" for item in records)
 
 
 def test_outline_stage_view_can_show_story_flow(tmp_path):
@@ -99,6 +122,7 @@ def test_outline_stage_view_can_show_story_flow(tmp_path):
     graph = build_outline_collaboration_graph(CodexCLIAdapter(mock=True), store)
 
     state = run_outline_turn(graph, state, store, "生成大纲")
+    state = run_outline_turn(graph, state, store, "确认进入下一阶段")
     state = run_outline_turn(graph, state, store, "确认进入下一阶段")
     state = run_outline_turn(graph, state, store, "确认进入下一阶段")
     state = run_outline_turn(graph, state, store, "确认进入下一阶段")
@@ -121,6 +145,28 @@ def test_old_state_json_missing_new_fields_still_loads():
     assert state.retrieval_sources == []
     assert state.outline_stage == "direction"
     assert state.outline_stage_status == "collecting"
+
+
+def test_old_outline_draft_state_loads_as_volume_outline_and_advances(tmp_path):
+    store = LocalStore(tmp_path)
+    project_dir = store.project_dir("old")
+    project_dir.mkdir(parents=True)
+    store.chapters_dir("old").mkdir()
+    store.outline_stages_dir("old").mkdir()
+    store.state_path("old").write_text(
+        '{"project_id":"old","title":"Old","outline_stage":"outline_draft","outline_stage_artifacts":{"outline_draft":{"stage":"outline_draft","label":"总大纲草案","status":"options_ready","synthesis":"旧总纲"}}}\n',
+        encoding="utf-8",
+    )
+    state = store.load_state("old")
+    graph = build_outline_collaboration_graph(CodexCLIAdapter(mock=True), store)
+
+    assert state.outline_stage == "volume_outline"
+    assert "volume_outline" in state.outline_stage_artifacts
+
+    state = run_outline_turn(graph, state, store, "确认进入下一阶段")
+
+    assert state.outline_stage == "chapter_outline"
+    assert state.outline_stage_artifacts["volume_outline"]["status"] == "locked"
 
 
 def test_chat_routes_outline_request_to_stage_flow(tmp_path):
@@ -211,7 +257,7 @@ def test_worldbuilding_prompt_uses_saved_direction_context():
     assert "前序已保存阶段内容" in prompt
     assert "方向定位（options_ready）" in prompt
     assert "主角以低调求生方式追查师傅吞噬气运" in prompt
-    assert "世界观必须承接方向定位" in prompt
+    assert "世界观必须承接方向定位和故事概念" in prompt
 
 
 def test_characters_prompt_uses_direction_and_worldbuilding_context():
@@ -235,7 +281,7 @@ def test_characters_prompt_uses_direction_and_worldbuilding_context():
     assert "黑暗魔门悬疑智斗" in prompt
     assert "世界观设定（options_ready）" in prompt
     assert "气运可以被观测、借贷和吞噬" in prompt
-    assert "人物关系必须承接方向定位和世界观规则" in prompt
+    assert "人物关系必须承接方向定位、故事概念和世界观规则" in prompt
 
 
 def test_story_flow_prompt_uses_all_prior_stage_contexts():
@@ -249,7 +295,7 @@ def test_story_flow_prompt_uses_all_prior_stage_contexts():
     assert "低调求生追查真相" in prompt
     assert "气运规则造成修行代价" in prompt
     assert "师徒关系隐藏吞噬冲突" in prompt
-    assert "故事流程必须承接方向定位、世界观代价和人物关系冲突" in prompt
+    assert "故事流程必须承接方向定位、故事概念、世界观代价和人物关系冲突" in prompt
 
 
 def test_current_stage_draft_enters_synthesizer_prompt():

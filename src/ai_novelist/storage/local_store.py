@@ -26,6 +26,7 @@ class LocalStore:
         project_dir.mkdir(parents=True, exist_ok=True)
         self.chapters_dir(project_id).mkdir(exist_ok=True)
         self.outline_stages_dir(project_id).mkdir(exist_ok=True)
+        self.outline_dir(project_id).mkdir(exist_ok=True)
 
         state_path = self.state_path(project_id)
         if state_path.exists():
@@ -44,6 +45,9 @@ class LocalStore:
     def outline_stages_dir(self, project_id: str) -> Path:
         return self.project_dir(project_id) / "outline_stages"
 
+    def outline_dir(self, project_id: str) -> Path:
+        return self.project_dir(project_id) / "outline"
+
     def state_path(self, project_id: str) -> Path:
         return self.project_dir(project_id) / "state.json"
 
@@ -52,6 +56,9 @@ class LocalStore:
 
     def outline_stage_path(self, project_id: str, stage: str) -> Path:
         return self.outline_stages_dir(project_id) / f"{stage}.md"
+
+    def outline_artifact_path(self, project_id: str, stage: str) -> Path:
+        return self.outline_dir(project_id) / f"{stage}.md"
 
     def worldbuilding_path(self, project_id: str) -> Path:
         return self.project_dir(project_id) / "worldbuilding.md"
@@ -95,6 +102,7 @@ class LocalStore:
         project_dir.mkdir(parents=True, exist_ok=True)
         self.chapters_dir(state.project_id).mkdir(exist_ok=True)
         self.outline_stages_dir(state.project_id).mkdir(exist_ok=True)
+        self.outline_dir(state.project_id).mkdir(exist_ok=True)
         with self.state_path(state.project_id).open("w", encoding="utf-8") as file:
             json.dump(state.to_dict(), file, ensure_ascii=False, indent=2)
             file.write("\n")
@@ -104,6 +112,9 @@ class LocalStore:
 
     def save_outline_stage(self, state: NovelState, stage: str, content: str) -> Path:
         return self._write_required(self.outline_stage_path(state.project_id, stage), content, f"outline stage {stage}")
+
+    def save_outline_artifact(self, state: NovelState, stage: str, content: str) -> Path:
+        return self._write_required(self.outline_artifact_path(state.project_id, stage), content, f"outline artifact {stage}")
 
     def load_outline_stage(self, project_id: str, stage: str) -> str:
         path = self.outline_stage_path(project_id, stage)

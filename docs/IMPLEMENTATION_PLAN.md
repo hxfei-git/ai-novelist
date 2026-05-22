@@ -647,3 +647,32 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 .venv/bin/python tests/smoke_phase2_chat.py
 ```
 
+
+
+## 26. Phase 4：八阶段大纲与 Artifact 注册
+
+本轮只实施 `plan.md` 中的 Phase 4，不接入 Bible Graph 或章节写作新管线。
+
+已完成：
+
+- 大纲共创阶段从六阶段扩展为八阶段：`direction -> concept -> worldbuilding -> characters -> story_flow -> volume_outline -> chapter_outline -> review_lock -> done`。
+- `outline_draft` 保留为旧状态兼容值：旧 `state.json` 加载时会规范化为 `volume_outline`；旧 `outline_stage_artifacts["outline_draft"]` 会迁移为 `volume_outline`。
+- `graph_outline` 更新阶段标签、角色和连续性要求：新增故事概念、分卷大纲、章节大纲，并让后续阶段显式承接概念、分卷和章节可执行性。
+- 阶段产物现在同时保存到旧路径 `outline_stages/<stage>.md` 和新路径 `outline/<stage>.md`。
+- 每次阶段产物生成都会注册到 `artifacts.json`，字段为 `type=<stage>`、`stage=<stage>`、`graph="outline"`、`source_agent="outline_stage_synthesizer"`、`path="outline/<stage>.md"`。
+- `LocalStore` 增加 `outline_dir(project_id)`、`outline_artifact_path(project_id, stage)` 和 `save_outline_artifact(...)`；旧 `outline_stages` 路径方法继续保留。
+- Mock adapter 增加 `concept`、`volume_outline`、`chapter_outline` 阶段稳定输出。
+- `review_lock` 确认后仍生成最终 `outline.md`，内容按八阶段顺序合并。
+
+当前边界：
+
+- 新 `outline/<stage>.md` 和 Artifact Registry 已接入阶段保存，但 ContextBuilder、Bible Graph 和后续章节管线尚未默认消费这些产物。
+- 旧 `outline_stages/<stage>.md` 继续写入以兼容现有 CLI、测试和历史项目。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest
+.venv/bin/python tests/smoke_outline_collaboration.py
+.venv/bin/python tests/smoke_phase2_chat.py
+```

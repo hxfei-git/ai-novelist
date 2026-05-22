@@ -37,6 +37,12 @@ def main() -> int:
 
         state = store.load_state("demo")
         advanced = run_turn(graph, store, state, "确认进入下一阶段")
+        assert advanced["outline_stage"] == "concept"
+        assert "concept" in advanced["outline_stage_artifacts"]
+        assert not store.outline_path("demo").exists()
+
+        state = store.load_state("demo")
+        advanced = run_turn(graph, store, state, "确认进入下一阶段")
         assert advanced["outline_stage"] == "worldbuilding"
         assert "worldbuilding" in advanced["outline_stage_artifacts"]
         assert not store.outline_path("demo").exists()

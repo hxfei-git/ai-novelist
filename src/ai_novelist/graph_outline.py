@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
+from ai_novelist.artifacts import ArtifactRecord, register_artifact
 from ai_novelist.prompts import load_prompt
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
@@ -34,22 +35,36 @@ OUTLINE_ACTIONS = {
     "stop",
 }
 
-OUTLINE_STAGES = ["direction", "worldbuilding", "characters", "story_flow", "outline_draft", "review_lock"]
+OUTLINE_STAGES = [
+    "direction",
+    "concept",
+    "worldbuilding",
+    "characters",
+    "story_flow",
+    "volume_outline",
+    "chapter_outline",
+    "review_lock",
+]
+LEGACY_STAGE_ALIASES = {"outline_draft": "volume_outline"}
 STAGE_LABELS = {
     "direction": "方向定位",
+    "concept": "故事概念",
     "worldbuilding": "世界观设定",
     "characters": "人物关系",
     "story_flow": "故事流程",
-    "outline_draft": "总大纲草案",
+    "volume_outline": "分卷大纲",
+    "chapter_outline": "章节大纲",
     "review_lock": "审稿锁定",
     "done": "已锁定",
 }
 STAGE_ROLES = {
     "direction": ["类型定位 Agent", "主题卖点 Agent", "风险编辑 Agent"],
+    "concept": ["故事概念 Agent", "核心冲突 Agent", "反转机制 Agent"],
     "worldbuilding": ["规则架构 Agent", "冲突资源 Agent", "原作/检索一致性 Agent"],
     "characters": ["主角弧光 Agent", "关系冲突 Agent", "反派/势力 Agent"],
     "story_flow": ["主线结构 Agent", "节奏悬念 Agent", "伏笔代价 Agent"],
-    "outline_draft": ["大纲策划 Agent", "连续性编辑 Agent", "章节可执行性 Agent"],
+    "volume_outline": ["分卷策划 Agent", "卷内高潮 Agent", "卷间钩子 Agent"],
+    "chapter_outline": ["章节拆分 Agent", "章节钩子 Agent", "连续性编辑 Agent"],
     "review_lock": ["总编辑 Agent", "约束审计 Agent", "章节准备 Agent"],
 }
 
@@ -414,7 +429,7 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore)
         state.pending_question = f"请确认是否锁定{STAGE_LABELS[stage]}并进入下一阶段，或继续提出修改。"
         state.pending_questions = [state.pending_question]
     record_stage_history(state, "run", stage, state.user_request)
-    store.save_outline_stage(state, stage, format_stage_markdown(artifact))
+    save_outline_stage_outputs(state, stage, format_stage_markdown(artifact), store)
     store.save_state(state)
     return state.to_dict()
 
@@ -459,6 +474,22 @@ def advance_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalSt
 
 
 
+def save_outline_stage_outputs(state: NovelState, stage: str, content: str, store: LocalStore) -> None:
+    store.save_outline_stage(state, stage, content)
+    artifact_path = store.save_outline_artifact(state, stage, content)
+    register_artifact(
+        store.project_dir(state.project_id),
+        ArtifactRecord(
+            id="",
+            type=stage,
+            path=artifact_path.relative_to(store.project_dir(state.project_id)).as_posix(),
+            source_agent="outline_stage_synthesizer",
+            graph="outline",
+            stage=stage,
+        ),
+    )
+
+
 def hydrate_stage_artifact_from_legacy_fields(state: NovelState, stage: str, store: LocalStore) -> None:
     if stage in state.outline_stage_artifacts:
         return
@@ -474,7 +505,7 @@ def hydrate_stage_artifact_from_legacy_fields(state: NovelState, stage: str, sto
         "updated_at": datetime.now(UTC).isoformat(timespec="seconds"),
     }
     state.outline_stage_artifacts["worldbuilding"] = artifact
-    store.save_outline_stage(state, "worldbuilding", format_stage_markdown(artifact))
+    save_outline_stage_outputs(state, "worldbuilding", format_stage_markdown(artifact), store)
 
 
 def lock_previous_stage_artifacts(state: NovelState, stage: str) -> None:
@@ -507,19 +538,37 @@ def show_outline_stage_node(data: dict, store: LocalStore) -> dict:
 
 
 def ensure_outline_stage(state: NovelState) -> None:
+    normalize_legacy_outline_artifacts(state)
     if state.outline_stage == "done":
         state.outline_stage_status = "done"
         return
+    if state.outline_stage in LEGACY_STAGE_ALIASES:
+        state.outline_stage = LEGACY_STAGE_ALIASES[state.outline_stage]  # type: ignore[assignment]
     if state.outline_stage not in OUTLINE_STAGES:
         state.outline_stage = "direction"
     if not state.outline_stage_status:
         state.outline_stage_status = "collecting"
 
 
+def normalize_legacy_outline_artifacts(state: NovelState) -> None:
+    for legacy_stage, stage in LEGACY_STAGE_ALIASES.items():
+        if legacy_stage not in state.outline_stage_artifacts:
+            continue
+        if stage not in state.outline_stage_artifacts:
+            artifact = state.outline_stage_artifacts[legacy_stage]
+            if isinstance(artifact, dict):
+                artifact = dict(artifact)
+                artifact["stage"] = stage
+                if artifact.get("label") == "总大纲草案":
+                    artifact["label"] = STAGE_LABELS[stage]
+            state.outline_stage_artifacts[stage] = artifact
+        del state.outline_stage_artifacts[legacy_stage]
+
+
 def should_run_outline_stage(text: str, state: NovelState) -> bool:
     if state.active_workflow == "outline":
         return True
-    markers = ("生成大纲", "写大纲", "大纲", "方向", "世界观", "人物", "故事流程", "主线", "审稿", "锁定")
+    markers = ("生成大纲", "写大纲", "大纲", "方向", "概念", "核心冲突", "反转", "世界观", "人物", "故事流程", "主线", "分卷", "章节", "审稿", "锁定")
     return any(marker in text for marker in markers)
 
 
@@ -560,10 +609,12 @@ def is_stage_switch_request(text: str) -> bool:
 def detect_stage_reference(text: str) -> str | None:
     mapping = [
         ("direction", ("方向", "定位", "类型", "卖点")),
+        ("concept", ("故事概念", "概念", "核心冲突", "主题", "反转")),
         ("worldbuilding", ("世界观", "设定", "规则")),
         ("characters", ("人物", "人设", "关系", "反派", "势力")),
         ("story_flow", ("故事流程", "流程", "主线", "节奏", "伏笔")),
-        ("outline_draft", ("总大纲", "大纲草案", "草案")),
+        ("volume_outline", ("分卷", "卷纲", "卷内", "卷间", "总大纲", "大纲草案", "草案")),
+        ("chapter_outline", ("章节大纲", "章节拆分", "章节钩子", "章节", "细纲")),
         ("review_lock", ("审稿", "锁定", "终审")),
     ]
     for stage, markers in mapping:
@@ -635,15 +686,15 @@ def build_outline_stage_synthesizer_prompt(state: NovelState, stage: str, role_r
     reviews = "\n\n".join(f"## {item['role']}\n{item['content']}" for item in role_reviews)
     if stage == "direction":
         output_rule = (
-            "方向定位不是评审报告，而是后续世界观、人物和剧情都会继承的创作基准。"
+            "方向定位不是评审报告，而是后续概念、世界观、人物和剧情都会继承的创作基准。"
             "必须把用户最新输入与当前阶段已有内容整合成一版新的方向定位稿；"
             "不要追加、罗列或保留历史修改记录，不要把用户意见单独堆成段落。"
             "若新意见与旧方向重复，合并去重；若冲突，以用户最新输入为准并改写旧方向。"
             "最终文本必须短、准、可执行，而不是资料汇编。"
             "请只输出一个 Markdown 小节：\n"
             "## 方向定位稿\n"
-            "用 6-10 条短句同时确定故事类型、主角行动方式、核心冲突、情绪基调、关键关系、主要代价、全书开篇切入、中期升级、后期终局和禁止跑偏项；"
-            "不能只写开篇局面，必须让后续世界观、人物关系和故事流程能看见中期与结尾方向；"
+            "用 6-10 条短句同时确定故事类型、主角行动方式、核心冲突、主题表达、反转机制、情绪基调、关键关系、主要代价、全书开篇切入、中期升级、后期终局和禁止跑偏项；"
+            "不能只写开篇局面，必须让后续故事概念、世界观、人物关系和故事流程能看见中期与结尾方向；"
             "不要再拆成“一句话方向 / 方向命令 / 不许跑偏”。"
         )
     else:
@@ -708,12 +759,14 @@ def current_stage_context(state: NovelState, stage: str, max_chars: int = 2400) 
 
 def stage_continuity_requirement(stage: str) -> str:
     requirements = {
-        "direction": "方向定位是后续所有阶段的源头：输出必须成为世界观、人物关系和故事流程可执行的控制稿。",
-        "worldbuilding": "世界观必须承接方向定位提出的类型、冲突、情绪和禁止项；每条规则都要服务这个故事方向。",
-        "characters": "人物关系必须承接方向定位和世界观规则；人物欲望、关系张力和阵营冲突要由已保存设定自然生长。",
-        "story_flow": "故事流程必须承接方向定位、世界观代价和人物关系冲突；转折不能脱离已建立的规则和人物动机。",
-        "outline_draft": "总大纲草案必须整合方向、世界观、人物关系和故事流程，形成同一条连续故事骨架。",
-        "review_lock": "审稿锁定必须检查六阶段是否互相承接，并指出任何方向、规则、人物、流程或章节草案的割裂点。",
+        "direction": "方向定位是后续所有阶段的源头：输出必须成为概念、世界观、人物关系和故事流程可执行的控制稿。",
+        "concept": "故事概念必须承接方向定位，明确故事概念、核心冲突、主题表达和反转机制，不能另起一个故事。",
+        "worldbuilding": "世界观必须承接方向定位和故事概念提出的类型、冲突、主题与反转机制；每条规则都要服务这个故事方向。",
+        "characters": "人物关系必须承接方向定位、故事概念和世界观规则；人物欲望、关系张力和阵营冲突要由已保存设定自然生长。",
+        "story_flow": "故事流程必须承接方向定位、故事概念、世界观代价和人物关系冲突；转折不能脱离已建立的规则和人物动机。",
+        "volume_outline": "分卷大纲必须整合方向、概念、世界观、人物关系和故事流程，明确分卷策划、卷内高潮和卷间钩子。",
+        "chapter_outline": "章节大纲必须承接分卷大纲，完成章节拆分、章节钩子和章节可执行性检查，确保连续性可写。",
+        "review_lock": "审稿锁定必须检查八阶段是否互相承接，并指出任何方向、概念、规则、人物、流程、分卷或章节大纲的割裂点。",
     }
     return requirements.get(stage, "本阶段必须承接前序已保存阶段内容继续创作。")
 
@@ -811,8 +864,8 @@ def finalize_locked_outline(state: NovelState, store: LocalStore) -> None:
     state.active_workflow = ""
     state.current_stage = "chapter_plan"
     state.director_action = "advance_outline_stage"
-    state.director_message = f"六阶段大纲已锁定，并保存为最终大纲：{store.outline_path(state.project_id)}"
-    add_outline_version(state, "outline", state.outline, "六阶段锁定大纲")
+    state.director_message = f"八阶段大纲已锁定，并保存为最终大纲：{store.outline_path(state.project_id)}"
+    add_outline_version(state, "outline", state.outline, "八阶段锁定大纲")
     store.save_outline(state)
 
 

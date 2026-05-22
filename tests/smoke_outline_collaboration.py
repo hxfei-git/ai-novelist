@@ -39,8 +39,14 @@ def main() -> int:
         assert not state.outline
 
         state = run_turn(graph, store, state, "确认进入下一阶段")
-        assert state.outline_stage == "worldbuilding"
+        assert state.outline_stage == "concept"
         assert state.outline_stage_artifacts["direction"]["status"] == "locked"
+        assert "concept" in state.outline_stage_artifacts
+        assert not store.outline_path("demo").exists()
+
+        state = run_turn(graph, store, state, "确认进入下一阶段")
+        assert state.outline_stage == "worldbuilding"
+        assert state.outline_stage_artifacts["concept"]["status"] == "locked"
         assert "worldbuilding" in state.outline_stage_artifacts
         assert not store.outline_path("demo").exists()
 
