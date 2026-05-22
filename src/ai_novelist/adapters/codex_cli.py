@@ -357,7 +357,72 @@ class CodexCLIAdapter(AgentAdapter):
 
         if any(word in request for word in ("退出", "结束", "quit", "exit", "stop")):
             return response("stop", "project", "stop", "已结束本次创作对话。")
+        if any(word in request for word in ("查看小说圣经", "展示小说圣经", "show bible", "view bible")):
+            return response("show_bible", "novel_bible", "status", "我会展示当前小说圣经。")
+        if any(word in request for word in ("初始化小说圣经", "生成小说圣经", "更新小说圣经", "init bible", "generate bible", "update bible")):
+            action = "init_bible" if any(word in request for word in ("初始化", "生成", "init", "generate")) else "update_bible"
+            return response(action, "novel_bible", "update", "我会基于当前稳定产物更新小说圣经。")
+        if "active_workflow：outline" in prompt and any(word in request for word in ("查看", "展示", "看一下", "看下", "显示")):
+            task_args = {}
+            if "方向" in request:
+                task_args["stage"] = "direction"
+            elif "世界观" in request:
+                task_args["stage"] = "worldbuilding"
+            elif "人物" in request or "角色" in request:
+                task_args["stage"] = "characters"
+            elif "故事流程" in request or "流程" in request:
+                task_args["stage"] = "story_flow"
+            elif "分卷" in request:
+                task_args["stage"] = "volume_outline"
+            elif "章节" in request:
+                task_args["stage"] = "chapter_outline"
+            return json.dumps({
+                "action": "show_outline",
+                "requires_confirmation": False,
+                "confidence": 95,
+                "target": "outline",
+                "intent": "status",
+                "user_message": "我会展示当前大纲阶段内容。",
+                "task_args": task_args,
+            }, ensure_ascii=False)
+        if "active_workflow：outline" in prompt and any(word in request for word in ("这个设定别改", "别改", "不要改", "保留")):
+            return response("revise_outline", "outline", "lock", "已记录锁定约束，我会按该约束重跑当前大纲阶段。", request, request)
         if "active_workflow：outline" in prompt and "outline_stage_status：options_ready" in prompt:
+            if any(word in request for word in ("查看", "展示", "看一下", "看下", "显示")):
+                task_args = {}
+                if "方向" in request:
+                    task_args["stage"] = "direction"
+                elif "世界观" in request:
+                    task_args["stage"] = "worldbuilding"
+                elif "人物" in request or "角色" in request:
+                    task_args["stage"] = "characters"
+                elif "故事流程" in request or "流程" in request:
+                    task_args["stage"] = "story_flow"
+                elif "分卷" in request:
+                    task_args["stage"] = "volume_outline"
+                elif "章节" in request:
+                    task_args["stage"] = "chapter_outline"
+                return json.dumps({
+                    "action": "show_outline",
+                    "requires_confirmation": False,
+                    "confidence": 95,
+                    "target": "outline",
+                    "intent": "status",
+                    "user_message": "我会展示当前大纲阶段内容。",
+                    "task_args": task_args,
+                }, ensure_ascii=False)
+            compact_request = request.replace(" ", "")
+            if any(word in compact_request for word in ("接下来", "下一步", "怎么办", "现在怎么办")) and not any(word in request for word in ("进入下一阶段", "推进到下一阶段")):
+                return json.dumps({
+                    "action": "ask_user",
+                    "requires_confirmation": False,
+                    "confidence": 92,
+                    "target": "outline",
+                    "intent": "status",
+                    "user_message": "当前阶段：审稿锁定 options_ready\n未决问题：2 项。是否需要补一个失败代价？；终局拒绝是否保留一次？\n可选下一步：\n1. 直接回答上述问题，系统会吸收回答并重跑当前阶段。\n2. 明确说确认进入下一阶段，系统会先请求你确认。\n3. 说查看当前阶段产物，我会展示当前阶段内容。",
+                }, ensure_ascii=False)
+            if __import__("re").search(r"(^|[\s，,；;])\d+(?:[.、)]|(?=\D))", request):
+                return response("revise_outline", "outline", "answer_pending_questions", "我会吸收你的补充回答，并重跑当前大纲阶段。", request, request)
             negated = any(word in request for word in ("不要进入下一阶段", "不进入下一阶段", "先不进入下一阶段", "暂不进入下一阶段", "别进入下一阶段", "不要推进", "先不推进", "暂不推进"))
             transition = any(word in request for word in ("下一阶段", "进入下一阶段", "推进到下一阶段", "进入后续阶段", "推进后续阶段"))
             lock_and_continue = any(word in request for word in ("锁定当前阶段", "锁定本阶段", "通过当前阶段", "通过本阶段")) and any(word in request for word in ("继续", "进入", "推进", "下一阶段"))
@@ -376,13 +441,15 @@ class CodexCLIAdapter(AgentAdapter):
                     task_args["stage"] = "chapter_outline"
                 return json.dumps({
                     "action": "advance_current_stage",
-                    "requires_confirmation": False,
+                    "requires_confirmation": True,
                     "confidence": 95,
                     "target": "outline",
                     "intent": "approve",
                     "user_message": "我会先让当前阶段自行闭环未决问题，再锁定并进入下一阶段。",
                     "task_args": task_args,
                 }, ensure_ascii=False)
+            if any(word in request for word in ("加入", "增加", "补充", "强化", "削弱", "修改", "调整", "改成", "改为", "设为", "设定", "选择", "采用", "接受", "接收", "同意", "保留", "不要", "别", "更", "太")):
+                return response("revise_outline", "outline", "revise", "我会把你的新意见合入当前阶段，并重跑阶段产物。", request)
         if any(word in request for word in ("保存大纲", "确认大纲", "approve")):
             return response("persist_outline", "outline", "approve", "我会保存当前大纲。")
         if any(word in request for word in ("保存", "落盘", "写入文件")):
@@ -427,12 +494,14 @@ class CodexCLIAdapter(AgentAdapter):
             return response("finalize_chapter", "final_chapter", "approve", f"我会定稿第 {chapter or 1} 章并更新小说圣经。", chapter_value=chapter or "1")
         if any(word in request for word in ("审稿", "编辑", "检查")):
             return response("review_chapter", "chapter", "review", "我会调度编辑 Agent 检查当前章节。", chapter_value=chapter)
-        if any(word in request for word in ("重写", "修改章节", "改写", "修订章节")):
+        if any(word in request for word in ("重写", "修改章节", "改写", "修订章节")) or ("修订" in request and ("章" in request or chapter)):
             return response("revise_chapter", "chapter", "revise", "我会根据编辑意见调度章节写手重写当前章节。", request, chapter_value=chapter)
         if "写" in request and "章" in request:
             return response("write_chapter", "chapter", "create", f"我会调度章节写手生成第 {chapter or 1} 章。", chapter_value=chapter or "1")
         if any(word in request for word in ("想写", "创意", "小说", "故事")):
             return response("propose_directions", "outline", "variant", "我先把这个创意拆成几个可选方向，再由你决定大纲路线。")
+        if any(word in request for word in ("聊聊", "你觉得", "怎么样", "好不好", "有意思", "感觉")):
+            return response("chat", "project", "answer", "可以，我们先聊这个方向；如果你要我改产物，请明确说修改哪里。")
         return response("ask_user", "unknown", "answer", "你想让我下一步做什么？可以说：生成大纲、给三个方向、修改大纲、审查大纲或保存。")
 
     def _extract_director_request(self, prompt: str) -> str:

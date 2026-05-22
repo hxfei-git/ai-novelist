@@ -14,7 +14,8 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
 - Research/检索增强：chat 可先搜索原始资料，生成通用 `retrieval_context`，并继续产出兼容旧流程的参考简报和来源列表。
 - 本地小说知识库优先 RAG：chat 可配置本地 `.txt/.md` 语料目录，research 优先检索本地语料；本地无命中时回退 mock 或真实联网搜索。
 - 大纲共创增强：outline collaboration graph，支持方向提案、生成、审稿、用户反馈、修订、版本比较、锁定约束、查看正文和保存。
-- Director 交互增强：用户始终只和 Director 对话；Director 会把口语化、多项确认和“接收/接受/同意”等回复转译为下游 Agent 可执行的 `instruction` 与 `locked_constraints`。
+- Director 交互增强：用户始终只和 Director 对话；每轮 chat 自然语言输入优先调用 LLM Director prompt 做意图判断，确定性规则只作为模型失败兜底；Director 会把口语化、多项确认和“接收/接受/同意”等回复转译为下游 Agent 可执行的 `instruction` 与 `locked_constraints`。
+- Director 确认门增强：`chat/ask_user/show_* /stop` 直接返回；research、大纲修订/推进、章节规划、写作、审稿、修订、定稿、导出、保存、小说圣经更新等写操作都会先返回 1/2 确认选项，用户确认后才执行工作流。
 - mock 模式：不依赖外部模型即可端到端验证。
 - 真实模式：Codex CLI 或 DeepSeek API。
 - 阶段 3 飞书长连接机器人最小闭环：支持飞书单聊文本、`/project` 项目切换、纯文本确认选项和同步调用 DirectorService。
@@ -123,7 +124,9 @@ Prompt 模板层
 
 ## 3. Chat 主入口调度
 
-用户侧所有直接交互都应先进入 Director。Director 负责理解自然语言、合并上下文中的待确认项，并把用户反馈转译为下游 Agent 能直接执行的 `task_args/instruction/locked_constraints`；用户不需要、也不应直接按其他 prompts 的格式和子 Agent 对话。
+用户侧所有直接交互都应先进入 Director。Director 负责理解自然语言、合并上下文中的待确认项，并把用户反馈转译为下游 Agent 能直接执行的 `task_args/instruction/locked_constraints`；用户不需要、也不应直接按其他 prompts 的格式和子 Agent 对话。正常路径下 `DirectorService._decide()` 优先调用 LLM Director prompt，`deterministic_*_decision` 只在模型调用失败时作为 fallback，避免大纲阶段修订、章节规划等输入绕过主脑。
+
+Director 支持 `chat` 直接动作：当用户只是聊天、讨论偏好或表达感受时，Director 只回复用户，不触发工作流、不写产物、不弹确认。所有会改变状态或产物的动作统一走 pending decision：先展示“确认执行 / 取消”两个选项；用户回复 `1` 或确认词后才执行原决策，回复 `2` 或取消词则清空待执行决策。
 
 `run_chat_command` 每轮加载同一个项目的 `state.json`，根据状态和用户输入选择子图：
 

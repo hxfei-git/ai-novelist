@@ -30,9 +30,10 @@ from ai_novelist.storage.local_store import LocalStore, LocalStoreError
 ProgressFunc = Callable[[str, str], None]
 Channel = Literal["cli", "feishu", "test"] | str
 
-CONFIRMATION_ACTIONS = {
+MUTATING_ACTIONS = {
     "research",
     "worldbuild",
+    "propose_directions",
     "generate_outline",
     "review_outline",
     "revise_outline",
@@ -47,8 +48,11 @@ CONFIRMATION_ACTIONS = {
     "finalize_chapter",
     "export_project",
     "persist_outputs",
+    "init_bible",
+    "update_bible",
 }
-DIRECT_ACTIONS = {"ask_user", "show_status", "show_outline", "show_reference", "show_bible", "stop"}
+CONFIRMATION_ACTIONS = MUTATING_ACTIONS
+DIRECT_ACTIONS = {"chat", "ask_user", "show_status", "show_outline", "show_reference", "show_bible", "stop"}
 
 
 @dataclass
@@ -107,7 +111,7 @@ class DirectorDecision:
         chapter = normalize_chapter(data.get("chapter") or task_args.get("chapter"))
         return cls(
             action=action,
-            requires_confirmation=normalize_bool(data.get("requires_confirmation"), action in CONFIRMATION_ACTIONS),
+            requires_confirmation=normalize_bool(data.get("requires_confirmation"), action in MUTATING_ACTIONS),
             confidence=normalize_confidence(data.get("confidence")),
             user_message=str(data.get("user_message") or data.get("message") or "我需要更多信息才能决定下一步。").strip(),
             task_args=dict(task_args),
@@ -210,15 +214,6 @@ class DirectorService:
         return self._execute_decision(state, decision, channel)
 
     def _decide(self, state: NovelState, channel: Channel) -> DirectorDecision:
-        direct = deterministic_bible_decision(state, self.store)
-        if direct is not None:
-            return direct
-        direct = deterministic_chapter_pipeline_decision(state)
-        if direct is not None:
-            return direct
-        direct = deterministic_outline_stage_decision(state)
-        if direct is not None:
-            return direct
         prompt = build_service_director_prompt(state, self.store, channel)
         if self.progress:
             self.progress("Director", "正在理解你的需求...")
@@ -269,6 +264,12 @@ class DirectorService:
             result_state = NovelState.from_dict(show_outline_node(state.to_dict(), self.store))
         elif decision.action == "show_reference":
             result_state = NovelState.from_dict(show_reference_node(state.to_dict(), self.store))
+        elif decision.action == "chat":
+            state.pending_question = ""
+            state.director_message = decision.user_message or "我在。"
+            append_message(state, "assistant", state.director_message)
+            self.store.save_state(state)
+            result_state = state
         elif decision.action == "stop":
             state.review_status = "stopped"
             state.next_action = "stop"
@@ -540,6 +541,10 @@ def parse_service_director_output(output: str, state: NovelState) -> DirectorDec
         legacy["task_args"] = {}
         decision = DirectorDecision.from_dict(legacy)
     hydrate_decision_args(decision, state)
+    if decision.action == "revise_outline" and decision.intent == "answer_pending_questions" and state.pending_questions:
+        instruction = build_pending_answer_instruction(state, state.user_request)
+        decision.instruction = instruction
+        decision.task_args["instruction"] = instruction
     apply_pending_confirmation_feedback(decision, state)
     return decision
 
@@ -1248,11 +1253,9 @@ def confirmation_choices() -> list[DirectorChoice]:
 
 
 def should_prompt_for_confirmation(decision: DirectorDecision, state: NovelState) -> bool:
-    if not decision.requires_confirmation or decision.action in DIRECT_ACTIONS:
+    if decision.action in DIRECT_ACTIONS:
         return False
-    if state.active_workflow == "outline" and state.outline_stage != "done" and decision.action in OUTLINE_STAGE_EDIT_ACTIONS:
-        return False
-    return True
+    return decision.action in MUTATING_ACTIONS or decision.requires_confirmation
 
 
 OUTLINE_STAGE_EDIT_ACTIONS = {

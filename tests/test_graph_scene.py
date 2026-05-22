@@ -52,8 +52,10 @@ def test_director_service_routes_scene_planning(tmp_path):
     make_state_with_chapter_card(store)
     service = DirectorService(store, CodexCLIAdapter(mock=True), MockSearchBackend())
 
-    result = service.handle_turn("demo", "规划第 1 章场景", channel="cli")
+    first = service.handle_turn("demo", "规划第 1 章场景", channel="cli")
+    result = service.handle_turn("demo", "1", channel="cli")
 
+    assert first.choices
     assert result.state.director_action == "plan_scenes"
     assert result.state.active_graph == "scene"
     assert store.scene_cards_path("demo", 1).exists()

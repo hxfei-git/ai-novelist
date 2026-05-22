@@ -10,22 +10,28 @@ def make_service(tmp_path):
     return store, service
 
 
+def run_confirmed(service: DirectorService, project_id: str, text: str):
+    first = service.handle_turn(project_id, text, channel="test")
+    assert first.choices
+    return service.handle_turn(project_id, "1", channel="test")
+
+
 def test_director_routes_finalize_and_export(tmp_path):
     store, service = make_service(tmp_path)
     state = store.create_project("Demo", "demo")
     state.idea = "月球城市失忆工程师"
     store.save_state(state)
 
-    service.handle_turn("demo", "写第 1 章", channel="test")
-    service.handle_turn("demo", "审稿第 1 章", channel="test")
-    service.handle_turn("demo", "修订第 1 章", channel="test")
-    service.handle_turn("demo", "审稿第 1 章", channel="test")
-    finalized = service.handle_turn("demo", "定稿第 1 章", channel="test")
+    run_confirmed(service, "demo", "写第 1 章")
+    run_confirmed(service, "demo", "审稿第 1 章")
+    run_confirmed(service, "demo", "修订第 1 章")
+    run_confirmed(service, "demo", "审稿第 1 章")
+    finalized = run_confirmed(service, "demo", "定稿第 1 章")
 
     assert finalized.state.director_action == "finalize_chapter"
     assert store.final_chapter_path("demo", 1).exists()
 
-    exported = service.handle_turn("demo", "导出小说", channel="test")
+    exported = run_confirmed(service, "demo", "导出小说")
 
     assert exported.state.director_action == "export_project"
     assert store.manuscript_export_path("demo").exists()
@@ -37,7 +43,7 @@ def test_director_write_chapter_auto_completes_prerequisites(tmp_path):
     state.idea = "月球城市失忆工程师"
     store.save_state(state)
 
-    result = service.handle_turn("demo", "写第 1 章", channel="test")
+    result = run_confirmed(service, "demo", "写第 1 章")
 
     assert result.state.director_action == "write_chapter"
     assert store.chapter_card_path("demo", 1).exists()

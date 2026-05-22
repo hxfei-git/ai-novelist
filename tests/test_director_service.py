@@ -49,6 +49,57 @@ def test_parse_service_director_output_supports_json_research_args():
     assert decision.task_args["author"] == "初圣"
 
 
+
+class ChatDirectorAdapter(CodexCLIAdapter):
+    def _mock_director(self, prompt: str) -> str:
+        return json.dumps(
+            {
+                "action": "chat",
+                "requires_confirmation": False,
+                "confidence": 90,
+                "user_message": "可以，我们先聊这个方向。",
+                "task_args": {},
+                "next_steps": [],
+            },
+            ensure_ascii=False,
+        )
+
+
+def test_director_service_chat_action_does_not_trigger_workflow(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.active_workflow = "outline"
+    state.outline_stage = "characters"
+    state.outline_stage_status = "options_ready"
+    store.save_state(state)
+    service = DirectorService(store, ChatDirectorAdapter(mock=True), MockSearchBackend())
+
+    result = service.handle_turn("demo", "这个方向感觉怎么样？", channel="cli")
+
+    assert result.decision.action == "chat"
+    assert not result.choices
+    assert result.final_message == "可以，我们先聊这个方向。"
+    assert result.state.director_action == "chat"
+    assert result.state.outline_stage == "characters"
+    assert not store.load_state("demo").pending_director_decision
+
+
+def test_cancel_pending_write_action_does_not_execute(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.current_chapter = 1
+    store.save_state(state)
+    service = DirectorService(store, CodexCLIAdapter(mock=True), MockSearchBackend())
+
+    first = service.handle_turn("demo", "写第 1 章", channel="cli")
+    cancelled = service.handle_turn("demo", "2", channel="cli")
+
+    assert first.choices[0].id == "confirm"
+    assert cancelled.final_message == "已取消上一步计划。你可以重新说明想做什么。"
+    state_after = store.load_state("demo")
+    assert state_after.chapter_draft == ""
+    assert not state_after.pending_director_decision
+
 def test_director_service_confirms_then_reuses_pending_research_decision(tmp_path):
     store = LocalStore(tmp_path)
     store.create_project("Demo", "demo")
@@ -132,7 +183,7 @@ class OutlineReviseDirectorAdapter(CodexCLIAdapter):
         )
 
 
-def test_outline_stage_revision_runs_without_confirmation_menu(tmp_path):
+def test_outline_stage_revision_requires_confirmation_menu(tmp_path):
     store = LocalStore(tmp_path)
     state = store.create_project("重生魔门", "重生魔门")
     state.active_workflow = "outline"
@@ -143,11 +194,15 @@ def test_outline_stage_revision_runs_without_confirmation_menu(tmp_path):
 
     result = service.handle_turn("重生魔门", "加入魔宗圣女与剑宗天才少女", channel="cli")
 
-    assert result.immediate_message == ""
-    assert not result.choices
-    assert result.state.director_action == "run_outline_stage"
-    assert result.state.outline_stage == "characters"
-    assert "characters" in result.state.outline_stage_artifacts
+    assert result.immediate_message == "我会修订当前人物关系。"
+    assert result.choices[0].id == "confirm"
+    assert store.load_state("重生魔门").pending_director_decision["action"] == "revise_outline"
+
+    confirmed = service.handle_turn("重生魔门", "1", channel="cli")
+
+    assert confirmed.state.director_action == "run_outline_stage"
+    assert confirmed.state.outline_stage == "characters"
+    assert "characters" in confirmed.state.outline_stage_artifacts
     assert not store.load_state("重生魔门").pending_director_decision
 
 
@@ -308,10 +363,15 @@ def test_director_service_confirms_existing_worldbuilding_stage(tmp_path):
 
     result = service.handle_turn("重生魔门", "确定世界观并进入下一阶段", channel="cli")
 
-    assert result.state.outline_stage == "characters"
-    assert result.state.outline_stage_artifacts["direction"]["status"] == "locked"
-    assert result.state.outline_stage_artifacts["worldbuilding"]["status"] == "locked"
-    assert "气运可以被观测和借贷" in result.state.outline_stage_artifacts["worldbuilding"]["synthesis"]
+    assert result.choices[0].id == "confirm"
+    assert result.state.outline_stage == "direction"
+
+    confirmed = service.handle_turn("重生魔门", "1", channel="cli")
+
+    assert confirmed.state.outline_stage == "characters"
+    assert confirmed.state.outline_stage_artifacts["direction"]["status"] == "locked"
+    assert confirmed.state.outline_stage_artifacts["worldbuilding"]["status"] == "locked"
+    assert "气运可以被观测和借贷" in confirmed.state.outline_stage_artifacts["worldbuilding"]["synthesis"]
     assert store.outline_stage_path("重生魔门", "worldbuilding").exists()
 
 def test_confirmation_accepts_receive_words():
@@ -362,9 +422,14 @@ def test_director_service_update_bible_runs_graph(tmp_path):
 
     result = service.handle_turn("demo", "更新小说圣经", channel="cli")
 
+    assert result.choices[0].id == "confirm"
     assert result.state.director_action == "update_bible"
+
+    confirmed = service.handle_turn("demo", "1", channel="cli")
+
+    assert confirmed.state.director_action == "update_bible"
     assert store.novel_bible_markdown_path("demo").exists()
-    assert "小说圣经已更新" in result.final_message
+    assert "小说圣经已更新" in confirmed.final_message
 
 def test_director_service_reports_execution_plan_for_write_chapter(tmp_path):
     store = LocalStore(tmp_path)
@@ -381,7 +446,13 @@ def test_director_service_reports_execution_plan_for_write_chapter(tmp_path):
 
     result = service.handle_turn("demo", "写第 1 章", channel="cli")
 
+    assert result.choices[0].id == "confirm"
     assert result.state.director_action == "write_chapter"
+    assert ("Plan", "将生成第 1 章正文；缺少章节卡或场景卡时会先自动补齐。") not in events
+
+    confirmed = service.handle_turn("demo", "1", channel="cli")
+
+    assert confirmed.state.director_action == "write_chapter"
     assert ("Plan", "将生成第 1 章正文；缺少章节卡或场景卡时会先自动补齐。") in events
     assert any(stage == "Drafting 1/8" for stage, _message in events)
 
@@ -415,12 +486,17 @@ def test_outline_stage_delegated_discretion_advances(tmp_path):
 
     result = service.handle_turn("demo", "这些由你决定，按当前建议处理并进入下一阶段", channel="cli")
 
-    assert result.state.outline_stage == "story_flow"
-    assert result.state.outline_stage_status == "options_ready"
-    assert result.state.outline_stage_artifacts["characters"]["status"] == "locked"
-    assert "default_discretion_summary" in result.state.outline_stage_artifacts["characters"]
-    assert "story_flow" in result.state.outline_stage_artifacts
+    assert result.choices[0].id == "confirm"
     assert result.decision.action == "persist_outputs"
+    assert result.state.outline_stage == "characters"
+
+    confirmed = service.handle_turn("demo", "1", channel="cli")
+
+    assert confirmed.state.outline_stage == "story_flow"
+    assert confirmed.state.outline_stage_status == "options_ready"
+    assert confirmed.state.outline_stage_artifacts["characters"]["status"] == "locked"
+    assert "default_discretion_summary" in confirmed.state.outline_stage_artifacts["characters"]
+    assert "story_flow" in confirmed.state.outline_stage_artifacts
 
 
 def test_outline_stage_specific_feedback_reruns_current_stage(tmp_path):
@@ -430,11 +506,16 @@ def test_outline_stage_specific_feedback_reruns_current_stage(tmp_path):
 
     result = service.handle_turn("demo", "补充人物设定：魔宗圣女表面诱惑，实际受心魔誓约限制", channel="cli")
 
-    assert result.state.director_action == "run_outline_stage"
+    assert result.choices[0].id == "confirm"
+    assert result.state.director_action == "revise_outline"
     assert result.state.outline_stage == "characters"
-    assert result.state.outline_stage_status == "options_ready"
     assert result.decision.action == "revise_outline"
     assert "心魔誓约" in result.decision.instruction
+
+    confirmed = service.handle_turn("demo", "1", channel="cli")
+
+    assert confirmed.state.director_action == "run_outline_stage"
+    assert confirmed.state.outline_stage_status == "options_ready"
 
 
 def test_outline_stage_numbered_answers_rerun_current_stage(tmp_path):
@@ -444,11 +525,16 @@ def test_outline_stage_numbered_answers_rerun_current_stage(tmp_path):
 
     result = service.handle_turn("demo", "1. 心魔誓约 2. 葬魂谷", channel="cli")
 
-    assert result.state.director_action == "run_outline_stage"
+    assert result.choices[0].id == "confirm"
+    assert result.state.director_action == "revise_outline"
     assert result.state.outline_stage == "characters"
     assert result.decision.intent == "answer_pending_questions"
     assert "心魔誓约" in result.decision.instruction
     assert "葬魂谷" in result.decision.instruction
+
+    confirmed = service.handle_turn("demo", "1", channel="cli")
+
+    assert confirmed.state.director_action == "run_outline_stage"
 
 
 def test_outline_stage_view_current_does_not_advance(tmp_path):
@@ -471,8 +557,13 @@ def test_outline_stage_simple_confirmation_advances(tmp_path):
 
     result = service.handle_turn("demo", "进入下一阶段", channel="cli")
 
-    assert result.state.outline_stage == "story_flow"
-    assert result.state.outline_stage_artifacts["characters"]["status"] == "locked"
+    assert result.choices[0].id == "confirm"
+    assert result.state.outline_stage == "characters"
+
+    confirmed = service.handle_turn("demo", "1", channel="cli")
+
+    assert confirmed.state.outline_stage == "story_flow"
+    assert confirmed.state.outline_stage_artifacts["characters"]["status"] == "locked"
 
 def test_director_treats_determine_enter_next_stage_as_approval(tmp_path):
     store = LocalStore(tmp_path)
@@ -493,11 +584,16 @@ def test_director_treats_determine_enter_next_stage_as_approval(tmp_path):
 
     result = service.handle_turn("demo", "确定进入下一阶段", channel="cli")
 
+    assert result.choices[0].id == "confirm"
     assert result.decision.action == "persist_outputs"
     assert result.decision.intent == "approve"
-    assert result.state.outline_stage == "volume_outline"
-    assert result.state.outline_stage_artifacts["story_flow"]["status"] == "locked"
-    assert "自行闭环未决问题" in result.state.outline_stage_artifacts["story_flow"]["default_discretion_summary"]
+    assert result.state.outline_stage == "story_flow"
+
+    confirmed = service.handle_turn("demo", "1", channel="cli")
+
+    assert confirmed.state.outline_stage == "volume_outline"
+    assert confirmed.state.outline_stage_artifacts["story_flow"]["status"] == "locked"
+    assert "自行闭环未决问题" in confirmed.state.outline_stage_artifacts["story_flow"]["default_discretion_summary"]
 
 def test_director_does_not_advance_on_bare_determine_detail(tmp_path):
     store = LocalStore(tmp_path)
@@ -518,9 +614,10 @@ def test_director_does_not_advance_on_bare_determine_detail(tmp_path):
 
     result = service.handle_turn("demo", "确定终局让纪无厌拒绝一次，但不要进入下一阶段", channel="cli")
 
+    assert result.choices[0].id == "confirm"
     assert result.state.outline_stage == "story_flow"
     assert result.state.outline_stage_artifacts["story_flow"]["status"] == "options_ready"
-    assert result.state.director_action == "run_outline_stage"
+    assert result.state.director_action == "revise_outline"
 
 
 

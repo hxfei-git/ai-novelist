@@ -844,3 +844,25 @@ Smoke 验证：`.venv/bin/python tests/smoke_phase2_chat.py`，结果 `phase2 ch
 .venv/bin/python tests/smoke_phase2_chat.py
 # phase2 chat smoke ok
 ```
+
+## 40. 本轮修复：Chat 全量 Director 优先与写操作确认门
+
+- 修复大纲阶段输入会被 `deterministic_outline_stage_decision()` 提前接管的问题；`DirectorService._decide()` 现在正常路径优先调用 LLM Director prompt，确定性规则只作为模型失败 fallback。
+- 新增 `chat` 动作：普通聊天、偏好讨论或非执行性问题只返回 Director 回复，不触发工作流、不弹确认。
+- 新增统一写操作确认门：research、大纲生成/修订/推进、章节卡/场景卡、写章、审稿、修订、定稿、导出、保存、小说圣经更新等 mutating action 都会先返回 `1. 确认执行 / 2. 取消`。
+- 大纲阶段修订不再免确认；例如“加入魔宗圣女与剑宗天才少女”会先保存 pending decision，用户回复 `1` 后才进入 `[OutlineStage]` 重跑阶段 Agent。
+- Mock Director 补齐小说圣经、阶段查看、阶段待确认回答、阶段推进和普通聊天识别，保证 mock 测试覆盖新路由。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_director_service.py
+# 28 passed
+.venv/bin/python -m pytest tests/test_director_service.py tests/test_graph_writer.py
+# 52 passed
+.venv/bin/python -m pytest
+# 181 passed
+.venv/bin/python tests/smoke_phase2_chat.py
+# phase2 chat smoke ok
+```
+

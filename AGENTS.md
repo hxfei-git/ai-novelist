@@ -30,7 +30,7 @@ This is a hard requirement: every code change must update the relevant documenta
 
 ## Commit & Pull Request Guidelines
 
-This checkout does not include Git history, so follow clear conventional-style commits such as `feat: add chapter planning route` or `fix: preserve state on review failure`. Pull requests should include a short summary, affected commands or workflows, test results, and any generated project artifacts worth reviewing. Link issues when applicable and include screenshots only for future UI-facing changes.
+This checkout does not include Git history, so follow clear conventional-style commits such as `feat: add chapter planning route` or `fix: preserve state on review failure`. After every completed modification, create a new Git commit that includes the relevant code, tests, and documentation updates. Pull requests should include a short summary, affected commands or workflows, test results, and any generated project artifacts worth reviewing. Link issues when applicable and include screenshots only for future UI-facing changes.
 
 ## Security & Configuration Tips
 
