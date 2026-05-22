@@ -484,3 +484,15 @@ def test_final_bible_update_extractor_prompt_explicit_facts_only():
     assert "chapter_summaries 每章 80-180 中文字符" in prompt
     for forbidden in ("推断世界规则", "覆盖旧设定为空", "未发生事件", "未来预测", "读者评价"):
         assert forbidden in prompt
+
+
+def test_chapter_summarizer_prompt_facts_only_no_prediction():
+    prompt = load_prompt("chapter_summarizer")
+
+    assert "只记录本章已发生事实" in prompt
+    assert "人物状态变化" in prompt
+    assert "关键线索" in prompt
+    assert "章末钩子" in prompt
+    assert "80-180 字" in prompt
+    for forbidden in ("推断未明说动机", "读者猜测", "预测后续剧情", "可能", "似乎暗示后续会", "读者评价"):
+        assert forbidden in prompt

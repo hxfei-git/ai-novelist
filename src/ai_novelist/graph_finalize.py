@@ -317,7 +317,7 @@ def fallback_bible_updates(state: NovelState) -> dict[str, Any]:
     }
 
 
-def normalize_summary(output: str, max_chars: int = 420) -> str:
+def normalize_summary(output: str, max_chars: int = 180) -> str:
     text = output.strip()
     if text.startswith("{"):
         data = parse_json_object(text)
@@ -327,7 +327,7 @@ def normalize_summary(output: str, max_chars: int = 420) -> str:
     return text[:max_chars].rstrip()
 
 
-def fallback_chapter_summary(text: str, max_chars: int = 260) -> str:
+def fallback_chapter_summary(text: str, max_chars: int = 180) -> str:
     compact = re.sub(r"\s+", " ", text).strip()
     return compact[:max_chars].rstrip() or "本章已定稿。"
 

@@ -2032,3 +2032,24 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Final bible update extractor 只记录定稿已发生事实。
 - 单章修辞、氛围和隐喻不能升级为小说圣经世界规则。
+
+
+## 83. Chapter Summarizer Prompt 整改
+
+目标：执行 `43_chapter_summarizer.md`，让章节摘要只记录已发生事实、明确状态变化和显性线索，不预测后续。
+
+已完成：
+
+- `chapter_summarizer.md` 明确只记录本章已发生事实、人物状态变化、关键线索和章末钩子。
+- 禁止加入未在正文出现的新设定。
+- 禁止推断未明说动机，禁止把读者猜测写成事实。
+- 禁止预测后续剧情，禁止“可能”“似乎暗示后续会”等预测表达。
+- 禁止输出读者评价、优缺点分析或写作建议。
+- 输出预算保持 80-180 字，只输出摘要正文。
+- `normalize_summary` 和 `fallback_chapter_summary` 上限收紧为 180 字。
+- 新增 prompt loader 和 finalize 回归测试覆盖 facts-only、no-prediction 和长度上限。
+
+当前边界：
+
+- Chapter summarizer 只记录本章可验证连续性事实。
+- 摘要不能承担预测、评价或新设定写入功能。

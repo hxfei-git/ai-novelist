@@ -1830,3 +1830,25 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 250 passed
 ```
+
+
+## 87. 本轮更新：Chapter Summarizer Prompt 整改
+
+- 完整读取并执行 `43_chapter_summarizer.md`。
+- `chapter_summarizer.md` 现在只记录本章已发生事实、人物状态变化、关键线索和章末钩子。
+- 禁止加入未在正文出现的新设定、推断未明说动机或把读者猜测写成事实。
+- 禁止预测后续剧情，禁止“可能”“似乎暗示后续会”等预测表达。
+- 禁止输出读者评价、优缺点分析或写作建议。
+- `normalize_summary` 和 `fallback_chapter_summary` 上限收紧为 180 字。
+- 新增回归测试覆盖 facts-only、no-prediction 和长度上限。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 35 passed
+.venv/bin/python -m pytest tests/test_graph_bible.py tests/test_finalize_chapter.py tests/test_director_service.py tests/test_research_workflow.py tests/test_search_backend.py tests/test_bible.py
+# 72 passed
+.venv/bin/python -m pytest
+# 251 passed
+```
