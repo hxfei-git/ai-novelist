@@ -34,3 +34,18 @@ def test_world_builder_prompt_limits_rules_to_conflict_principles():
         assert forbidden in prompt
     assert "至少 5 条" not in prompt
     assert "硬规则" not in prompt
+
+
+def test_outline_planner_prompt_requires_confirmed_inputs_and_pending_gaps():
+    prompt = load_prompt("outline_planner")
+
+    assert "只整合已有创意、世界观和 locked_constraints" in prompt
+    assert "不得为了填满三幕/四段结构补造 canon" in prompt
+    assert "写“待确认”" in prompt
+    assert "整体不超过 1800 中文字符" in prompt
+    assert "每幕/每段最多 4 条" in prompt
+    assert "伏笔最多 5 个" in prompt
+    assert "不输出正文段落或对白" in prompt
+    assert "待确认" in prompt
+    for forbidden in ("新增世界观大规则", "人物关系机制", "组织流程", "章节正文", "场景动作", "审批", "备案", "绩效", "申请表", "KPI"):
+        assert forbidden in prompt

@@ -1438,3 +1438,21 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - World builder 只输出主线相关运行原则，不输出说明书式规则清单。
 - 无剧情功能的专有名词、组织、物件和仪式不得堆叠。
+
+## 52. Outline Planner Prompt 整改
+
+目标：执行 `12_outline_planner.md`，让总大纲只整合已有创意、世界观和锁定约束，不为填满结构补造 canon。
+
+已完成：
+
+- `outline_planner.md` 明确总大纲只整合已有创意、世界观和 `locked_constraints`。
+- 缺少世界规则、人物关系、动机或结局依据时必须写“待确认”，不得自创。
+- 默认禁止新增世界观大规则、人物关系机制、组织流程、章节正文、场景动作和审批/备案/绩效/申请表/KPI 等机制。
+- 输出预算限制为整体不超过 1800 中文字符、每幕/每段最多 4 条、伏笔最多 5 个。
+- 输出结构新增 `待确认` 段，并明确章节钩子策略只写策略不写正文。
+- 新增 prompt loader 回归测试覆盖待确认、预算和禁止补造 canon 边界。
+
+当前边界：
+
+- Outline planner 是整合器，不是设定发明器。
+- 信息缺口进入待确认，不用新规则或新关系填补。

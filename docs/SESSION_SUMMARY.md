@@ -1182,3 +1182,23 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 217 passed
 ```
+
+## 56. 本轮更新：Outline Planner Prompt 整改
+
+- 完整读取并执行 `12_outline_planner.md`。
+- `outline_planner.md` 现在明确只整合已有创意、世界观和 `locked_constraints`，不得为填满三幕/四段结构补造 canon。
+- 缺少依据时必须写“待确认”，不新增世界观大规则、人物关系机制、组织流程、章节正文或场景动作。
+- 默认禁止审批、备案、绩效、申请表、KPI 和考评等未输入机制。
+- 输出预算为整体不超过 1800 中文字符、每幕/每段最多 4 条、伏笔最多 5 个。
+- 新增回归测试覆盖待确认字段、预算和正文/机制禁区。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 4 passed
+.venv/bin/python -m pytest tests/test_graph_writer.py tests/test_outline_collaboration.py
+# 69 passed
+.venv/bin/python -m pytest
+# 218 passed
+```
