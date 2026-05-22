@@ -1949,3 +1949,23 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Version comparator 是差异分析器，不是新版创作器。
 - 采用建议只能基于已有版本差异、用户偏好和锁定约束。
+
+
+## 79. Bible Conflict Checker Prompt 整改
+
+目标：执行 `39_bible_conflict_checker.md`，让小说圣经冲突检查可路由，包含严重度和是否阻塞写入。
+
+已完成：
+
+- `bible_conflict_checker.md` 保持严格 JSON 输出。
+- conflict 字段扩展为 `type`、`name`、`current`、`incoming`、`severity`、`blocking`。
+- `severity` 限定为 low、medium、high；high 必须 blocking=true。
+- 禁止 Markdown、长解释、新设定和自动合并方案。
+- 输出预算限制为 conflicts<=10、字符串字段<=120 中文字符。
+- `detect_bible_conflicts` 同步输出完整字段，并限制冲突数量和字符串长度。
+- 新增 prompt loader 和 bible 回归测试覆盖空冲突、字段完整、severity/blocking 和 no-auto-merge 边界。
+
+当前边界：
+
+- Bible conflict checker 只识别冲突，不合并 canon。
+- blocking=true 的冲突用于阻止错误 stable canon 自动写入。

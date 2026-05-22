@@ -434,3 +434,16 @@ def test_version_comparator_prompt_compares_without_third_version():
     assert "每条不超过 80 中文字符" in prompt
     for forbidden in ("新增第三版大纲", "新设定", "详细改写方案", "正文", "改成全新版", "第三版内容"):
         assert forbidden in prompt
+
+
+def test_bible_conflict_checker_prompt_requires_routeable_json_fields():
+    prompt = load_prompt("bible_conflict_checker")
+
+    assert "输出严格 JSON" in prompt
+    assert '"severity": "low|medium|high"' in prompt
+    assert '"blocking": true' in prompt
+    assert "conflicts 最多 10 条" in prompt
+    assert "不合并、不生成新设定" in prompt
+    assert "没有冲突时输出" in prompt
+    for forbidden in ("Markdown", "自动合并方案", "新设定", "处理长解释"):
+        assert forbidden in prompt

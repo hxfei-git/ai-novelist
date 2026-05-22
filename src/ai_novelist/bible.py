@@ -207,19 +207,38 @@ def detect_bible_conflicts(bible: NovelBible, updates: dict[str, Any]) -> list[d
     for item in update_characters:
         current = current_characters.get(item.name)
         if current and item.role and current.role and current.role != item.role:
-            conflicts.append({"type": "character_role", "name": item.name, "current": current.role, "incoming": item.role})
+            conflicts.append(bible_conflict("character_role", item.name, current.role, item.role, severity="high", blocking=True))
     update_rules = dataclass_list_from_dict(WorldRule, updates.get("world_rules", [])) if isinstance(updates, dict) else []
     current_rules = {item.name: item for item in bible.world_rules if item.name}
     for item in update_rules:
         current = current_rules.get(item.name)
         if current and item.description and current.description and current.description != item.description:
-            conflicts.append({"type": "world_rule", "name": item.name, "current": current.description, "incoming": item.description})
+            conflicts.append(bible_conflict("world_rule", item.name, current.description, item.description, severity="high", blocking=True))
     summaries = normalize_dict(updates.get("chapter_summaries", {})) if isinstance(updates, dict) else {}
     for key, value in summaries.items():
         old = bible.chapter_summaries.get(str(key))
-        if old and str(value).strip() and old != str(value).strip():
-            conflicts.append({"type": "chapter_summary", "chapter": str(key), "current": old, "incoming": str(value).strip()})
-    return conflicts
+        incoming = str(value).strip()
+        if old and incoming and old != incoming:
+            conflicts.append(bible_conflict("chapter_summary", f"chapter_{key}", old, incoming, severity="medium", blocking=True))
+    return conflicts[:10]
+
+
+def bible_conflict(conflict_type: str, name: str, current: str, incoming: str, *, severity: str, blocking: bool) -> dict[str, Any]:
+    return {
+        "type": compact_bible_conflict_text(conflict_type, 120),
+        "name": compact_bible_conflict_text(name, 120),
+        "current": compact_bible_conflict_text(current, 120),
+        "incoming": compact_bible_conflict_text(incoming, 120),
+        "severity": severity if severity in {"low", "medium", "high"} else "medium",
+        "blocking": bool(blocking),
+    }
+
+
+def compact_bible_conflict_text(value: object, max_chars: int) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= max_chars:
+        return text
+    return text[: max(0, max_chars - 3)].rstrip() + "..."
 
 
 def novel_bible_json_path(project_dir: Path) -> Path:

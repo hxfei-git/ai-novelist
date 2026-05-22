@@ -1740,3 +1740,24 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 245 passed
 ```
+
+
+## 83. 本轮更新：Bible Conflict Checker Prompt 整改
+
+- 完整读取并执行 `39_bible_conflict_checker.md`。
+- `bible_conflict_checker.md` 现在保持严格 JSON，并要求 conflict 包含 `type`、`name`、`current`、`incoming`、`severity`、`blocking`。
+- 禁止 Markdown、长解释、新设定和自动合并方案。
+- 输出预算限制为 conflicts<=10、字符串字段<=120 中文字符。
+- `detect_bible_conflicts` 同步输出完整字段，并限制数量和字符串长度。
+- 新增回归测试覆盖空冲突、字段完整、severity/blocking 和 no-auto-merge 边界。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 31 passed
+.venv/bin/python -m pytest tests/test_graph_bible.py tests/test_finalize_chapter.py tests/test_director_service.py tests/test_research_workflow.py tests/test_search_backend.py tests/test_bible.py
+# 72 passed
+.venv/bin/python -m pytest
+# 247 passed
+```

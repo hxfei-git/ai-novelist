@@ -83,6 +83,12 @@ def test_detect_bible_conflicts():
     )
 
     assert {item["type"] for item in conflicts} == {"character_role", "world_rule", "chapter_summary"}
+    for item in conflicts:
+        assert set(item) == {"type", "name", "current", "incoming", "severity", "blocking"}
+        assert item["severity"] in {"low", "medium", "high"}
+        assert isinstance(item["blocking"], bool)
+        assert all(len(str(item[key])) <= 120 for key in ("type", "name", "current", "incoming", "severity"))
+    assert any(item["blocking"] for item in conflicts)
 
 
 def test_bible_from_dict_tolerates_missing_fields():
@@ -90,3 +96,9 @@ def test_bible_from_dict_tolerates_missing_fields():
 
     assert bible.project.title == "Demo"
     assert bible.characters == []
+
+
+def test_detect_bible_conflicts_empty_output_for_no_conflict():
+    bible = NovelBible(characters=[CharacterCard(name="林澈", role="主角")])
+
+    assert detect_bible_conflicts(bible, {"characters": [{"name": "林澈", "role": "主角"}]}) == []
