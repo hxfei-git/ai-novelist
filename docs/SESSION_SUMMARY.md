@@ -1609,3 +1609,24 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 238 passed
 ```
+
+
+## 77. 本轮更新：Simulated Reader Prompt 整改
+
+- 完整读取并执行 `33_simulated_reader.md`。
+- `simulated_reader.md` 现在只能表达阅读体验缺口和困惑。
+- 允许反馈吸引力、困惑点、拖沓处、最想继续看的既有线索和保留项。
+- `rewrite_tasks` 必须转化为澄清已有内容、强化已有线索、压缩拖沓段落或保留有效吸引点。
+- 禁止新增剧情走向、新人物关系、新世界机制、CP 福利或长评式扩写。
+- 新增回归测试覆盖模拟读者反馈不新增剧情和 rewrite_tasks 只处理已有内容。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 25 passed
+.venv/bin/python -m pytest tests/test_graph_review.py tests/test_graph_revision.py tests/test_output_contracts.py
+# 9 passed
+.venv/bin/python -m pytest
+# 239 passed
+```

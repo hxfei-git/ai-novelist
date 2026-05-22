@@ -360,3 +360,14 @@ def test_style_editor_prompt_only_diagnoses_language_layer():
     assert "needs_confirmation" in prompt
     for forbidden in ("新增设定", "改剧情", "改类型定位", "重写正文", "长篇示范段落", "改变事实", "结尾钩子"):
         assert forbidden in prompt
+
+
+def test_simulated_reader_prompt_feedback_does_not_add_story():
+    prompt = load_prompt("simulated_reader")
+
+    assert "只能表达阅读体验缺口和困惑" in prompt
+    assert "澄清已有内容、强化已有线索" in prompt
+    assert "最想继续看的既有线索" in prompt
+    assert "rewrite_tasks" in prompt
+    for forbidden in ("新增剧情走向", "新人物关系", "新世界机制", "CP 福利", "长评", "新增一个", "安排一个", "让他们恋爱"):
+        assert forbidden in prompt

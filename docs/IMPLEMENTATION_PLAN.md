@@ -1827,3 +1827,23 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Style editor 是语言与叙述诊断器，不是剧情或类型方向编辑器。
 - 风格问题只能转化为语言层最小修复任务。
+
+
+## 73. Simulated Reader Prompt 整改
+
+目标：执行 `33_simulated_reader.md`，让模拟读者只表达阅读体验缺口和困惑，不提出新增剧情、CP 或世界机制。
+
+已完成：
+
+- `simulated_reader.md` 明确只能表达阅读体验缺口和困惑。
+- 允许反馈吸引力不足、困惑点、拖沓处、最想继续看的既有线索和应保留内容。
+- `rewrite_tasks` 必须转化为澄清已有内容、强化已有线索、压缩拖沓段落或保留有效吸引点。
+- 禁止新增剧情走向、新人物关系、新世界机制、CP 福利或长评式扩写。
+- 禁止使用“新增一个”“安排一个”“让他们恋爱”等方式提出新内容。
+- 保留 JSON 输出和既有预算：top_issues<=5、rewrite_tasks<=5、keep<=3、每字符串不超过 80 中文字符。
+- 新增 prompt loader 回归测试覆盖读者反馈 no-new-story 边界。
+
+当前边界：
+
+- Simulated reader 是体验反馈器，不是创作方案生成器。
+- 读者任务只能指向已有内容的澄清、强化或压缩。
