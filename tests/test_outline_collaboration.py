@@ -455,6 +455,23 @@ def test_story_flow_prompt_limits_flow_to_narrative_structure():
         assert forbidden in role_prompt or forbidden in synth_prompt
 
 
+def test_volume_outline_prompt_limits_output_to_volume_level():
+    state = NovelState(project_id="demo", title="Demo", idea="重生魔门")
+
+    role_prompt = build_outline_stage_role_prompt(state, "volume_outline", "分卷策划 Agent")
+    synth_prompt = build_outline_stage_synthesizer_prompt(state, "volume_outline", [])
+
+    assert "只做卷级目标、卷内高潮、代价和卷间钩子" in role_prompt
+    assert "只输出卷级结构，不拆具体章节" in synth_prompt
+    assert "规划 3-5 卷" in synth_prompt
+    assert "卷名 / 卷目标 / 卷内主要矛盾 / 高潮事件 / 失败或胜利代价 / 卷间钩子" in synth_prompt
+    assert "每字段不超过 80 中文字符" in synth_prompt
+    assert "每卷必须包含目标、高潮、代价和卷间钩子" in synth_prompt
+    assert "主角能力或认知变化" in synth_prompt
+    for forbidden in ("逐章细纲", "第1章", "第2章", "章节列表", "场景列表", "正文片段", "新世界观规则", "新人物系统", "过细制度机制"):
+        assert forbidden in role_prompt or forbidden in synth_prompt
+
+
 def test_current_stage_draft_enters_synthesizer_prompt():
     state = NovelState(project_id="demo", title="Demo", idea="重生魔门")
     state.outline_stage_artifacts["characters"] = {

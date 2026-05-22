@@ -1084,3 +1084,22 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 212 passed
 ```
+
+## 51. 本轮更新：Volume Outline 阶段专项边界整改
+
+- 完整读取并执行 `05_outline_stage_volume_outline.md`。
+- 分卷大纲阶段 prompt 现在只允许卷名、卷目标、卷内主要矛盾、卷级高潮事件、失败/胜利代价、主角能力或认知变化和卷间钩子。
+- 明确禁止逐章细纲、第1章、第2章、章节列表、场景列表、细场景动作、正文片段、新世界观规则、新人物系统和过细制度机制。
+- Synthesizer 固定规划 3-5 卷，每卷使用 `卷名 / 卷目标 / 卷内主要矛盾 / 高潮事件 / 失败或胜利代价 / 卷间钩子`，每字段不超过 80 中文字符。
+- 新增回归测试覆盖分卷只做卷级结构，并要求每卷包含目标、高潮、代价和卷间钩子。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 1 passed
+.venv/bin/python -m pytest tests/test_outline_collaboration.py
+# 43 passed
+.venv/bin/python -m pytest
+# 213 passed
+```
