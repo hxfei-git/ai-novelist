@@ -1456,3 +1456,21 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Outline planner 是整合器，不是设定发明器。
 - 信息缺口进入待确认，不用新规则或新关系填补。
+
+## 53. Outline Editor Prompt 整改
+
+目标：执行 `13_outline_editor.md`，让大纲审稿只给可路由问题和短修复建议，保持 `STATUS` / `QUALITY_SCORE` 可解析，不重写大纲或新增设定。
+
+已完成：
+
+- `outline_editor.md` 明确只审稿，不重写大纲，不新增 canon。
+- 保留并强调首部可解析字段 `STATUS: pass|revise|stop` 与 `QUALITY_SCORE: 0-100`。
+- 修改建议必须指向已有大纲位置、锁定约束冲突或明确缺口；缺信息写待确认。
+- 禁止完整重写大纲、新增世界观、人物关系新机制、章节正文和长篇分析过程。
+- 输出预算限制为主要问题最多 5 条、修改建议最多 5 条、每条不超过 80 中文字符，锁定约束检查最多 3 条。
+- 新增 prompt loader 回归测试覆盖状态字段、预算和审稿边界。
+
+当前边界：
+
+- Outline editor 只产出审稿判断和可路由修复建议。
+- 建议不能变成替代大纲或新的稳定设定。

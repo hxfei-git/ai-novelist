@@ -1202,3 +1202,23 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 218 passed
 ```
+
+## 57. 本轮更新：Outline Editor Prompt 整改
+
+- 完整读取并执行 `13_outline_editor.md`。
+- `outline_editor.md` 现在明确只审稿，不重写大纲，不新增 canon。
+- 保持 `STATUS: pass|revise|stop` 和 `QUALITY_SCORE: 0-100` 可解析。
+- 主要问题和修改建议均限制最多 5 条、每条不超过 80 中文字符。
+- 修改建议必须指向已有大纲位置、锁定约束冲突或明确缺口。
+- 新增回归测试覆盖状态字段、预算和不新增设定边界。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 5 passed
+.venv/bin/python -m pytest tests/test_graph_writer.py tests/test_outline_collaboration.py
+# 69 passed
+.venv/bin/python -m pytest
+# 219 passed
+```

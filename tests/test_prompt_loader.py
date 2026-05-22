@@ -49,3 +49,18 @@ def test_outline_planner_prompt_requires_confirmed_inputs_and_pending_gaps():
     assert "待确认" in prompt
     for forbidden in ("新增世界观大规则", "人物关系机制", "组织流程", "章节正文", "场景动作", "审批", "备案", "绩效", "申请表", "KPI"):
         assert forbidden in prompt
+
+
+def test_outline_editor_prompt_keeps_parseable_status_and_review_boundary():
+    prompt = load_prompt("outline_editor")
+
+    assert "STATUS: pass|revise|stop" in prompt
+    assert "QUALITY_SCORE: 0-100" in prompt
+    assert "只审稿，不重写大纲，不新增 canon" in prompt
+    assert "修改建议必须指向已有大纲位置" in prompt
+    assert "主要问题最多 5 条" in prompt
+    assert "修改建议最多 5 条" in prompt
+    assert "每条不超过 80 中文字符" in prompt
+    assert "不得把建议写成新的稳定设定" in prompt
+    for forbidden in ("完整重写大纲", "新增世界观", "人物关系新机制", "章节正文", "长篇分析过程"):
+        assert forbidden in prompt
