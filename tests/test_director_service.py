@@ -671,3 +671,91 @@ def test_outline_next_step_variants_do_not_trigger_agent(tmp_path):
         assert result.state.outline_stage == "review_lock"
         assert result.state.outline_stage_artifacts["review_lock"]["status"] == "options_ready"
         assert "可选下一步" in result.final_message
+
+
+
+def make_story_flow_with_locked_prior_state(store: LocalStore) -> NovelState:
+    state = store.create_project("Demo", "demo")
+    state.idea = "重生魔门悬疑智斗"
+    state.active_workflow = "outline"
+    state.outline_stage = "story_flow"
+    state.outline_stage_status = "options_ready"
+    for stage, label in [
+        ("direction", "方向定位"),
+        ("concept", "故事概念"),
+        ("worldbuilding", "世界观设定"),
+        ("characters", "人物关系"),
+    ]:
+        state.outline_stage_artifacts[stage] = {
+            "stage": stage,
+            "label": label,
+            "status": "locked",
+            "summary": f"{label}旧稿",
+            "stage_memory": [f"{label}旧稿"],
+        }
+    state.outline_stage_artifacts["story_flow"] = {
+        "stage": "story_flow",
+        "label": "故事流程",
+        "status": "options_ready",
+        "summary": "第5阶段旧稿",
+        "stage_memory": ["第5阶段旧稿"],
+        "pending_questions": ["第5阶段问题？"],
+    }
+    state.pending_questions = ["第5阶段问题？"]
+    state.pending_question = "1. 第5阶段问题？"
+    store.save_state(state)
+    return state
+
+
+def test_director_service_temporary_revises_locked_direction_then_returns_to_story_flow(tmp_path):
+    store = LocalStore(tmp_path)
+    make_story_flow_with_locked_prior_state(store)
+    service = DirectorService(store, CodexCLIAdapter(mock=True), MockSearchBackend())
+
+    result = service.handle_turn(
+        "demo",
+        "我希望方向定位阶段的制度框架，感答辩之类的词都很生硬，请按照正常小说去写",
+        channel="cli",
+    )
+
+    assert result.choices[0].id == "confirm"
+    assert result.decision.action == "revise_outline"
+    assert result.decision.intent == "revise_previous_stage"
+    assert result.decision.task_args["stage"] == "direction"
+    assert result.decision.task_args["return_stage"] == "story_flow"
+    assert result.state.outline_stage == "story_flow"
+
+    confirmed = service.handle_turn("demo", "1", channel="cli")
+
+    assert confirmed.state.outline_stage == "story_flow"
+    assert confirmed.state.outline_stage_status == "options_ready"
+    assert confirmed.state.pending_questions == ["第5阶段问题？"]
+    assert confirmed.state.outline_stage_artifacts["direction"]["status"] == "locked"
+    assert confirmed.state.outline_stage_artifacts["direction"]["pending_questions"] == []
+    assert confirmed.state.outline_stage_artifacts["concept"]["status"] == "locked"
+    assert confirmed.state.outline_stage_artifacts["worldbuilding"]["status"] == "locked"
+    assert "已回到第 5 阶段「故事流程」继续修改" in confirmed.final_message
+
+
+def test_director_service_stage_number_revision_targets_direction(tmp_path):
+    store = LocalStore(tmp_path)
+    make_story_flow_with_locked_prior_state(store)
+    service = DirectorService(store, CodexCLIAdapter(mock=True), MockSearchBackend())
+
+    result = service.handle_turn("demo", "回到第1阶段修改，术语太生硬", channel="cli")
+
+    assert result.choices[0].id == "confirm"
+    assert result.decision.task_args["stage"] == "direction"
+    assert result.decision.task_args["return_stage"] == "story_flow"
+
+
+def test_director_service_chinese_stage_number_revision_targets_direction(tmp_path):
+    store = LocalStore(tmp_path)
+    make_story_flow_with_locked_prior_state(store)
+    service = DirectorService(store, CodexCLIAdapter(mock=True), MockSearchBackend())
+
+    result = service.handle_turn("demo", "重修第一阶段，语感要更像正常小说", channel="cli")
+
+    assert result.choices[0].id == "confirm"
+    assert result.decision.task_args["stage"] == "direction"
+    assert result.decision.task_args["return_stage"] == "story_flow"

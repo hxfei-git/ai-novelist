@@ -1143,3 +1143,27 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 .venv/bin/python tests/smoke_phase2_chat.py
 # phase2 chat smoke ok
 ```
+
+
+## 39. 大纲阶段临时回修与原阶段恢复
+
+本轮修复已进入后续大纲阶段时回修早期阶段会误跑当前/下一阶段的问题。
+
+已完成：
+
+- `DirectorService` 增加大纲阶段回修确定性识别，支持“第1阶段/第一阶段/方向定位阶段/回到方向/重修世界观”等目标定位。
+- 当用户在第 5 阶段等后续阶段要求修改第 1 阶段等已锁定早期阶段时，决策写入 `stage`、`return_stage` 和 `auto_relock_target`，确认后临时切到目标阶段执行。
+- `run_selected_outline_agent()` 增加临时回修执行路径：保存原阶段和待确认问题，重跑目标阶段，早期目标阶段自动重新标记为 `locked`，然后恢复原当前阶段继续修改。
+- 回修不会自动重跑中间阶段，也不会推进下一阶段；后续阶段会在之后生成时读取更新后的早期阶段记忆。
+- Director prompt 已补充阶段回修规则，避免把“方向定位术语太生硬”误当成普通当前阶段重跑或重新生成方向提案。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_director_service.py tests/test_outline_collaboration.py
+# 61 passed
+.venv/bin/python -m pytest
+# 185 passed
+.venv/bin/python tests/smoke_outline_collaboration.py
+# outline collaboration smoke ok
+```

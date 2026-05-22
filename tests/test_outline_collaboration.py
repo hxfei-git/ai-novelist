@@ -579,3 +579,47 @@ def test_outline_direct_entry_next_step_question_uses_director_status(tmp_path):
     assert state.outline_stage_artifacts["review_lock"]["status"] == "options_ready"
     assert "当前阶段：审稿锁定 options_ready" in state.director_message
     assert "可选下一步" in state.director_message
+
+
+
+def test_outline_direct_entry_temporary_revises_locked_direction_then_returns_to_story_flow(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.idea = "重生魔门悬疑智斗"
+    state.active_workflow = "outline"
+    state.outline_stage = "story_flow"
+    state.outline_stage_status = "options_ready"
+    for stage, label in [
+        ("direction", "方向定位"),
+        ("concept", "故事概念"),
+        ("worldbuilding", "世界观设定"),
+        ("characters", "人物关系"),
+    ]:
+        state.outline_stage_artifacts[stage] = {
+            "stage": stage,
+            "label": label,
+            "status": "locked",
+            "summary": f"{label}旧稿",
+            "stage_memory": [f"{label}旧稿"],
+        }
+    state.outline_stage_artifacts["story_flow"] = {
+        "stage": "story_flow",
+        "label": "故事流程",
+        "status": "options_ready",
+        "summary": "第5阶段旧稿",
+        "stage_memory": ["第5阶段旧稿"],
+        "pending_questions": ["第5阶段问题？"],
+    }
+    state.pending_questions = ["第5阶段问题？"]
+    state.pending_question = "1. 第5阶段问题？"
+    store.save_state(state)
+    graph = build_outline_collaboration_graph(CodexCLIAdapter(mock=True), store)
+
+    state = run_outline_turn(graph, state, store, "方向定位阶段的制度词太生硬，按正常小说去写")
+
+    assert state.outline_stage == "story_flow"
+    assert state.outline_stage_status == "options_ready"
+    assert state.pending_questions == ["第5阶段问题？"]
+    assert state.outline_stage_artifacts["direction"]["status"] == "locked"
+    assert state.outline_stage_artifacts["direction"]["pending_questions"] == []
+    assert "已回到第 5 阶段「故事流程」继续修改" in state.director_message

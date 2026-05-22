@@ -866,3 +866,23 @@ Smoke 验证：`.venv/bin/python tests/smoke_phase2_chat.py`，结果 `phase2 ch
 # phase2 chat smoke ok
 ```
 
+
+
+## 41. 本轮修复：大纲阶段临时回修后恢复原阶段
+
+- 修复用户在第 5 阶段等后续阶段要求回到第 1 阶段修改时，系统误重跑当前阶段或推进到下一阶段的问题。
+- 新增阶段目标识别：支持“第1阶段”“第一阶段”“方向定位阶段”“回到方向”“重修世界观”等说法。
+- 新增临时回修执行路径：确认后临时切到目标阶段重跑 Agent；若目标阶段早于当前阶段，则重写后自动重新锁定，再恢复原当前阶段、原状态和原待确认问题。
+- 本轮不做级联重跑：回修早期阶段后，第 2-4 阶段不会自动废弃或重跑；后续阶段继续修改时会读取更新后的阶段记忆。
+- 新增回归测试覆盖 CLI 确认流、阶段编号识别和 outline 直入口。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_director_service.py tests/test_outline_collaboration.py
+# 61 passed
+.venv/bin/python -m pytest
+# 185 passed
+.venv/bin/python tests/smoke_outline_collaboration.py
+# outline collaboration smoke ok
+```

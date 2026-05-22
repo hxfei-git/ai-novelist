@@ -214,9 +214,14 @@ class DirectorService:
         return self._execute_decision(state, decision, channel)
 
     def _decide(self, state: NovelState, channel: Channel) -> DirectorDecision:
-        prompt = build_service_director_prompt(state, self.store, channel)
         if self.progress:
             self.progress("Director", "正在理解你的需求...")
+
+        outline_decision = deterministic_outline_stage_pre_model_decision(state)
+        if outline_decision is not None:
+            return outline_decision
+
+        prompt = build_service_director_prompt(state, self.store, channel)
         try:
             output = self.adapter.complete(prompt, self.store.project_dir(state.project_id))
         except AgentAdapterError:
@@ -769,6 +774,37 @@ def deterministic_bible_decision(state: NovelState, store: LocalStore) -> Direct
     return None
 
 
+def deterministic_outline_stage_pre_model_decision(state: NovelState) -> DirectorDecision | None:
+    text = state.user_request.strip()
+    if not text:
+        return None
+    view = deterministic_view_decision(state)
+    if view is not None:
+        return view
+    if state.active_workflow != "outline" or state.outline_stage == "done":
+        return None
+    stage_revision = deterministic_cross_stage_revision_decision(state)
+    if stage_revision is not None:
+        return stage_revision
+    if asks_outline_next_step(text):
+        message = build_outline_next_step_message(state)
+        return DirectorDecision(
+            "ask_user",
+            requires_confirmation=False,
+            user_message=message,
+            confidence=92,
+            target="outline",
+            intent="status",
+            next_steps=[
+                "回答当前阶段待确认问题",
+                "明确要求系统闭环并进入下一阶段",
+                "查看当前阶段产物",
+                "继续提出具体修改",
+            ],
+        )
+    return None
+
+
 def deterministic_outline_stage_decision(state: NovelState) -> DirectorDecision | None:
     text = state.user_request.strip()
     if not text:
@@ -779,6 +815,10 @@ def deterministic_outline_stage_decision(state: NovelState) -> DirectorDecision 
 
     if state.active_workflow != "outline" or state.outline_stage == "done":
         return None
+
+    stage_revision = deterministic_cross_stage_revision_decision(state)
+    if stage_revision is not None:
+        return stage_revision
 
     if asks_outline_next_step(text):
         message = build_outline_next_step_message(state)
@@ -844,6 +884,37 @@ def deterministic_outline_stage_decision(state: NovelState) -> DirectorDecision 
 
 
 
+def deterministic_cross_stage_revision_decision(state: NovelState) -> DirectorDecision | None:
+    text = state.user_request.strip()
+    target_stage = detect_outline_stage_reference(text)
+    if not target_stage or target_stage == state.outline_stage:
+        return None
+    if should_defer_outline_confirmation_to_director(text) or looks_like_outline_lock_feedback(text):
+        return None
+    if not has_explicit_outline_feedback(text):
+        return None
+
+    return_stage = state.outline_stage
+    auto_relock = outline_stage_index(target_stage) < outline_stage_index(return_stage)
+    target_label = stage_display_name(target_stage)
+    return_label = stage_display_name(return_stage)
+    return DirectorDecision(
+        "revise_outline",
+        requires_confirmation=False,
+        user_message=f"我会临时回到「{target_label}」阶段修订，完成后回到「{return_label}」继续当前阶段。",
+        confidence=94,
+        task_args={
+            "instruction": text,
+            "stage": target_stage,
+            "return_stage": return_stage,
+            "auto_relock_target": auto_relock,
+        },
+        target="outline",
+        intent="revise_previous_stage",
+        instruction=text,
+    )
+
+
 def negates_stage_advance(text: str) -> bool:
     return any(marker in text for marker in ("不要进入下一阶段", "不进入下一阶段", "先不进入下一阶段", "暂不进入下一阶段", "别进入下一阶段", "不要推进", "先不推进", "暂不推进"))
 
@@ -875,6 +946,49 @@ def stage_display_name(stage: str) -> str:
         "review_lock": "审稿锁定",
     }
     return labels.get(stage, stage)
+
+
+def outline_stage_index(stage: str) -> int:
+    stages = [
+        "direction",
+        "concept",
+        "worldbuilding",
+        "characters",
+        "story_flow",
+        "volume_outline",
+        "chapter_outline",
+        "review_lock",
+    ]
+    return stages.index(stage) if stage in stages else 999
+
+
+def detect_outline_stage_reference(text: str) -> str:
+    numbered = detect_outline_stage_number(text)
+    if numbered:
+        return numbered
+    return detect_outline_stage_request(text)
+
+
+def detect_outline_stage_number(text: str) -> str:
+    match = re.search(r"第\s*(?P<number>[1-8一二三四五六七八])\s*(?:个)?阶段", text)
+    if not match:
+        match = re.search(r"阶段\s*(?P<number>[1-8一二三四五六七八])", text)
+    if not match:
+        return ""
+    raw_number = match.group("number")
+    number = int(raw_number) if raw_number.isdigit() else "一二三四五六七八".index(raw_number) + 1
+    stages = [
+        "direction",
+        "concept",
+        "worldbuilding",
+        "characters",
+        "story_flow",
+        "volume_outline",
+        "chapter_outline",
+        "review_lock",
+    ]
+    return stages[number - 1] if 1 <= number <= len(stages) else ""
+
 
 def is_simple_outline_stage_confirmation(text: str) -> bool:
     lowered = text.strip().lower()
@@ -966,6 +1080,7 @@ def has_explicit_outline_feedback(text: str) -> bool:
         "修改", "调整", "重做", "重新", "补充", "强化", "削弱", "增加", "加入",
         "删掉", "删除", "保留", "不要", "别", "改成", "改为", "设为", "设定",
         "选择", "选", "采用", "接受", "接收", "同意", "确定", "太", "更",
+        "生硬", "别扭", "自然", "语感", "口吻", "术语", "词", "正常小说", "写",
     )
     if any(marker in stripped for marker in feedback_markers):
         return True
@@ -1058,7 +1173,7 @@ def deterministic_view_decision(state: NovelState) -> DirectorDecision | None:
 
 def detect_outline_stage_request(text: str) -> str:
     stage_markers = {
-        "direction": ("方向定位", "创作方向", "方向阶段"),
+        "direction": ("方向定位", "创作方向", "方向阶段", "回到方向", "重修方向", "修改方向"),
         "concept": ("故事概念", "概念阶段", "核心冲突", "反转机制"),
         "worldbuilding": ("世界观", "世界观设定", "世界观阶段"),
         "characters": ("人物关系", "人物阶段", "角色关系"),

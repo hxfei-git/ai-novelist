@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Callable, Literal, Protocol
 
 from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
@@ -573,9 +574,13 @@ def run_selected_agent(data: dict, adapter: AgentAdapter, store: LocalStore, pro
 
 def run_selected_outline_agent(state: NovelState, adapter: AgentAdapter, store: LocalStore, action: str, progress: ProgressFunc = noop_progress) -> dict:
     from ai_novelist.graph_outline import (
+        OUTLINE_STAGES,
+        STAGE_LABELS,
         advance_outline_stage_node,
+        record_stage_history,
         run_outline_stage_node,
         show_outline_stage_node,
+        stage_number,
     )
 
     if action == "show_outline":
@@ -584,10 +589,94 @@ def run_selected_outline_agent(state: NovelState, adapter: AgentAdapter, store: 
         progress("OutlineStage", "正在锁定当前大纲阶段...")
         return advance_outline_stage_node(state.to_dict(), adapter, store, progress)
 
+    target_stage = str(state.director_task_args.get("stage") or "").strip()
+    return_stage = str(state.director_task_args.get("return_stage") or "").strip()
+    if target_stage in OUTLINE_STAGES and return_stage in OUTLINE_STAGES and target_stage != state.outline_stage:
+        return run_temporary_outline_stage_revision(
+            state,
+            adapter,
+            store,
+            progress,
+            run_outline_stage_node,
+            OUTLINE_STAGES,
+            STAGE_LABELS,
+            stage_number,
+            record_stage_history,
+        )
+
     progress("OutlineStage", "正在执行当前大纲共创阶段...")
     state.director_action = "run_outline_stage"
     result = NovelState.from_dict(run_outline_stage_node(state.to_dict(), adapter, store, progress))
     progress("Done", outline_done_message("run_outline_stage"))
+    append_message(result, "assistant", result.director_message)
+    store.save_state(result)
+    return result.to_dict()
+
+
+def run_temporary_outline_stage_revision(
+    state: NovelState,
+    adapter: AgentAdapter,
+    store: LocalStore,
+    progress: ProgressFunc,
+    run_outline_stage_node,
+    outline_stages: list[str],
+    stage_labels: dict[str, str],
+    stage_number_func,
+    record_stage_history_func,
+) -> dict:
+    target_stage = str(state.director_task_args.get("stage") or "").strip()
+    return_stage = str(state.director_task_args.get("return_stage") or state.outline_stage).strip()
+    auto_relock = bool(state.director_task_args.get("auto_relock_target"))
+    if target_stage not in outline_stages or return_stage not in outline_stages:
+        state.director_message = "阶段回修目标无效，请重新说明要修改哪个大纲阶段。"
+        store.save_state(state)
+        return state.to_dict()
+
+    original_stage = state.outline_stage
+    original_status = state.outline_stage_status
+    original_pending_question = state.pending_question
+    original_pending_questions = list(state.pending_questions)
+    target_label = stage_labels[target_stage]
+    return_label = stage_labels[return_stage]
+
+    progress("OutlineStage", f"正在临时回到第 {stage_number_func(target_stage)} 阶段「{target_label}」修订...")
+    state.outline_stage = target_stage  # type: ignore[assignment]
+    state.outline_stage_status = "collecting"
+    state.current_stage = target_stage
+    state.pending_question = ""
+    state.pending_questions = []
+    state.director_action = "run_outline_stage"
+    store.save_state(state)
+
+    result = NovelState.from_dict(run_outline_stage_node(state.to_dict(), adapter, store, progress))
+    relocked = False
+    if auto_relock and outline_stages.index(target_stage) < outline_stages.index(return_stage):
+        artifact = dict(result.outline_stage_artifacts.get(target_stage) or {})
+        artifact["status"] = "locked"
+        artifact["pending_questions"] = []
+        artifact["locked_at"] = datetime.now(UTC).isoformat(timespec="seconds")
+        artifact["revised_from_stage"] = return_stage
+        result.outline_stage_artifacts[target_stage] = artifact
+        record_stage_history_func(result, "relock", target_stage, result.user_request)
+        relocked = True
+
+    return_artifact = result.outline_stage_artifacts.get(return_stage)
+    result.outline_stage = return_stage  # type: ignore[assignment]
+    result.outline_stage_status = original_status if return_stage == original_stage else str(
+        return_artifact.get("status") if isinstance(return_artifact, dict) else "options_ready"
+    )
+    result.current_stage = return_stage
+    result.pending_question = original_pending_question
+    result.pending_questions = original_pending_questions
+    result.active_workflow = "outline"
+    result.active_artifact = "outline_stage"
+    result.director_action = "run_outline_stage"
+    lock_phrase = "并重新锁定" if relocked else ""
+    result.director_message = (
+        f"第 {stage_number_func(target_stage)} 阶段「{target_label}」已按你的反馈回修{lock_phrase}。"
+        f"已回到第 {stage_number_func(return_stage)} 阶段「{return_label}」继续修改。"
+    )
+    progress("Done", result.director_message)
     append_message(result, "assistant", result.director_message)
     store.save_state(result)
     return result.to_dict()
