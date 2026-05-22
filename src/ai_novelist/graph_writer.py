@@ -367,6 +367,8 @@ DIRECTOR_ACTIONS = {
     "review",
     "review_chapter",
     "revise_chapter",
+    "finalize_chapter",
+    "export_project",
     "persist_outputs",
     "init_bible",
     "update_bible",
@@ -579,7 +581,10 @@ def run_selected_agent(data: dict, adapter: AgentAdapter, store: LocalStore, pro
             state.director_action = "review_chapter"
             state.director_message = summarize_agent_result(state, task)
         else:
-            state.director_message = summarize_agent_result(state, task)
+            if task == "write_chapter" and state.director_message:
+                state.director_message = state.director_message
+            else:
+                state.director_message = summarize_agent_result(state, task)
 
     progress("Done", outline_done_message(action))
     append_message(state, "assistant", state.director_message)
@@ -814,6 +819,8 @@ def parse_director_decision(output: str) -> dict:
         action = "persist_outputs"
     if action == "review":
         action = "review_chapter"
+    if action == "export":
+        action = "export_project"
     if action == "plan_outline":
         action = "generate_outline"
     if action == "plan_chapters":

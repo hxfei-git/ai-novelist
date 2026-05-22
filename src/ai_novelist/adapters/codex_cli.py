@@ -179,6 +179,10 @@ class CodexCLIAdapter(AgentAdapter):
                 "- 已补强审计编号查询、纸质文本禁忌和东七气闸倒计时。\n"
                 "- 未提前揭露月背冷库真相。"
             )
+        if "AGENT: chapter_summarizer" in prompt:
+            return self._mock_chapter_summary()
+        if "AGENT: final_bible_update_extractor" in prompt:
+            return self._mock_final_bible_updates()
         if "AGENT: editor" in prompt:
             return self._mock_editor_review(revised=self._is_revised_prompt(prompt))
         return self._mock_outline(prompt)
@@ -390,8 +394,12 @@ class CodexCLIAdapter(AgentAdapter):
             return response("worldbuild", "worldbuilding", "create", "我会先调度世界观 Agent，建立可持续写作的规则、冲突和素材。")
         if any(word in request for word in ("细纲", "章节规划", "章节计划")):
             return response("plan_chapters", "outline", "create", "我会调度章节细纲 Agent，把大纲拆成可执行章节。")
+        if any(word in request for word in ("导出小说", "导出全文", "导出手稿", "export")):
+            return response("export_project", "export", "export", "我会导出当前已定稿章节。")
+        if any(word in request for word in ("定稿", "最终稿", "finalize")) and ("章" in request or chapter):
+            return response("finalize_chapter", "final_chapter", "approve", f"我会定稿第 {chapter or 1} 章并更新小说圣经。", chapter_value=chapter or "1")
         if any(word in request for word in ("审稿", "编辑", "检查")):
-            return response("review", "chapter", "review", "我会调度编辑 Agent 检查当前章节。", chapter_value=chapter)
+            return response("review_chapter", "chapter", "review", "我会调度编辑 Agent 检查当前章节。", chapter_value=chapter)
         if any(word in request for word in ("重写", "修改章节", "改写", "修订章节")):
             return response("revise_chapter", "chapter", "revise", "我会根据编辑意见调度章节写手重写当前章节。", request, chapter_value=chapter)
         if "写" in request and "章" in request:
@@ -597,6 +605,28 @@ class CodexCLIAdapter(AgentAdapter):
             "- 退出状态：林澈带着手稿冲向东七气闸，进入下一章事故验证。"
         )
 
+
+
+    def _mock_chapter_summary(self) -> str:
+        return "林澈在银湾城第三维修站醒来，发现纸质手稿预告东七气闸事故，并确认审计编号失效指向自己。修订稿补强了纸质文本禁忌、身份异常和事故倒计时，章末他带着手稿冲向东七气闸，决定违规追查。"
+
+    def _mock_final_bible_updates(self) -> str:
+        data = {
+            "chapter_summaries": {
+                "1": "林澈在银湾城第三维修站醒来，发现纸质手稿预告东七气闸事故，并确认审计编号失效指向自己。他带着手稿冲向东七气闸，决定违规追查。"
+            },
+            "timeline": [
+                {"id": "chapter-001-final", "order": 1, "chapter": 1, "event": "林澈发现纸质手稿、失效审计编号和东七气闸事故预告。", "characters": ["林澈"], "location": "银湾城第三维修站"}
+            ],
+            "foreshadowing": [
+                {"id": "CH001-HOOK", "setup_chapter": 1, "setup_text": "手稿第二页预告东七气闸事故坐标。", "payoff_text": "后续验证手稿来源和月背冷库线索。", "status": "setup"}
+            ],
+            "plot_threads": [
+                {"name": "手稿预言", "description": "第一章确认手稿能预告真实事故。", "status": "active", "related_chapters": [1]}
+            ],
+            "open_questions": ["手稿为何能预告东七气闸事故仍待解释。"],
+        }
+        return json.dumps(data, ensure_ascii=False)
 
     def _mock_review_role(self, role: str, revised: bool) -> str:
         if revised:

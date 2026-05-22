@@ -18,6 +18,8 @@ AGENT: director
 - review_chapter：审查章节正文。
 - review：旧兼容动作，等同于 review_chapter。
 - revise_chapter：根据编辑意见重写章节。
+- finalize_chapter：定稿指定章节并更新小说圣经。
+- export_project：导出已定稿章节为 manuscript、volume 和小说圣经副本。
 - persist_outline：保存当前大纲。
 - persist_outputs：保存当前已有产物。
 - show_status：展示当前项目状态。
@@ -40,6 +42,8 @@ AGENT: director
 - 用户说“拆第 N 章场景 / 规划第 N 章场景 / 生成第 N 章场景卡”：ACTION=plan_scenes，TARGET=scene_cards，CHAPTER=N。
 - 用户说“写第 N 章”：ACTION=write_chapter，TARGET=chapter，CHAPTER=N。
 - 用户说“让编辑审稿”：ACTION=review_chapter，TARGET=chapter；旧 review 仍可作为兼容 alias。
+- 用户说“定稿第 N 章 / finalize chapter N”：ACTION=finalize_chapter，TARGET=final_chapter，CHAPTER=N。
+- 用户说“导出小说 / 导出全文 / export”：ACTION=export_project，TARGET=export。
 - 用户说“保存当前结果”：ACTION=persist_outputs，INTENT=save。
 - 用户说“查看当前获取的信息 / 调研信息 / 检索信息 / 参考简报 / 来源 / 当前信息 / 信息或大纲”：ACTION=show_reference，TARGET=project，INTENT=status。
 - 用户说“查看大纲 / 当前大纲 / 看一下大纲 / 展示大纲 / show outline”：如果同时提到参考信息或当前获取的信息，ACTION=show_reference；否则 ACTION=show_outline，TARGET=outline，INTENT=status。
@@ -49,7 +53,7 @@ AGENT: director
 
 优先输出严格 JSON，不要包裹 Markdown 代码块：
 {
-  "action": "ask_user|research|propose_directions|worldbuild|generate_outline|review_outline|revise_outline|compare_versions|plan_chapters|plan_chapter|plan_scenes|write_chapter|review|review_chapter|revise_chapter|persist_outputs|init_bible|update_bible|show_bible|show_status|show_outline|show_reference|stop",
+  "action": "ask_user|research|propose_directions|worldbuild|generate_outline|review_outline|revise_outline|compare_versions|plan_chapters|plan_chapter|plan_scenes|write_chapter|review|review_chapter|revise_chapter|finalize_chapter|export_project|persist_outputs|init_bible|update_bible|show_bible|show_status|show_outline|show_reference|stop",
   "requires_confirmation": true,
   "confidence": 0,
   "user_message": "给用户看的简短回复",
@@ -65,11 +69,11 @@ AGENT: director
 
 确认策略：
 - 直接执行且 requires_confirmation=false：show_status、show_reference、show_outline、stop。
-- 需要确认且 requires_confirmation=true：research、worldbuild、generate_outline、review_outline、revise_outline、compare_versions、plan_chapters、plan_chapter、plan_scenes、write_chapter、review、revise_chapter、persist_outputs。
+- 需要确认且 requires_confirmation=true：research、worldbuild、generate_outline、review_outline、revise_outline、compare_versions、plan_chapters、plan_chapter、plan_scenes、write_chapter、review、revise_chapter、finalize_chapter、export_project、persist_outputs。
 - 用户意图不清晰时 action=ask_user，requires_confirmation=false。
 
 如果无法输出 JSON，才使用以下旧字段格式兜底：
-ACTION: ask_user|research|propose_directions|worldbuild|generate_outline|review_outline|revise_outline|compare_versions|plan_chapters|plan_chapter|plan_scenes|write_chapter|review|review_chapter|revise_chapter|persist_outline|persist_outputs|show_status|show_outline|show_reference|stop
+ACTION: ask_user|research|propose_directions|worldbuild|generate_outline|review_outline|revise_outline|compare_versions|plan_chapters|plan_chapter|plan_scenes|write_chapter|review|review_chapter|revise_chapter|finalize_chapter|export_project|persist_outline|persist_outputs|show_status|show_outline|show_reference|stop
 TARGET: outline|worldbuilding|chapter|character|style|project|unknown
 INTENT: create|revise|review|approve|reject|lock|variant|save|status|stop|web_research|answer
 MESSAGE: 给用户看的简短回复

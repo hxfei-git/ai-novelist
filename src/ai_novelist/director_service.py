@@ -44,6 +44,8 @@ CONFIRMATION_ACTIONS = {
     "review",
     "review_chapter",
     "revise_chapter",
+    "finalize_chapter",
+    "export_project",
     "persist_outputs",
 }
 DIRECT_ACTIONS = {"ask_user", "show_status", "show_outline", "show_reference", "show_bible", "stop"}
@@ -91,6 +93,8 @@ class DirectorDecision:
             action = "plan_chapter"
         if action == "review":
             action = "review_chapter"
+        if action == "export":
+            action = "export_project"
         if action not in DIRECTOR_ACTIONS:
             action = "ask_user"
         task_args = data.get("task_args") if isinstance(data.get("task_args"), dict) else {}
@@ -240,6 +244,10 @@ class DirectorService:
             result_state = self._run_chapter_plan(state)
         elif decision.action == "plan_scenes":
             result_state = self._run_scene_plan(state)
+        elif decision.action == "finalize_chapter":
+            result_state = self._run_finalize(state)
+        elif decision.action == "export_project":
+            result_state = self._run_export(state)
         elif decision.action == "show_bible":
             result_state = show_bible_state(state, self.store)
         elif decision.action == "show_status":
@@ -293,6 +301,18 @@ class DirectorService:
         from ai_novelist.graph_scene import build_scene_graph
 
         graph = build_scene_graph(self.adapter, self.store)
+        return NovelState.from_dict(graph.invoke(state.to_dict()))
+
+    def _run_finalize(self, state: NovelState) -> NovelState:
+        from ai_novelist.graph_finalize import build_finalize_graph
+
+        graph = build_finalize_graph(self.adapter, self.store)
+        return NovelState.from_dict(graph.invoke(state.to_dict()))
+
+    def _run_export(self, state: NovelState) -> NovelState:
+        from ai_novelist.graph_export import build_export_graph
+
+        graph = build_export_graph(self.store)
         return NovelState.from_dict(graph.invoke(state.to_dict()))
 
     def _run_research(self, state: NovelState) -> NovelState:
@@ -536,6 +556,28 @@ def deterministic_chapter_pipeline_decision(state: NovelState) -> DirectorDecisi
         return None
     lowered = text.lower()
     chapter = extract_chapter_from_text(text) or state.current_chapter
+    wants_export = any(marker in text for marker in ("导出小说", "导出全文", "导出手稿")) or any(marker in lowered for marker in ("export novel", "export manuscript", "export"))
+    if wants_export:
+        return DirectorDecision(
+            "export_project",
+            requires_confirmation=False,
+            user_message="我会导出当前已定稿章节。",
+            confidence=95,
+            target="export",
+            intent="export",
+        )
+    wants_finalize = (any(marker in text for marker in ("定稿", "最终稿")) and "章" in text) or "finalize chapter" in lowered
+    if wants_finalize:
+        return DirectorDecision(
+            "finalize_chapter",
+            requires_confirmation=False,
+            user_message=f"我会定稿第 {chapter} 章并更新小说圣经。",
+            confidence=95,
+            task_args={"chapter": chapter, "explicit_finalize": True},
+            target="final_chapter",
+            intent="approve",
+            chapter=chapter,
+        )
     wants_scene = "章" in text and ("场景" in text or "scene" in lowered)
     if wants_scene:
         return DirectorDecision(
@@ -557,6 +599,42 @@ def deterministic_chapter_pipeline_decision(state: NovelState) -> DirectorDecisi
             confidence=95,
             task_args={"chapter": chapter},
             target="chapter_card",
+            intent="create",
+            chapter=chapter,
+        )
+    wants_review = ("章" in text and any(marker in text for marker in ("审稿", "审查", "检查"))) or "review chapter" in lowered
+    if wants_review:
+        return DirectorDecision(
+            "review_chapter",
+            requires_confirmation=False,
+            user_message=f"我会审稿第 {chapter} 章。",
+            confidence=95,
+            task_args={"chapter": chapter},
+            target="chapter",
+            intent="review",
+            chapter=chapter,
+        )
+    wants_revise = ("章" in text and any(marker in text for marker in ("修订", "修改", "重写", "改写"))) or "revise chapter" in lowered
+    if wants_revise:
+        return DirectorDecision(
+            "revise_chapter",
+            requires_confirmation=False,
+            user_message=f"我会修订第 {chapter} 章。",
+            confidence=95,
+            task_args={"chapter": chapter},
+            target="chapter",
+            intent="revise",
+            chapter=chapter,
+        )
+    wants_write = ("章" in text and any(marker in text for marker in ("写", "生成正文", "正文"))) or "write chapter" in lowered
+    if wants_write:
+        return DirectorDecision(
+            "write_chapter",
+            requires_confirmation=False,
+            user_message=f"我会生成第 {chapter} 章正文。",
+            confidence=95,
+            task_args={"chapter": chapter},
+            target="chapter",
             intent="create",
             chapter=chapter,
         )
@@ -673,6 +751,11 @@ def fallback_decision(state: NovelState) -> DirectorDecision:
     if any(marker in text for marker in ("查看小说圣经", "展示小说圣经", "更新小说圣经", "小说圣经")) or text.lower() in {"show bible", "update bible"}:
         action = "update_bible" if "更新" in text or "update" in text.lower() else "show_bible"
         return DirectorDecision(action, user_message="我会处理小说圣经。", confidence=70, target="novel_bible")
+    if any(marker in text for marker in ("导出小说", "导出全文", "导出手稿")) or "export" in text.lower():
+        return DirectorDecision("export_project", user_message="我会导出当前已定稿章节。", confidence=70, target="export", intent="export")
+    if any(marker in text for marker in ("定稿", "最终稿")) and "章" in text:
+        chapter = extract_chapter_from_text(text) or state.current_chapter
+        return DirectorDecision("finalize_chapter", user_message=f"我会定稿第 {chapter} 章并更新小说圣经。", confidence=70, task_args={"chapter": chapter, "explicit_finalize": True}, target="final_chapter", intent="approve", chapter=chapter)
     if any(marker in text for marker in ("查看大纲", "当前大纲", "展示大纲")):
         return DirectorDecision("show_outline", user_message="我会展示当前大纲。", confidence=60)
     if any(marker in text for marker in ("参考简报", "参考信息", "检索信息", "调研信息", "当前获取的信息")):
@@ -691,7 +774,7 @@ def hydrate_decision_args(decision: DirectorDecision, state: NovelState) -> None
         query = first_text(decision.task_args, "research_query", "work_title", "author") or extract_research_query(state.user_request)
         if query:
             decision.task_args["research_query"] = query
-    if decision.action in {"plan_chapter", "plan_scenes", "write_chapter", "review", "review_chapter", "revise_chapter"} and not decision.task_args.get("chapter"):
+    if decision.action in {"plan_chapter", "plan_scenes", "write_chapter", "review", "review_chapter", "revise_chapter", "finalize_chapter"} and not decision.task_args.get("chapter"):
         decision.task_args["chapter"] = state.current_chapter
 
 
@@ -722,6 +805,7 @@ def update_project_context(state: NovelState, store: LocalStore, decision: Direc
         f"- 章节卡：{'已有' if state.current_chapter_card.strip() else '暂无'}\n"
         f"- 场景卡：{'已有' if state.current_scene_cards.strip() else '暂无'}\n"
         f"- 章节正文：{'已有' if state.chapter_draft.strip() else '暂无'}\n"
+        f"- 定稿章节：{'已有' if state.current_final_chapter.strip() else '暂无'}\n"
         f"- 编辑意见：{'已有' if state.editor_notes.strip() else '暂无'}\n"
         f"- 小说圣经：{'已有' if store.novel_bible_markdown_path(state.project_id).exists() else '暂无'}\n\n"
         "## 待确认事项\n"
@@ -770,6 +854,12 @@ def default_next_steps(state: NovelState) -> str:
         return "- 生成章节细纲。"
     if state.chapter_plan.strip() and not state.chapter_draft.strip():
         return f"- 写第 {state.current_chapter} 章。"
+    if state.chapter_draft.strip() and state.editor_decision != "pass":
+        return f"- 审稿第 {state.current_chapter} 章。"
+    if state.editor_decision == "pass" and not state.current_final_chapter.strip():
+        return f"- 定稿第 {state.current_chapter} 章。"
+    if state.current_final_chapter.strip():
+        return "- 导出小说。"
     return "- 等待用户指定下一步。"
 
 
@@ -783,6 +873,8 @@ def artifact_paths(state: NovelState, store: LocalStore) -> list[str]:
         (state.current_chapter_card, store.chapter_card_path(state.project_id, state.active_chapter or state.current_chapter)),
         (state.current_scene_cards, store.scene_cards_path(state.project_id, state.active_chapter or state.current_chapter)),
         (state.chapter_draft, store.chapter_path(state.project_id, state.current_chapter)),
+        (state.current_final_chapter, store.final_chapter_path(state.project_id, state.active_chapter or state.current_chapter)),
+        (state.chapter_summaries.get(str(state.active_chapter or state.current_chapter), ""), store.chapter_summary_path(state.project_id, state.active_chapter or state.current_chapter)),
         (state.editor_notes, store.editor_notes_path(state.project_id, state.current_chapter)),
     ]
     for content, path in candidates:
@@ -792,6 +884,9 @@ def artifact_paths(state: NovelState, store: LocalStore) -> list[str]:
     bible_path = store.novel_bible_markdown_path(state.project_id)
     if bible_path.exists():
         paths.append(str(bible_path))
+    for export_path in (store.manuscript_export_path(state.project_id), store.volume_export_path(state.project_id), store.bible_export_path(state.project_id)):
+        if export_path.exists():
+            paths.append(str(export_path))
     context_path = store.project_context_path(state.project_id)
     if context_path.exists():
         paths.append(str(context_path))

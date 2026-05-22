@@ -67,6 +67,10 @@ def main(argv: list[str] | None = None) -> int:
             return run_writer_command(args, store, settings, "write_chapter")
         if args.command == "review":
             return run_writer_command(args, store, settings, "review")
+        if args.command == "finalize-chapter":
+            return run_finalize_command(args, store, settings)
+        if args.command == "export":
+            return run_export_command(args, store)
         if args.command == "show":
             return show_project(args, store)
     except (LocalStoreError, SearchBackendError, FeishuConfigError) as exc:
@@ -149,6 +153,14 @@ def build_parser() -> argparse.ArgumentParser:
     review_parser.add_argument("--project", required=True, help="项目 ID")
     review_parser.add_argument("--chapter", type=int, help="章节编号，默认使用当前章节")
     add_generation_flags(review_parser)
+
+    finalize_parser = subparsers.add_parser("finalize-chapter", help="定稿指定章节并更新小说圣经")
+    finalize_parser.add_argument("--project", required=True, help="项目 ID")
+    finalize_parser.add_argument("--chapter", type=int, required=True, help="章节编号，从 1 开始")
+    add_generation_flags(finalize_parser)
+
+    export_parser = subparsers.add_parser("export", help="导出已定稿小说")
+    export_parser.add_argument("--project", required=True, help="项目 ID")
 
     show_parser = subparsers.add_parser("show", help="显示项目状态")
     show_parser.add_argument("--project", required=True, help="项目 ID")
@@ -476,6 +488,7 @@ def print_project_startup_context(state: NovelState, store: LocalStore) -> None:
         f"- 世界观：{'已有' if state.worldbuilding.strip() else '暂无'}",
         f"- 章节细纲：{'已有' if state.chapter_plan.strip() else '暂无'}",
         f"- 章节正文：{'已有' if state.chapter_draft.strip() else '暂无'}",
+        f"- 定稿章节：{'已有' if state.current_final_chapter.strip() else '暂无'}",
     ]
     if state.retrieval_query.strip():
         lines.append(f"- 最近检索：{state.retrieval_query.strip()}")
@@ -613,6 +626,52 @@ def run_writer_command(
     return 1 if result.review_status == "error" else 0
 
 
+
+
+def run_finalize_command(
+    args: argparse.Namespace,
+    store: LocalStore,
+    settings: Settings,
+) -> int:
+    if args.chapter < 1:
+        print("错误：章节编号必须大于 0", file=sys.stderr)
+        return 2
+    state = store.load_state(args.project)
+    state.current_chapter = args.chapter
+    state.active_chapter = args.chapter
+    state.director_action = "finalize_chapter"
+    state.director_task_args = {"chapter": args.chapter, "explicit_finalize": True}
+    state.user_request = f"定稿第 {args.chapter} 章"
+    state.error = ""
+    store.save_state(state)
+
+    effective_timeout = args.timeout or settings.codex_timeout_seconds
+    adapter = make_agent_adapter(args, settings, effective_timeout)
+    print_real_mode_notice(args.mock, adapter, effective_timeout)
+    from ai_novelist.graph_finalize import build_finalize_graph
+
+    result = NovelState.from_dict(build_finalize_graph(adapter, store).invoke(state.to_dict()))
+    if result.error:
+        print(f"错误：{result.error}", file=sys.stderr)
+        return 1
+    print(result.director_message)
+    return 0
+
+
+def run_export_command(args: argparse.Namespace, store: LocalStore) -> int:
+    state = store.load_state(args.project)
+    state.director_action = "export_project"
+    state.error = ""
+    store.save_state(state)
+    from ai_novelist.graph_export import build_export_graph
+
+    result = NovelState.from_dict(build_export_graph(store).invoke(state.to_dict()))
+    if result.error:
+        print(f"错误：{result.error}", file=sys.stderr)
+        return 1
+    print(result.director_message)
+    return 0
+
 def make_search_backend(args: argparse.Namespace, settings: Settings) -> SearchBackend:
     fallback_backend: SearchBackend
     if args.mock:
@@ -749,7 +808,11 @@ def show_project(args: argparse.Namespace, store: LocalStore) -> int:
     print(artifact_status("总大纲", state.outline, store.outline_path(state.project_id)))
     print(artifact_status("章节细纲", state.chapter_plan, store.chapter_plan_path(state.project_id)))
     print(artifact_status("章节正文", state.chapter_draft, store.chapter_path(state.project_id, state.current_chapter)))
+    print(artifact_status("定稿章节", state.current_final_chapter, store.final_chapter_path(state.project_id, state.current_chapter)))
     print(artifact_status("编辑意见", state.editor_notes, store.editor_notes_path(state.project_id, state.current_chapter)))
+    manuscript_path = store.manuscript_export_path(state.project_id)
+    if manuscript_path.exists():
+        print(f"导出手稿：已保存 -> {manuscript_path}")
     if state.director_action:
         print(f"Director 动作：{state.director_action}")
     if state.error:

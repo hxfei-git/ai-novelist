@@ -863,3 +863,46 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 .venv/bin/python tests/smoke_phase2_compose.py
 # phase2 compose smoke ok
 ```
+
+
+## 30. Phase 11-13：定稿、导出与完整 Director 工作流
+
+本轮一次性实施 `plan.md` 的 Phase 11-13，完成定稿、章节摘要、NovelBible 写回、Markdown 导出和完整 mock 工作流。
+
+已完成：
+
+- 新增 `src/ai_novelist/graph_finalize.py`，按 `load_latest_draft -> save_final_chapter -> summarize_chapter -> save_chapter_summary -> extract_bible_updates_from_final -> update_bible` 定稿章节并更新连续性。
+- 定稿读取最新 `final.md` / `draft_v2.md` / `draft_v1.md` / 旧兼容章节路径；审稿通过可定稿，用户明确“定稿第 N 章”也可强制定稿。
+- 定稿保存 `chapters/chapter_XXX/final.md` 和 `summary.md`，写入 `state.current_final_chapter`、`state.chapter_summaries[str(chapter)]`，注册 `final_chapter` 和 `chapter_summary` artifacts。
+- 定稿后从 final + summary 提取 Bible updates，保守合并到 `novel_bible.json` / `novel_bible.md`，更新 `bible_version`、`bible_updated_at`，注册 `novel_bible` artifact。
+- 新增 `src/ai_novelist/graph_export.py`，收集 `chapters/chapter_*/final.md`，按章节号排序生成 `exports/manuscript.md`、`exports/volume_001.md`，并复制 `exports/novel_bible.md`。无 final 章节时返回明确提示，不写空导出。
+- DirectorService 新增 `finalize_chapter` 和 `export_project`，并补齐 `write_chapter`、`review_chapter`、`revise_chapter`、`finalize_chapter`、`export_project` 的确定性自然语言路由。
+- CLI 新增 `finalize-chapter` 和 `export` 命令；README 已补充章节闭环、定稿、导出命令和产物路径。
+- Mock adapter 新增 `chapter_summarizer` 和 `final_bible_update_extractor` 稳定输出，测试不依赖真实模型。
+
+当前边界：
+
+- 导出仅支持 Markdown，不生成 EPUB/PDF。
+- 重复定稿会覆盖固定 `final.md` / `summary.md`，artifact registry 继续递增版本。
+- Bible 更新继续采用保守 merge，冲突或后续回收点进入 open questions。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest
+# 148 passed
+.venv/bin/python tests/smoke_chapter_pipeline_mock.py
+# chapter pipeline mock smoke passed
+.venv/bin/python tests/smoke_bible_update_mock.py
+# bible update mock smoke passed
+.venv/bin/python tests/smoke_full_workflow_mock.py
+# full workflow mock smoke passed
+.venv/bin/python tests/smoke_outline_collaboration.py
+# outline collaboration smoke ok
+.venv/bin/python tests/smoke_phase2_chat.py
+# phase2 chat smoke ok
+.venv/bin/python tests/smoke_phase2.py
+# phase2 smoke ok
+.venv/bin/python tests/smoke_phase2_compose.py
+# phase2 compose smoke ok
+```

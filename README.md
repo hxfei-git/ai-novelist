@@ -84,14 +84,58 @@ Director 可路由动作：
 - `ask_user`：追问缺失信息。
 - `worldbuild`：调度世界观 Agent。
 - `generate_outline` / `revise_outline` / `review_outline`：调度交互式大纲共创节点。
-- `plan_chapters`：调度章节细纲 Agent。
-- `write_chapter`：调度章节写手 Agent。
-- `review`：调度编辑 Agent。
-- `revise_chapter`：按编辑意见重写章节。
+- `plan_chapter` / `plan_scenes`：生成章节卡和场景卡。
+- `write_chapter`：自动补齐章节卡/场景卡并生成章节草稿。
+- `review_chapter`：调度多编辑审稿，旧 `review` 仍兼容。
+- `revise_chapter`：按审稿任务定向修订章节。
+- `finalize_chapter`：保存定稿章节、章节摘要，并更新小说圣经。
+- `export_project`：导出已定稿章节为 manuscript / volume / novel_bible。
 - `persist_outputs`：保存当前已有产物。
 - `show_status`：展示当前项目状态。
 - `stop`：结束对话。
 
+
+## 章节闭环、定稿与导出
+
+推荐在 `chat` 中自然语言执行：
+
+```text
+写第 1 章
+审稿第 1 章
+修订第 1 章
+审稿第 1 章
+定稿第 1 章
+导出小说
+```
+
+也可以使用显式 CLI：
+
+```bash
+.venv/bin/ai-novelist write-chapter --project demo --chapter 1 --mock --auto-approve
+.venv/bin/ai-novelist review --project demo --chapter 1 --mock --auto-approve
+.venv/bin/ai-novelist finalize-chapter --project demo --chapter 1 --mock --auto-approve
+.venv/bin/ai-novelist export --project demo
+```
+
+关键产物路径：
+
+```text
+projects/<project>/chapters/chapter_001/chapter_card.md
+projects/<project>/chapters/chapter_001/scene_cards.md
+projects/<project>/chapters/chapter_001/draft_v1.md
+projects/<project>/chapters/chapter_001/review_v1.md
+projects/<project>/chapters/chapter_001/review_v1.json
+projects/<project>/chapters/chapter_001/revision_plan_v1.md
+projects/<project>/chapters/chapter_001/draft_v2.md
+projects/<project>/chapters/chapter_001/final.md
+projects/<project>/chapters/chapter_001/summary.md
+projects/<project>/novel_bible.md
+projects/<project>/exports/manuscript.md
+projects/<project>/exports/volume_001.md
+projects/<project>/exports/novel_bible.md
+```
+
+`--mock` 下完整闭环不调用真实模型，适合本地验证。
 
 ## Research 参考调研
 

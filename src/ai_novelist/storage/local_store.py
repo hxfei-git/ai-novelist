@@ -108,6 +108,24 @@ class LocalStore:
     def revision_plan_path(self, project_id: str, chapter: int, version: int = 1) -> Path:
         return self.chapter_artifact_dir(project_id, chapter) / f"revision_plan_v{version}.md"
 
+    def final_chapter_path(self, project_id: str, chapter: int) -> Path:
+        return self.chapter_artifact_dir(project_id, chapter) / "final.md"
+
+    def chapter_summary_path(self, project_id: str, chapter: int) -> Path:
+        return self.chapter_artifact_dir(project_id, chapter) / "summary.md"
+
+    def exports_dir(self, project_id: str) -> Path:
+        return self.project_dir(project_id) / "exports"
+
+    def manuscript_export_path(self, project_id: str) -> Path:
+        return self.exports_dir(project_id) / "manuscript.md"
+
+    def volume_export_path(self, project_id: str, volume: int = 1) -> Path:
+        return self.exports_dir(project_id) / f"volume_{volume:03d}.md"
+
+    def bible_export_path(self, project_id: str) -> Path:
+        return self.exports_dir(project_id) / "novel_bible.md"
+
     def editor_notes_path(self, project_id: str, chapter: int) -> Path:
         return self.chapters_dir(project_id) / f"chapter_{chapter:03d}_review.md"
 
@@ -212,6 +230,20 @@ class LocalStore:
             self.revision_plan_path(state.project_id, state.active_chapter or state.current_chapter, version),
             state.current_revision_plan,
             "revision plan",
+        )
+
+    def save_final_chapter(self, state: NovelState) -> Path:
+        return self._write_required(
+            self.final_chapter_path(state.project_id, state.active_chapter or state.current_chapter),
+            state.current_final_chapter,
+            "final chapter",
+        )
+
+    def save_chapter_summary(self, state: NovelState) -> Path:
+        return self._write_required(
+            self.chapter_summary_path(state.project_id, state.active_chapter or state.current_chapter),
+            state.chapter_summaries.get(str(state.active_chapter or state.current_chapter), ""),
+            "chapter summary",
         )
 
     def save_editor_notes(self, state: NovelState) -> Path:

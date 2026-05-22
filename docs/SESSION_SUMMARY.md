@@ -622,3 +622,40 @@ Smoke 验证：`.venv/bin/python tests/smoke_phase2_chat.py`，结果 `phase2 ch
 - 本轮不实现定稿、章节摘要、Bible 写回和导出。
 - 固定版本文件重复运行会被覆盖，版本历史以 artifact registry 为准。
 - 大文本仍同时保存在 `state.json` 的当前字段和 Markdown/JSON artifact 中，后续内容变大时应改为摘要加路径。
+
+
+## 31. 本轮更新：Phase 11-13 定稿、导出与完整工作流
+
+- 新增 Finalize Graph，定稿章节后保存 `final.md`、生成 `summary.md`，并把章节摘要、时间线、伏笔和开放问题写回 NovelBible。
+- 新增 Export Graph，按章节号收集所有 `final.md`，生成 `exports/manuscript.md`、`exports/volume_001.md` 和 `exports/novel_bible.md`。
+- DirectorService 支持 `finalize_chapter`、`export_project`，并能确定性识别“写/审稿/修订/定稿/导出”章节主流程命令。
+- CLI 新增 `finalize-chapter` 和 `export`；README 已记录完整章节闭环和产物路径。
+- 新增 prompts：`chapter_summarizer.md`、`final_bible_update_extractor.md`；mock adapter 提供稳定章节摘要和 Bible updates。
+- 新增测试：`tests/test_finalize_chapter.py`、`tests/test_graph_export.py`、`tests/test_director_prerequisites.py`、`tests/smoke_bible_update_mock.py`、`tests/smoke_full_workflow_mock.py`。
+
+验证已完成：
+
+```bash
+.venv/bin/python -m pytest
+# 148 passed
+.venv/bin/python tests/smoke_chapter_pipeline_mock.py
+# chapter pipeline mock smoke passed
+.venv/bin/python tests/smoke_bible_update_mock.py
+# bible update mock smoke passed
+.venv/bin/python tests/smoke_full_workflow_mock.py
+# full workflow mock smoke passed
+.venv/bin/python tests/smoke_outline_collaboration.py
+# outline collaboration smoke ok
+.venv/bin/python tests/smoke_phase2_chat.py
+# phase2 chat smoke ok
+.venv/bin/python tests/smoke_phase2.py
+# phase2 smoke ok
+.venv/bin/python tests/smoke_phase2_compose.py
+# phase2 compose smoke ok
+```
+
+剩余限制：
+
+- 导出目前只生成 Markdown。
+- `final.md`、`summary.md` 和 exports 重复运行会覆盖固定路径，历史版本以 artifact registry 为准。
+- 全书多卷拆分仍使用单卷 `volume_001.md`，后续可基于大纲卷信息扩展。
