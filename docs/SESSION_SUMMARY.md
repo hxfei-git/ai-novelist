@@ -1527,3 +1527,23 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 234 passed
 ```
+
+## 73. 本轮更新：Continuity Editor Prompt 整改
+
+- 完整读取并执行 `29_continuity_editor.md`。
+- `continuity_editor.md` 现在明确连续性修复优先删除、澄清已有信息、调整表述或改序。
+- 禁止通过新增设定补洞，禁止新增世界规则、新人物、新伏笔或新章节事件。
+- 新增设定需求只能进入 `needs_confirmation`，不能进入 `rewrite_tasks`。
+- 保持 JSON 输出和预算：`top_issues<=5`、`rewrite_tasks<=5`、`keep<=3`、每字符串不超过 80 中文字符。
+- 新增回归测试覆盖最小修复和 no-new-canon 补洞边界。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 21 passed
+.venv/bin/python -m pytest tests/test_graph_review.py tests/test_graph_revision.py tests/test_output_contracts.py
+# 9 passed
+.venv/bin/python -m pytest
+# 235 passed
+```

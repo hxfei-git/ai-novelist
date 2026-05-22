@@ -1752,3 +1752,22 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Editor 只诊断和路由修复，不生成替代正文。
 - 审稿建议必须指向已有章节卡、场景卡或草稿位置。
+
+## 69. Continuity Editor Prompt 整改
+
+目标：执行 `29_continuity_editor.md`，防止连续性编辑通过新增设定补洞，优先使用删减、改序和澄清已有信息。
+
+已完成：
+
+- `continuity_editor.md` 明确连续性修复优先使用删除、澄清已有信息、调整表述、改序或保持既有设定。
+- 禁止通过新增设定补洞。
+- 禁止新增世界规则、新人物、新伏笔、新章节事件或长篇分析。
+- 只有 review_synthesizer 明确标记需要用户确认时，新增设定需求才能进入 `needs_confirmation`，不能进入 `rewrite_tasks`。
+- 保留 JSON 输出结构，新增 `needs_confirmation` 字段。
+- 输出预算保持 `top_issues<=5`、`rewrite_tasks<=5`、`keep<=3`、每字符串不超过 80 中文字符。
+- 新增 prompt loader 回归测试覆盖最小修复和 no-new-canon 补洞边界。
+
+当前边界：
+
+- Continuity editor 只修连续性，不创造新设定。
+- 需要新增信息的情况必须转为待确认。

@@ -306,3 +306,18 @@ def test_editor_prompt_keeps_parseable_status_and_routeable_suggestions():
     assert "不得提出与细纲无关的大改建议" in prompt
     for forbidden in ("发明新设定", "新角色", "新世界规则", "新剧情"):
         assert forbidden in prompt
+
+
+def test_continuity_editor_prompt_prefers_minimal_fixes_not_new_canon():
+    prompt = load_prompt("continuity_editor")
+
+    assert "只输出 JSON" in prompt or "输出 JSON" in prompt
+    assert "top_issues <= 5" in prompt
+    assert "rewrite_tasks <= 5" in prompt
+    assert "keep <= 3" in prompt
+    assert "删除、澄清已有信息、调整表述、改序" in prompt
+    assert "不得通过新增设定补洞" in prompt
+    assert "不能写入 rewrite_tasks" in prompt
+    assert "needs_confirmation" in prompt
+    for forbidden in ("新增世界规则", "新人物", "新伏笔", "新章节事件", "长篇分析"):
+        assert forbidden in prompt
