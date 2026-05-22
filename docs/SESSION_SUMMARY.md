@@ -1024,3 +1024,23 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 207 passed
 ```
+
+## 48. 本轮更新：Worldbuilding 阶段专项边界整改
+
+- 完整读取并执行 `02_outline_stage_worldbuilding.md`。
+- 世界观阶段 prompt 现在只允许世界运行原则、力量/技术边界、阵营结构、资源与代价、冲突来源和可渐进揭露的秘密。
+- 默认禁止申请表、申请、审批、备案、考评、绩效、KPI、表格化制度、无关规则清单和未被用户要求的猎奇机制。
+- 当用户原始输入或锁定产物明确包含受控词时，prompt 会允许保留该词，但要求改写为服务主线冲突的世界运行原则。
+- Synthesizer 结构改为 `世界运行原则 / 关键边界 / 冲突资源 / 代价红线 / 仍需确认的问题`，并限制 6-8 条原则、每条不超过 100 中文字符、最多 3 个冲突资源点。
+- 新增回归测试覆盖默认行政化机制禁区和用户明确指定“绩效”时的保留边界。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 1 passed
+.venv/bin/python -m pytest tests/test_outline_collaboration.py
+# 39 passed
+.venv/bin/python -m pytest
+# 209 passed
+```

@@ -277,7 +277,7 @@ def test_outline_synthesizer_prompts_use_stage_specific_structures():
     chapter_prompt = build_outline_stage_synthesizer_prompt(state, "chapter_outline", [])
 
     assert "## 故事概念稿" in concept_prompt
-    assert "## 世界观设定稿" in world_prompt
+    assert "## 世界运行原则" in world_prompt
     assert "## 章节大纲稿" in chapter_prompt
     assert "具体世界规则" in concept_prompt
     assert "完整人物小传" in world_prompt
@@ -332,6 +332,40 @@ def test_worldbuilding_prompt_uses_saved_direction_context():
     assert "方向定位（options_ready）" in prompt
     assert "主角以低调求生方式追查师傅吞噬气运" in prompt
     assert "世界观必须承接方向定位和故事概念" in prompt
+
+
+def test_worldbuilding_prompt_blocks_default_administrative_mechanisms():
+    state = NovelState(project_id="demo", title="Demo", idea="重生魔门")
+
+    role_prompt = build_outline_stage_role_prompt(state, "worldbuilding", "规则架构 Agent")
+    synth_prompt = build_outline_stage_synthesizer_prompt(state, "worldbuilding", [])
+
+    assert "世界运行原则" in role_prompt
+    assert "力量/技术边界" in role_prompt
+    assert "资源与代价" in role_prompt
+    assert "冲突来源" in role_prompt
+    assert "默认不要生成申请表、申请、审批、备案、考评、绩效或 KPI" in role_prompt
+    assert "## 世界运行原则" in synth_prompt
+    assert "## 关键边界" in synth_prompt
+    assert "## 冲突资源" in synth_prompt
+    assert "## 代价红线" in synth_prompt
+    assert "6-8 条" in synth_prompt
+    assert "每条不超过 100 中文字符" in synth_prompt
+    assert "最多列 3 个阵营或资源冲突点" in synth_prompt
+    for forbidden in ("申请表", "审批", "备案", "考评", "绩效", "KPI", "表格制度"):
+        assert forbidden in role_prompt or forbidden in synth_prompt
+
+
+def test_worldbuilding_prompt_preserves_user_requested_controlled_terms_as_principles():
+    state = NovelState(project_id="demo", title="Demo", idea="职场绩效修仙")
+    state.user_request = "世界观保留职场绩效修仙，但不要写成流水线表格。"
+
+    prompt = build_outline_stage_synthesizer_prompt(state, "worldbuilding", [])
+
+    assert "用户原始输入或锁定产物已明确包含：绩效" in prompt
+    assert "可以保留这些词" in prompt
+    assert "只能改写为服务主线冲突的世界运行原则" in prompt
+    assert "不得扩写成申请/审批/备案/考评流程或表格制度" in prompt
 
 
 def test_characters_prompt_uses_direction_and_worldbuilding_context():

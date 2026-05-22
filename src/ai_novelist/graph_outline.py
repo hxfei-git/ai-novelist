@@ -825,7 +825,8 @@ def build_outline_stage_role_prompt(state: NovelState, stage: str, role: str) ->
         f"前序已保存阶段内容：\n{previous_stage_context(state, stage)}\n\n"
         f"当前阶段已有内容：\n{current_stage_context(state, stage)}\n\n"
         f"阶段连续性要求：\n{stage_continuity_requirement(stage)}\n\n"
-        f"{outline_stage_boundary_prompt(stage)}\n\n"
+        f"{outline_stage_boundary_prompt(stage)}\n"
+        f"{worldbuilding_overfine_terms_guard(state, stage)}\n\n"
         "OUTPUT_BUDGET:\n"
         "- 只输出短 JSON：{role, opportunities, risks, suggestions}。\n"
         "- opportunities/risks/suggestions 各最多 2 条，每条不超过 80 中文字符。\n"
@@ -847,7 +848,8 @@ def build_outline_stage_synthesizer_prompt(state: NovelState, stage: str, role_r
         f"前序已保存阶段内容：\n{previous_stage_context(state, stage)}\n\n"
         f"当前阶段已有内容：\n{current_stage_context(state, stage)}\n\n"
         f"阶段连续性要求：\n{stage_continuity_requirement(stage)}\n\n"
-        f"{outline_stage_boundary_prompt(stage)}\n\n"
+        f"{outline_stage_boundary_prompt(stage)}\n"
+        f"{worldbuilding_overfine_terms_guard(state, stage)}\n\n"
         f"角色短评：\n{reviews}\n\n"
         f"{outline_stage_synthesizer_output_rule(stage)}"
     )
@@ -863,8 +865,8 @@ OUTLINE_STAGE_BOUNDARIES = {
         "forbidden": "具体世界规则、世界规则清单、组织流程、人物关系细则、人物亲密机制、章节列表、第1章/第 1 章、分卷结构、第一卷、专有名词堆砌、行政或制度化细则、申请表、审批、备案、绩效、KPI",
     },
     "worldbuilding": {
-        "allowed": "力量或资源规则、限制、代价、势力压力、与核心冲突相关的环境约束",
-        "forbidden": "完整人物小传、章节剧情、分卷安排、与主线无关的百科设定、无代价万能规则",
+        "allowed": "世界运行原则、力量/技术边界、阵营结构、资源与代价、冲突来源、可渐进揭露的秘密",
+        "forbidden": "过细行政流程、表格化制度、申请表、申请、审批、备案、考评、绩效、KPI、与主线无关的规则清单、未被用户要求的猎奇机制、完整人物小传、章节剧情、分卷安排、无代价万能规则",
     },
     "characters": {
         "allowed": "主角欲望与缺陷、关键关系张力、反派或势力压力、人物弧光和关系边界",
@@ -899,6 +901,33 @@ def outline_stage_boundary_prompt(stage: str) -> str:
     )
 
 
+def worldbuilding_overfine_terms_guard(state: NovelState, stage: str) -> str:
+    if stage != "worldbuilding":
+        return ""
+    controlled_terms = ("申请表", "申请", "审批", "备案", "考评", "绩效", "KPI")
+    explicit_sources = [state.user_request, state.idea]
+    for artifact in state.outline_stage_artifacts.values():
+        if not isinstance(artifact, dict) or artifact.get("status") != "locked":
+            continue
+        explicit_sources.append(str(artifact.get("synthesis") or ""))
+        memory = artifact.get("stage_memory")
+        if isinstance(memory, list):
+            explicit_sources.extend(str(item) for item in memory)
+    source_text = "\n".join(item for item in explicit_sources if item)
+    explicit_terms = [term for term in controlled_terms if term in source_text]
+    if explicit_terms:
+        return (
+            "\nWORLDBUILDING_OVERFINE_TERMS:\n"
+            f"- 用户原始输入或锁定产物已明确包含：{'、'.join(explicit_terms)}。\n"
+            "- 可以保留这些词，但只能改写为服务主线冲突的世界运行原则；不得扩写成申请/审批/备案/考评流程或表格制度。"
+        )
+    return (
+        "\nWORLDBUILDING_OVERFINE_TERMS:\n"
+        "- 默认不要生成申请表、申请、审批、备案、考评、绩效或 KPI 等行政化机制。\n"
+        "- 如果角色短评出现这些词，必须改写为资源压力、代价或阵营冲突原则。"
+    )
+
+
 def outline_stage_synthesizer_output_rule(stage: str) -> str:
     if stage == "direction":
         return (
@@ -925,10 +954,14 @@ def outline_stage_synthesizer_output_rule(stage: str) -> str:
             "不得出现章节列表、第1章、第一卷、世界规则清单、组织流程、人物亲密机制、申请表、审批、备案、绩效或 KPI。"
         ),
         "worldbuilding": (
-            "## 世界观设定稿\n"
-            "列出 4-6 条服务核心冲突的规则、资源、限制和代价；每条必须能制造人物选择。\n"
-            "## 使用边界\n"
-            "说明哪些设定只作为压力来源，避免扩写成百科。"
+            "## 世界运行原则\n"
+            "写 6-8 条可支撑剧情的运行原则，每条不超过 100 中文字符；每条必须说明冲突或代价功能，不写规则清单式条款。\n"
+            "## 关键边界\n"
+            "说明力量/技术边界和可渐进揭露的秘密，避免扩成百科、行政流程或表格制度。\n"
+            "## 冲突资源\n"
+            "最多列 3 个阵营或资源冲突点，只说明它们如何推动主线选择。\n"
+            "## 代价红线\n"
+            "列出不可绕开的代价，禁止无代价万能规则。"
         ),
         "characters": (
             "## 人物关系稿\n"
