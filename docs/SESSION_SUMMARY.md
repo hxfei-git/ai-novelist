@@ -1006,3 +1006,21 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 # 206 passed
 ```
 
+## 47. 本轮更新：Concept 阶段专项边界整改
+
+- 完整读取并执行 `01_outline_stage_concept.md`。
+- 故事概念阶段 prompt 现在只允许故事钩子、一句话概念、主角欲望、核心冲突、主要悬念、叙事承诺、主题问题、反转原则和待后续展开。
+- 明确禁止 concept 阶段提前生成世界规则清单、组织流程、人物关系细则、人物亲密机制、章节列表、第1章、第一卷、分卷结构、申请表、审批、备案、绩效和 KPI。
+- Synthesizer 固定输出 `## 故事概念稿` 下的 5-7 条短句，每条不超过 90 中文字符。
+- 新增回归测试覆盖 concept 核心信息保留和过细内容禁区。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 1 passed
+.venv/bin/python -m pytest tests/test_outline_collaboration.py
+# 37 passed
+.venv/bin/python -m pytest
+# 207 passed
+```

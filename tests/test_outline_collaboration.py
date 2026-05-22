@@ -285,6 +285,24 @@ def test_outline_synthesizer_prompts_use_stage_specific_structures():
     assert len({concept_prompt, world_prompt, chapter_prompt}) == 3
 
 
+def test_concept_stage_prompt_limits_output_to_core_concept():
+    state = NovelState(project_id="demo", title="Demo", idea="重生魔门")
+
+    role_prompt = build_outline_stage_role_prompt(state, "concept", "故事概念 Agent")
+    synth_prompt = build_outline_stage_synthesizer_prompt(state, "concept", [])
+
+    assert "故事钩子" in role_prompt
+    assert "主角欲望" in role_prompt
+    assert "核心冲突" in role_prompt
+    assert "反转原则" in synth_prompt
+    assert "待后续展开" in synth_prompt
+    assert "只写 5-7 条短句" in synth_prompt
+    assert "每条不超过 90 中文字符" in synth_prompt
+    for forbidden in ("章节列表", "第1章", "第一卷", "世界规则清单", "组织流程", "人物亲密机制", "申请表", "审批", "备案", "绩效", "KPI"):
+        assert forbidden in role_prompt or forbidden in synth_prompt
+    assert "## 待后续展开" not in synth_prompt
+
+
 def test_non_direction_formatter_does_not_duplicate_synthesis_heading():
     markdown = format_stage_markdown(
         {
