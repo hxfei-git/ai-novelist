@@ -2095,3 +2095,25 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Research intent 只识别调研需求，不给创作建议。
 - 原创题材词不能被当作已有作品名。
+
+
+## 86. Retrieval Context Synthesizer Prompt 整改
+
+目标：执行 `46_retrieval_context_synthesizer.md`，让检索上下文只整理来源事实、可用线索和使用边界，不创作、不 canon 化。
+
+已完成：
+
+- `retrieval_context_synthesizer.md` 明确只基于给定搜索结果整理来源事实、可用线索和使用边界。
+- 禁止生成大纲、世界观设定、章节正文或写作方案。
+- 禁止编造搜索结果之外的事实，禁止无来源事实。
+- “可用事实”每条必须带 `source_id`，对应原始搜索结果编号。
+- “创作相关线索”必须保持素材性质，不能转成 canon、正史或硬设定。
+- 禁止把二手资料、搜索摘要、论坛猜测直接当原作正史。
+- 输出预算限制为每节最多 6 条。
+- mock 和 fallback retrieval context 同步输出 `[source_id: N]` 与 stable canon 使用边界。
+- 新增 prompt loader 和 research_workflow 回归测试覆盖 source_id 和 no-canon 边界。
+
+当前边界：
+
+- Retrieval context synthesizer 是事实简报整理器，不是创作器。
+- 检索线索只有被用户确认后才可进入创作约束或 stable canon。

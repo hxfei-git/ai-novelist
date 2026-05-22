@@ -289,20 +289,26 @@ def build_retrieval_context_prompt(state: NovelState, results: list[SearchResult
 
 def fallback_retrieval_context(state: NovelState, results: list[SearchResult], note: str = "") -> str:
     query = state.retrieval_query or research_query_from_state(state)
-    source_lines = "\n".join(f"- {item.title}: {item.snippet} ({item.url})" for item in results) or "- 暂无来源"
-    fact_lines = "\n".join(f"- {fact}" for fact in canon_facts_from_results(results)) or "- 暂无可提取事实"
+    source_lines = "\n".join(f"- [source_id: {idx}] {item.title}: {item.snippet} ({item.url})" for idx, item in enumerate(results, start=1)) or "- 暂无来源"
+    facts = canon_facts_from_results(results)
+    fact_lines = "\n".join(f"- [source_id: {idx}] {fact}" for idx, fact in enumerate(facts, start=1)) or "- 暂无可提取事实"
     note_line = f"\n## 生成说明\n- {note}\n" if note else ""
     return (
         f"# 检索上下文：{query}\n\n"
         "## 查询意图\n"
         f"- {query}\n\n"
-        "## 可用信息\n"
+        "## 可用事实\n"
         f"{fact_lines}\n\n"
-        "## 来源\n"
+        "## 创作相关线索\n"
+        "- 仅作为素材参考，不能直接写成 stable canon。\n\n"
+        "## 不确定点\n"
+        "- 原作设定、人物关系和专有名词仍需用户确认。\n\n"
+        "## 来源索引\n"
         f"{source_lines}\n\n"
         "## 使用边界\n"
         "- 以上内容来自搜索摘要，可能不完整或过时。\n"
-        "- 涉及原作设定、人物关系和专有名词时，应要求用户确认后再固化为创作约束。"
+        "- 涉及原作设定、人物关系和专有名词时，应要求用户确认后再固化为创作约束。\n"
+        "- 不得把二手资料、搜索摘要或论坛猜测直接当作原作正史、硬设定或 stable canon。"
         f"{note_line}"
     )
 

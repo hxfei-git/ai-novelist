@@ -520,3 +520,15 @@ def test_research_intent_prompt_distinguishes_original_from_fanfic():
     assert "REASON: 简短说明，不超过 60 中文字符" in prompt
     for forbidden in ("修仙文", "爽文", "网文", "题材", "类型", "额外解释", "创作建议"):
         assert forbidden in prompt
+
+
+def test_retrieval_context_synthesizer_prompt_source_bound_no_canon():
+    prompt = load_prompt("retrieval_context_synthesizer")
+
+    assert "只基于给定搜索结果整理来源事实" in prompt
+    assert "不要创作，不要 canon 化" in prompt
+    assert "每条必须带 `source_id`" in prompt
+    assert "不能转成 canon、正史或硬设定" in prompt
+    assert "每节最多 6 条" in prompt
+    for forbidden in ("建议大纲", "世界观设定为", "正文如下", "无来源事实"):
+        assert forbidden in prompt

@@ -287,5 +287,7 @@ def test_research_graph_falls_back_when_llm_summary_fails(tmp_path):
 
     assert result.review_status == "draft"
     assert "# 检索上下文：苟在初圣" in result.retrieval_context
+    assert "[source_id: 1]" in result.retrieval_context
+    assert "stable canon" in result.retrieval_context
     assert "LLM 检索总结失败" in result.retrieval_context
     assert result.reference_brief

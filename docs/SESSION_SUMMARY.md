@@ -1897,3 +1897,26 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 254 passed
 ```
+
+
+## 90. 本轮更新：Retrieval Context Synthesizer Prompt 整改
+
+- 完整读取并执行 `46_retrieval_context_synthesizer.md`。
+- `retrieval_context_synthesizer.md` 现在只基于给定搜索结果整理来源事实、可用线索和使用边界。
+- 禁止生成大纲、世界观设定、章节正文或写作方案。
+- 禁止编造搜索结果之外的事实，禁止无来源事实。
+- “可用事实”每条必须带 `source_id`，对应原始搜索结果编号。
+- “创作相关线索”必须保持素材性质，不能转成 canon、正史或硬设定。
+- mock 和 fallback retrieval context 同步输出 `[source_id: N]` 与 stable canon 使用边界。
+- 新增回归测试覆盖 source_id 和 no-canon 边界。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 38 passed
+.venv/bin/python -m pytest tests/test_graph_bible.py tests/test_finalize_chapter.py tests/test_director_service.py tests/test_research_workflow.py tests/test_search_backend.py tests/test_bible.py
+# 73 passed
+.venv/bin/python -m pytest
+# 255 passed
+```
