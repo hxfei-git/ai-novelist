@@ -263,3 +263,15 @@ def test_dialogue_enhancer_prompt_prevents_dialogue_from_adding_canon():
     assert "新增对白不得引入新的事实信息" in prompt
     for forbidden in ("秘密", "世界规则", "后续伏笔", "未规划信息", "新承诺", "新誓言", "新设定", "新动机"):
         assert forbidden in prompt
+
+
+def test_hook_enhancer_prompt_requires_existing_foreshadowing_sources():
+    prompt = load_prompt("hook_enhancer")
+
+    assert "所有钩子必须来自章节卡、场景卡、已有伏笔" in prompt
+    assert "当前草稿中已存在的信息差" in prompt
+    assert "新增钩子必须可追溯到章节卡/场景卡已有伏笔" in prompt
+    assert "不得改变结尾事件" in prompt
+    assert "不得泄露后续真相" in prompt
+    for forbidden in ("新增全局真相", "大反转", "新敌人", "新组织", "新世界规则", "无依据异常", "结尾事实"):
+        assert forbidden in prompt

@@ -1696,3 +1696,22 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Dialogue enhancer 是语言与人物声音增强器，不是信息释放改写器。
 - 台词不能承担新增设定或新伏笔。
+
+## 66. Hook Enhancer Prompt 整改
+
+目标：执行 `26_hook_enhancer.md`，让钩子增强只强化已有开场异常、中段转折和结尾悬念，不新增核心真相或改变结尾事实。
+
+已完成：
+
+- `hook_enhancer.md` 明确所有钩子必须来自章节卡、场景卡、已有伏笔或当前草稿中已存在的信息差。
+- 允许强化既有异常的呈现方式、转折句、悬念力度和信息留白。
+- 禁止新增全局真相、大反转、新敌人、新组织、新世界规则或无依据异常。
+- 禁止改变结尾事件、结尾事实、人物状态或场景顺序。
+- 禁止泄露后续真相；需要保留的信息只做暗示或留白。
+- 输出可为完整修订稿，但新增钩子必须可追溯到章节卡/场景卡已有伏笔。
+- 新增 prompt loader 回归测试覆盖 source-bound guard 和 no-new-twist 边界。
+
+当前边界：
+
+- Hook enhancer 只调整悬念呈现强度。
+- 新钩子不能脱离已有伏笔来源，也不能改写结尾事实。

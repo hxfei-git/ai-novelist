@@ -1465,3 +1465,23 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 231 passed
 ```
+
+## 70. 本轮更新：Hook Enhancer Prompt 整改
+
+- 完整读取并执行 `26_hook_enhancer.md`。
+- `hook_enhancer.md` 现在要求所有钩子必须来自章节卡、场景卡、已有伏笔或当前草稿中已存在的信息差。
+- 禁止新增全局真相、大反转、新敌人、新组织、新世界规则或无依据异常。
+- 禁止改变结尾事件、结尾事实、人物状态或场景顺序。
+- 不得泄露后续真相；保留信息只做暗示或留白。
+- 新增回归测试覆盖 source-bound guard 和 no-new-twist/no-spoiler 边界。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 18 passed
+.venv/bin/python -m pytest tests/test_graph_drafting.py tests/test_graph_writer.py
+# 27 passed
+.venv/bin/python -m pytest
+# 232 passed
+```
