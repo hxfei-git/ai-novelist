@@ -1005,3 +1005,65 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 
 - 阶段角色 Agent 仍串行执行。
 - 默认裁量摘要当前记录用户交托意图和待裁量问题，不额外调用模型生成更长解释。
+
+## 34. State 瘦身与项目记忆层
+
+本轮将大纲共创从“完整产物塞进 state.json”调整为“薄 state + Markdown artifact + project_memory.md”。
+
+已完成：
+
+- `NovelState` 新增 `project_memory_version`、`rolling_dialogue_summary`、`outline_stage_summaries`，用于保存轻量阶段摘要和滚动上下文入口。
+- `LocalStore.save_state()` 写入轻量版 state：`outline_stage_artifacts` 每阶段只保留 `stage/status/path/summary/stage_memory/pending_questions/updated_at` 等恢复字段；完整 `synthesis` 和 `role_reviews` 不再长期写入 `state.json`。
+- 旧 state 自动迁移：保存时若发现旧 artifact 内含完整 `synthesis`，会写入 `outline/<stage>.md` 和 `outline_stages/<stage>.md`，再把 JSON 中的阶段 artifact 压成轻量结构。
+- 新增 `project_memory.md`，包含“不可压缩种子设定”“阶段记忆”“滚动对话摘要”。原始创意、锁定约束、风格偏好进入不可压缩种子；阶段记忆来自阶段产物的短条目。
+- 角色短评改为调试产物：阶段 Markdown 默认不展示短评；短评另存到 `outline/debug/<stage>_role_reviews.md`。
+- 大纲阶段 prompt 的 `previous_stage_context/current_stage_context` 优先使用 `stage_memory/summary`，不再拼接完整阶段正文。DirectorService prompt 也会读取 `project_memory.md` 并用阶段记忆展示当前阶段。
+- `messages` 保存时截断为最近 12 条、单条最多约 500 字；`append_message` 同步改为短消息保留，避免长 assistant 回复反复污染上下文。
+- 待确认问题回答支持紧凑编号输入，例如 `1可以2伏笔3结局阶段再设计` 会被解析为逐题回答并重跑当前阶段，不再当作普通修改意见。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_outline_collaboration.py
+# 25 passed
+.venv/bin/python -m pytest tests/test_director_service.py tests/test_graph_bible.py tests/test_graph_chapter_plan.py
+# 28 passed
+.venv/bin/python -m pytest
+# 171 passed
+.venv/bin/python tests/smoke_outline_collaboration.py
+# outline collaboration smoke ok
+.venv/bin/python tests/smoke_phase2_chat.py
+# phase2 chat smoke ok
+```
+
+剩余限制：
+
+- 阶段记忆目前用规则抽取生成短条目，没有新增一次模型调用做专门记忆压缩。
+- `rolling_dialogue_summary` 字段已预留；当前默认由最近短消息生成 `project_memory.md` 的滚动摘要。
+
+## 35. 阶段确认闭环与 Agent 调用信息
+
+本轮修复阶段共创在 `options_ready` 状态下误把“确定进入下一阶段”识别成修改意见的问题，并补充 Agent 进度打印的模型信息。
+
+已完成：
+
+- 阶段确认不再依赖单个词硬编码；`确定/确认/同意/继续` 单独出现不会触发推进。只有主脑判断用户明确表达“进入下一阶段/推进到下一阶段/锁定当前阶段并继续”等迁移意图时才推进。
+- `DirectorService` 和 `graph_outline` 的直接入口同步使用同一确认语义，避免 chat/CLI 路径行为不一致。
+- 锁定阶段前会自动闭环当前阶段未决问题：若 artifact 或 state 中仍有 `pending_questions`，系统会生成 `default_discretion_summary`，写入当前阶段 artifact、`stage_memory` 和 `locked_constraints`，并清空当前阶段待确认项，再进入下一阶段。
+- 这避免了故事流程、分卷大纲、章节大纲等后续阶段带着上一阶段问题继续滚动污染上下文。
+- 新增 `progress.describe_agent_call()` / `with_agent_metadata()`，Agent 进度消息会打印模型与 effort，例如 DeepSeek 会显示 `model=deepseek-v4-pro, effort=medium` 或 `effort=disabled-medium`，mock 显示 `model=mock, effort=n/a`。
+- 大纲、章节卡、场景卡、审稿、修订和正文生成流程的 Agent 进度消息已接入模型/effort 信息。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_outline_collaboration.py tests/test_director_service.py
+# 52 passed
+.venv/bin/python -m pytest
+# 176 passed
+.venv/bin/python tests/smoke_outline_collaboration.py
+# outline collaboration smoke ok
+.venv/bin/python tests/smoke_phase2_chat.py
+# phase2 chat smoke ok
+```
+

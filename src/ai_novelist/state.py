@@ -80,6 +80,9 @@ class NovelState:
     pending_director_decision: dict[str, Any] = field(default_factory=dict)
     pending_question: str = ""
     active_task: str = ""
+    project_memory_version: int = 1
+    rolling_dialogue_summary: str = ""
+    outline_stage_summaries: dict[str, str] = field(default_factory=dict)
     outline_stage: OutlineStage = "direction"
     outline_stage_status: OutlineStageStatus = "collecting"
     outline_stage_artifacts: dict[str, Any] = field(default_factory=dict)
@@ -149,6 +152,9 @@ class NovelState:
             pending_director_decision=normalize_dict(data.get("pending_director_decision", {})),
             pending_question=str(data.get("pending_question", "")),
             active_task=str(data.get("active_task", "")),
+            project_memory_version=int(data.get("project_memory_version", 1)),
+            rolling_dialogue_summary=str(data.get("rolling_dialogue_summary", "")),
+            outline_stage_summaries=normalize_str_dict(data.get("outline_stage_summaries", {})),
             outline_stage=normalize_outline_stage(data.get("outline_stage", "direction")),
             outline_stage_status=normalize_outline_stage_status(data.get("outline_stage_status", "collecting")),
             outline_stage_artifacts=normalize_outline_stage_artifacts(data.get("outline_stage_artifacts", {})),

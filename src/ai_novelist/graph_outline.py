@@ -9,7 +9,7 @@ from typing import Protocol
 
 from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
 from ai_novelist.artifacts import ArtifactRecord, register_artifact
-from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress
+from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, with_agent_metadata
 from ai_novelist.prompts import load_prompt
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
@@ -229,18 +229,14 @@ def outline_director_node(data: dict, adapter: AgentAdapter, store: LocalStore) 
             state.director_intent = "status"
             state.director_task_args = {"stage": state.outline_stage}
             state.director_message = f"我会展示{STAGE_LABELS[state.outline_stage]}阶段产物。"
-        elif state.outline_stage_status == "options_ready" and delegates_stage_decision(user_text):
-            summary = build_stage_default_discretion_summary(state, user_text)
-            state.director_action = "advance_outline_stage"
-            state.director_intent = "approve"
-            state.director_task_args = {"default_discretion_summary": summary}
-            add_unique_items(state.locked_constraints, [summary])
-            state.director_message = "我会按当前阶段建议作默认裁量，锁定本阶段并进入下一阶段。"
-        elif state.outline_stage_status == "options_ready" and is_short_stage_confirmation(user_text):
-            state.director_action = "advance_outline_stage"
-            state.director_intent = "approve"
-            state.director_message = "我会锁定当前阶段，并进入下一阶段。"
-        elif should_run_outline_stage(user_text, state):
+        elif state.pending_questions and answers_stage_pending_questions(user_text):
+            instruction = build_stage_pending_answer_instruction(state, user_text)
+            state.revision_instruction = instruction
+            add_unique_items(state.locked_constraints, [instruction])
+            state.director_action = "run_outline_stage"
+            state.director_intent = "answer_pending_questions"
+            state.director_message = "我会吸收你的补充回答，并重跑当前大纲阶段。"
+        elif should_run_outline_stage(user_text, state) and not should_defer_stage_confirmation_to_director(user_text, state):
             state.director_action = "run_outline_stage"
             state.director_intent = "revise" if is_revision_request(user_text) else "create"
             state.director_message = f"我会推进第 {stage_number(state.outline_stage)} 阶段：{STAGE_LABELS[state.outline_stage]}。"
@@ -405,7 +401,7 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
     emit_progress(progress, "OutlineStage", f"正在准备第 {stage_number(stage)} 阶段「{label}」上下文...")
     role_reviews: list[dict[str, str]] = []
     for role in STAGE_ROLES[stage]:
-        emit_progress(progress, role, f"正在生成「{label}」角色短评...")
+        emit_progress(progress, role, with_agent_metadata(f"正在生成「{label}」角色短评...", adapter, "outline_stage_role"))
         try:
             output = adapter.complete(build_outline_stage_role_prompt(state, stage, role), store.project_dir(state.project_id))
         except AgentAdapterError as exc:
@@ -415,7 +411,7 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
             return state.to_dict()
         role_reviews.append({"role": role, "content": output})
 
-    emit_progress(progress, "大纲汇总 Agent", f"正在汇总「{label}」阶段产物...")
+    emit_progress(progress, "大纲汇总 Agent", with_agent_metadata(f"正在汇总「{label}」阶段产物...", adapter, "outline_stage_synthesizer"))
     try:
         synthesis = adapter.complete(build_outline_stage_synthesizer_prompt(state, stage, role_reviews), store.project_dir(state.project_id))
     except AgentAdapterError as exc:
@@ -424,12 +420,17 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
         store.save_state(state)
         return state.to_dict()
 
+    questions = extract_stage_confirmation_questions(synthesis)
     artifact = {
         "stage": stage,
         "label": STAGE_LABELS[stage],
         "status": "options_ready",
+        "path": f"outline/{stage}.md",
         "role_reviews": role_reviews,
         "synthesis": synthesis,
+        "summary": summarize_stage_text(synthesis),
+        "stage_memory": extract_stage_memory(synthesis),
+        "pending_questions": questions,
         "user_feedback": state.user_request,
         "updated_at": datetime.now(UTC).isoformat(timespec="seconds"),
     }
@@ -440,7 +441,7 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
     state.current_stage = stage
     state.active_artifact = "outline_stage"
     state.director_action = "run_outline_stage"
-    questions = extract_stage_confirmation_questions(synthesis)
+    state.outline_stage_summaries[stage] = artifact["summary"]
     state.director_message = stage_ready_message(stage, questions)
     if questions:
         state.pending_questions = questions
@@ -474,11 +475,21 @@ def advance_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalSt
 
     artifact = dict(state.outline_stage_artifacts[stage])
     default_summary = str(state.director_task_args.get("default_discretion_summary") or "").strip()
+    if not default_summary:
+        unresolved = stage_unresolved_questions(state, artifact)
+        if unresolved:
+            default_summary = build_stage_closure_summary(stage, unresolved, state.user_request)
     if default_summary:
         artifact["default_discretion_summary"] = default_summary
+        add_unique_items(state.locked_constraints, [default_summary])
+        memory = artifact.get("stage_memory") if isinstance(artifact.get("stage_memory"), list) else []
+        artifact["stage_memory"] = [*memory, default_summary]
+    artifact["pending_questions"] = []
     artifact["status"] = "locked"
     artifact["locked_at"] = datetime.now(UTC).isoformat(timespec="seconds")
     state.outline_stage_artifacts[stage] = artifact
+    state.pending_question = ""
+    state.pending_questions = []
     record_stage_history(state, "lock", stage, default_summary or state.user_request)
 
     next_stage = next_outline_stage(stage)
@@ -515,9 +526,35 @@ def advance_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalSt
 
 
 
+
+def stage_unresolved_questions(state: NovelState, artifact: dict) -> list[str]:
+    questions = []
+    raw_artifact_questions = artifact.get("pending_questions")
+    if isinstance(raw_artifact_questions, list):
+        questions.extend(str(item).strip() for item in raw_artifact_questions if str(item).strip())
+    questions.extend(item.strip() for item in state.pending_questions if item.strip())
+    generic = f"请确认是否锁定{STAGE_LABELS.get(state.outline_stage, state.outline_stage)}并进入下一阶段，或继续提出修改。"
+    return [item for item in dict.fromkeys(questions) if item != generic][:8]
+
+
+def build_stage_closure_summary(stage: str, questions: list[str], user_text: str) -> str:
+    joined = "；".join(questions[:6])
+    return (
+        f"锁定{STAGE_LABELS.get(stage, stage)}前，系统按当前阶段产物和连续性要求自行闭环未决问题；"
+        f"已由本阶段 Agent 默认裁量：{joined}；用户确认语：{user_text}"
+    )
+
 def save_outline_stage_outputs(state: NovelState, stage: str, content: str, store: LocalStore) -> None:
     store.save_outline_stage(state, stage, content)
     artifact_path = store.save_outline_artifact(state, stage, content)
+    artifact = state.outline_stage_artifacts.get(stage)
+    role_reviews_path = None
+    if isinstance(artifact, dict):
+        role_reviews_path = store.save_outline_role_reviews(
+            state,
+            stage,
+            artifact.get("role_reviews") if isinstance(artifact.get("role_reviews"), list) else [],
+        )
     register_artifact(
         store.project_dir(state.project_id),
         ArtifactRecord(
@@ -529,6 +566,18 @@ def save_outline_stage_outputs(state: NovelState, stage: str, content: str, stor
             stage=stage,
         ),
     )
+    if role_reviews_path is not None:
+        register_artifact(
+            store.project_dir(state.project_id),
+            ArtifactRecord(
+                id="",
+                type=f"{stage}_role_reviews",
+                path=role_reviews_path.relative_to(store.project_dir(state.project_id)).as_posix(),
+                source_agent="outline_stage_roles",
+                graph="outline",
+                stage=stage,
+            ),
+        )
 
 
 def hydrate_stage_artifact_from_legacy_fields(state: NovelState, stage: str, store: LocalStore) -> None:
@@ -542,6 +591,8 @@ def hydrate_stage_artifact_from_legacy_fields(state: NovelState, stage: str, sto
         "status": "options_ready",
         "role_reviews": [],
         "synthesis": state.worldbuilding.strip(),
+        "summary": summarize_stage_text(state.worldbuilding),
+        "stage_memory": extract_stage_memory(state.worldbuilding),
         "user_feedback": state.user_request,
         "updated_at": datetime.now(UTC).isoformat(timespec="seconds"),
     }
@@ -564,10 +615,10 @@ def show_outline_stage_node(data: dict, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
     stage = str(state.director_task_args.get("stage") or detect_stage_reference(state.user_request) or state.outline_stage)
     artifact = state.outline_stage_artifacts.get(stage)
-    if artifact:
+    if artifact and str(artifact.get("synthesis", "")).strip():
         state.director_message = format_stage_markdown(artifact)
     else:
-        saved = store.load_outline_stage(state.project_id, stage)
+        saved = store.load_outline_artifact(state.project_id, stage) or store.load_outline_stage(state.project_id, stage)
         if saved:
             state.director_message = saved
         elif stage == "worldbuilding" and state.worldbuilding.strip():
@@ -606,6 +657,25 @@ def normalize_legacy_outline_artifacts(state: NovelState) -> None:
         del state.outline_stage_artifacts[legacy_stage]
 
 
+
+def negates_stage_advance(text: str) -> bool:
+    return any(marker in text for marker in ("不要进入下一阶段", "不进入下一阶段", "先不进入下一阶段", "暂不进入下一阶段", "别进入下一阶段", "不要推进", "先不推进", "暂不推进"))
+
+
+def should_defer_stage_confirmation_to_director(text: str, state: NovelState) -> bool:
+    if state.active_workflow != "outline" or state.outline_stage_status != "options_ready":
+        return False
+    if parse_compact_numbered_answers(text):
+        return False
+    if any(marker in text for marker in ("查看", "展示", "看一下", "看下", "显示")):
+        return False
+    if negates_stage_advance(text):
+        return False
+    transition_markers = ("下一阶段", "进入下一阶段", "推进到下一阶段", "进入后续阶段", "推进后续阶段")
+    lock_and_continue = any(marker in text for marker in ("锁定当前阶段", "锁定本阶段", "通过当前阶段", "通过本阶段")) and any(marker in text for marker in ("继续", "进入", "推进", "下一阶段"))
+    delegated_advance = any(marker in text for marker in ("你决定", "由你决定", "交给你", "默认处理", "你来定")) and any(marker in text for marker in ("继续", "进入", "推进", "下一阶段"))
+    return any(marker in text for marker in transition_markers) or lock_and_continue or delegated_advance
+
 def should_run_outline_stage(text: str, state: NovelState) -> bool:
     if state.active_workflow == "outline":
         return True
@@ -629,15 +699,23 @@ def is_lock_request(text: str) -> bool:
 
 def is_stage_confirmation(text: str) -> bool:
     lowered = text.strip().lower()
-    exact = {"确认", "下一阶段", "进入下一阶段", "确认进入下一阶段", "锁定", "锁定当前阶段", "ok", "yes", "approve", "confirm"}
+    exact = {"确认", "确定", "继续", "下一阶段", "进入下一阶段", "确认进入下一阶段", "确定进入下一阶段", "锁定", "锁定当前阶段", "通过", "认可", "同意", "ok", "yes", "approve", "confirm"}
     if lowered in exact:
         return True
-    return any(marker in text for marker in ("确认进入下一阶段", "锁定并进入", "进入下一阶段", "推进到下一阶段"))
+    return any(marker in text for marker in ("确认进入下一阶段", "确定进入下一阶段", "锁定并进入", "进入下一阶段", "推进到下一阶段"))
 
 
 
 def is_short_stage_confirmation(text: str) -> bool:
-    return text.strip().lower() in {"确认", "继续", "下一阶段", "进入下一阶段", "确认进入下一阶段", "锁定", "通过", "ok", "yes", "approve", "confirm"}
+    lowered = text.strip().lower()
+    return lowered in {
+        "下一阶段",
+        "进入下一阶段",
+        "确认进入下一阶段",
+        "确定进入下一阶段",
+        "推进到下一阶段",
+        "advance",
+    }
 
 
 def delegates_stage_decision(text: str) -> bool:
@@ -645,6 +723,39 @@ def delegates_stage_decision(text: str) -> bool:
     wants_advance = any(marker in text for marker in ("下一阶段", "进入", "推进", "继续", "锁定", "确定"))
     return any(marker in text for marker in markers) and wants_advance
 
+
+def answers_stage_pending_questions(text: str) -> bool:
+    if is_short_stage_confirmation(text) or delegates_stage_decision(text):
+        return False
+    if parse_compact_numbered_answers(text):
+        return True
+    if re.search(r"(^|[\s，,；;])\d+[.、)]", text):
+        return True
+    return any(marker in text for marker in ("回答", "补充", "选择", "选", "采用", "接受", "接收", "同意", "设为", "改成"))
+
+
+def build_stage_pending_answer_instruction(state: NovelState, text: str) -> str:
+    questions = [item.strip() for item in state.pending_questions if item.strip()]
+    numbered_answers = parse_compact_numbered_answers(text)
+    if questions and numbered_answers:
+        parts = []
+        for index, answer in numbered_answers.items():
+            question = questions[index - 1] if 0 < index <= len(questions) else f"问题 {index}"
+            parts.append(f"用户回答：{question} -> {answer}")
+        return "；".join(parts)
+    return "用户补充待确认问题：" + text
+
+
+def parse_compact_numbered_answers(text: str) -> dict[int, str]:
+    matches = list(re.finditer(r"(?<!\d)(?P<index>\d+)(?:[.、)]\s*|(?=\D))", text))
+    answers: dict[int, str] = {}
+    for pos, match in enumerate(matches):
+        start = match.end()
+        end = matches[pos + 1].start() if pos + 1 < len(matches) else len(text)
+        answer = text[start:end].strip(" ：:，,。；;\n\t")
+        if answer:
+            answers[int(match.group("index"))] = answer
+    return answers
 
 def build_stage_default_discretion_summary(state: NovelState, text: str) -> str:
     questions = [item.strip() for item in state.pending_questions if item.strip()]
@@ -784,6 +895,59 @@ def build_outline_stage_synthesizer_prompt(state: NovelState, stage: str, role_r
     )
 
 
+def summarize_stage_text(text: str, max_chars: int = 420) -> str:
+    cleaned = re.sub(r"\s+", " ", text).strip()
+    if not cleaned:
+        return ""
+    return cleaned[:max_chars].rstrip() + ("..." if len(cleaned) > max_chars else "")
+
+
+def extract_stage_memory(text: str, max_items: int = 12, max_chars: int = 1100) -> list[str]:
+    lines: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        line = re.sub(r"^[-*+•\s]*", "", line)
+        line = re.sub(r"^\d+[.、)]\s*", "", line).strip()
+        if not line or line.startswith("#") or "仍需确认" in line or "暂无" == line:
+            continue
+        lines.append(line)
+    if not lines and text.strip():
+        lines = [summarize_stage_text(text, max_chars=max_chars)]
+    result: list[str] = []
+    total = 0
+    for line in lines:
+        if line in result:
+            continue
+        total += len(line)
+        if total > max_chars and result:
+            break
+        result.append(line)
+        if len(result) >= max_items:
+            break
+    return result
+
+
+def stage_memory_context(artifact: dict, max_chars: int) -> str:
+    memory = artifact.get("stage_memory")
+    if isinstance(memory, list) and memory:
+        context = "\n".join(f"- {str(item).strip()}" for item in memory if str(item).strip())
+    else:
+        context = str(artifact.get("summary") or artifact.get("synthesis", "")).strip()
+    if len(context) > max_chars:
+        context = context[:max_chars].rstrip() + "\n..."
+    return context
+
+
+def stage_full_text(state: NovelState, store: LocalStore, stage: str) -> str:
+    saved = store.load_outline_artifact(state.project_id, stage).strip()
+    if saved:
+        return saved
+    artifact = state.outline_stage_artifacts.get(stage, {})
+    if isinstance(artifact, dict):
+        return str(artifact.get("synthesis") or artifact.get("summary") or "").strip()
+    return ""
+
+
 def previous_stage_context(state: NovelState, stage: str, max_chars_per_stage: int = 1800) -> str:
     if stage not in OUTLINE_STAGES:
         return "暂无"
@@ -792,13 +956,11 @@ def previous_stage_context(state: NovelState, stage: str, max_chars_per_stage: i
         artifact = state.outline_stage_artifacts.get(previous_stage)
         if not isinstance(artifact, dict):
             continue
-        synthesis = str(artifact.get("synthesis", "")).strip()
-        if not synthesis:
+        context = stage_memory_context(artifact, max_chars_per_stage)
+        if not context:
             continue
         status = str(artifact.get("status") or "draft")
-        if len(synthesis) > max_chars_per_stage:
-            synthesis = synthesis[:max_chars_per_stage].rstrip() + "\n..."
-        parts.append(f"## {STAGE_LABELS[previous_stage]}（{status}）\n{synthesis}")
+        parts.append(f"## {STAGE_LABELS[previous_stage]}（{status}）\n{context}")
     return "\n\n".join(parts) or "暂无"
 
 
@@ -806,13 +968,11 @@ def current_stage_context(state: NovelState, stage: str, max_chars: int = 2400) 
     artifact = state.outline_stage_artifacts.get(stage)
     if not isinstance(artifact, dict):
         return "暂无"
-    synthesis = str(artifact.get("synthesis", "")).strip()
-    if not synthesis:
+    context = stage_memory_context(artifact, max_chars)
+    if not context:
         return "暂无"
     status = str(artifact.get("status") or state.outline_stage_status or "draft")
-    if len(synthesis) > max_chars:
-        synthesis = synthesis[:max_chars].rstrip() + "\n..."
-    return f"## {STAGE_LABELS.get(stage, stage)}（{status}）\n{synthesis}"
+    return f"## {STAGE_LABELS.get(stage, stage)}（{status}）\n{context}"
 
 
 def stage_continuity_requirement(stage: str) -> str:
@@ -834,7 +994,9 @@ def locked_stage_summary(state: NovelState) -> str:
     for stage in OUTLINE_STAGES:
         artifact = state.outline_stage_artifacts.get(stage)
         if artifact and artifact.get("status") == "locked":
-            parts.append(f"## {STAGE_LABELS[stage]}\n{artifact.get('synthesis', '')}")
+            context = stage_memory_context(artifact, 1800)
+            if context:
+                parts.append(f"## {STAGE_LABELS[stage]}\n{context}")
     return "\n\n".join(parts) or "暂无"
 
 
@@ -853,16 +1015,6 @@ def format_stage_markdown(artifact: dict) -> str:
         heading = "## 方向控制稿" if stage == "direction" else "## Director 汇总"
         lines.append(heading)
         lines.append(synthesis)
-    if stage != "direction":
-        role_reviews = artifact.get("role_reviews") if isinstance(artifact.get("role_reviews"), list) else []
-        if role_reviews:
-            lines.append("")
-            lines.append("## 角色短评")
-            for item in role_reviews:
-                if isinstance(item, dict):
-                    lines.append(f"### {item.get('role', 'Agent')}")
-                    lines.append(str(item.get("content", "")).strip())
-                    lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -911,7 +1063,7 @@ def finalize_locked_outline(state: NovelState, store: LocalStore) -> None:
     sections = []
     for stage in OUTLINE_STAGES:
         artifact = state.outline_stage_artifacts.get(stage, {})
-        synthesis = str(artifact.get("synthesis", "")).strip()
+        synthesis = stage_full_text(state, store, stage).strip()
         if synthesis:
             sections.append(f"## {STAGE_LABELS[stage]}\n\n{synthesis}")
     state.outline = "# 最终锁定总大纲\n\n" + "\n\n".join(sections)
@@ -1012,7 +1164,7 @@ def build_outline_director_prompt(state: NovelState) -> str:
         f"{template.rstrip()}\n\n"
         "## 输出格式\n"
         "优先输出 JSON：action, intent, target, user_message, instruction, task_args, locked_constraints。大纲阶段动作可用 run_current_stage、advance_current_stage、answer_pending_questions、show_stage、ask_user。\n"
-        "请明确区分：新增修改意见、回答待确认问题、把剩余问题交给系统裁量并推进、仅查看状态。待确认问题不是必须逐项回答的阻塞项。\n\n"
+        "请明确区分：新增修改意见、回答待确认问题、把剩余问题交给系统裁量并推进、仅查看状态。待确认问题不是必须逐项回答的阻塞项。只有用户明确要求进入/推进下一阶段，或明确锁定当前阶段并继续，才选择 advance_current_stage；不要因为句子里出现‘确定/确认/同意’就推进。\n\n"
         "## 当前大纲共创状态\n"
         f"项目：{state.project_id}\n"
         f"标题：{state.title}\n"
@@ -1210,5 +1362,8 @@ def simple_outline_comparison(state: NovelState) -> str:
 
 def append_message(state: NovelState, role: str, content: str) -> None:
     if content:
-        state.messages.append({"role": role, "content": content})
-        state.messages = state.messages[-40:]
+        compact = re.sub(r"\s+", " ", content).strip()
+        if len(compact) > 500:
+            compact = compact[:500].rstrip() + "..."
+        state.messages.append({"role": role, "content": compact})
+        state.messages = state.messages[-12:]

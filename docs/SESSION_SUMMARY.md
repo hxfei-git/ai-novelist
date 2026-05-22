@@ -737,3 +737,54 @@ Smoke 验证：`.venv/bin/python tests/smoke_phase2_chat.py`，结果 `phase2 ch
 
 - 本轮不新增 CLI 参数，也不做终端动画进度条。
 - 真实模型的具体裁量仍依赖当前阶段产物；默认裁量摘要只记录推进依据，不展开成新的长篇设定。
+
+## 35. 本轮更新：State 瘦身与上下文记忆
+
+- `state.json` 改为轻量保存：大纲阶段 artifact 不再长期保存完整 `synthesis` 或 `role_reviews`，只保留路径、摘要、阶段记忆、状态和待确认问题。
+- 保存旧项目时会自动把旧 `synthesis` 迁到 `outline/<stage>.md` / `outline_stages/<stage>.md`，因此 `projects/test_chat4` 这类大 state 不需要手工改 JSON。
+- 新增 `project_memory.md`，分为不可压缩种子设定、阶段记忆、滚动对话摘要；种子设定保留原始创意和用户锁定约束。
+- 阶段 prompt 和 Director 上下文优先读取阶段记忆/摘要，避免完整阶段正文、角色短评和陈旧长回复重复进入上下文。
+- 角色短评默认不写入用户可见阶段 Markdown，改存 `outline/debug/<stage>_role_reviews.md` 作为调试产物。
+- 消息保存收敛为最近 12 条短消息，长 assistant 内容会截断。
+- 编号回答识别支持 `1可以2伏笔3结局阶段再设计` 这类紧凑输入，并映射为待确认问题答案。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_outline_collaboration.py
+# 25 passed
+.venv/bin/python -m pytest tests/test_director_service.py tests/test_graph_bible.py tests/test_graph_chapter_plan.py
+# 28 passed
+.venv/bin/python -m pytest
+# 171 passed
+.venv/bin/python tests/smoke_outline_collaboration.py
+# outline collaboration smoke ok
+.venv/bin/python tests/smoke_phase2_chat.py
+# phase2 chat smoke ok
+```
+
+剩余限制：
+
+- 阶段记忆由规则抽取，暂未引入独立记忆压缩 Agent。
+- `rolling_dialogue_summary` 已预留字段，当前仍以最近短消息生成默认滚动摘要。
+
+## 36. 本轮更新：阶段确认闭环与 Agent 调用信息
+
+- 修复 `projects/test_chat4` 中“确定进入下一阶段”被误判为当前阶段修改意见的问题；现在由 Director 主脑判断阶段迁移意图，并要求明确包含进入/推进下一阶段语义。
+- 确认推进时，如果当前阶段仍有待确认问题，会在锁定前由系统按当前阶段产物自行闭环，写入 `default_discretion_summary`、阶段记忆和锁定约束，并清空当前阶段待确认项；若用户写了“不要进入下一阶段/先不推进”，则保留在当前阶段。
+- 该逻辑适用于故事流程及其后的分卷大纲、章节大纲、审稿锁定等阶段，避免带着上一阶段未决问题进入后续流程。
+- Agent 进度打印增加模型和 effort 信息；DeepSeek 根据 Agent thinking 策略显示 `disabled-medium` / `medium` / `high`，Codex 显示 CLI 默认，mock 显示 `n/a`。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_outline_collaboration.py tests/test_director_service.py
+# 52 passed
+.venv/bin/python -m pytest
+# 176 passed
+.venv/bin/python tests/smoke_outline_collaboration.py
+# outline collaboration smoke ok
+.venv/bin/python tests/smoke_phase2_chat.py
+# phase2 chat smoke ok
+```
+

@@ -11,7 +11,7 @@ from ai_novelist.artifacts import ArtifactRecord, load_artifacts, register_artif
 from ai_novelist.context_builder import build_context
 from ai_novelist.graph_review import normalize_review_report
 from ai_novelist.graph_writer import parse_editor_review
-from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress
+from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, with_agent_metadata
 from ai_novelist.prompts import load_prompt
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
@@ -34,13 +34,13 @@ class RevisionSequentialGraph:
         loaded = NovelState.from_dict(current)
         if loaded.review_status in {"error", "stopped"}:
             return current
-        emit_progress(self.progress, "Revision 2/7", "正在生成修订计划...")
+        emit_progress(self.progress, "Revision 2/7", with_agent_metadata("正在生成修订计划...", self.adapter, "revision_planner"))
         current = build_revision_plan_node(current, self.adapter, self.store)
-        emit_progress(self.progress, "Revision 3/7", "正在定向改写问题段落...")
+        emit_progress(self.progress, "Revision 3/7", with_agent_metadata("正在定向改写问题段落...", self.adapter, "targeted_reviser"))
         current = revise_targeted_sections_node(current, self.adapter, self.store)
         emit_progress(self.progress, "Revision 4/7", "正在合并修订稿...")
         current = merge_revision_node(current, self.store)
-        emit_progress(self.progress, "Revision 5/7", "正在做修订自检...")
+        emit_progress(self.progress, "Revision 5/7", with_agent_metadata("正在做修订自检...", self.adapter, "revision_self_check"))
         current = revision_self_check_node(current, self.adapter, self.store)
         emit_progress(self.progress, "Revision 6/7", "正在保存修订稿...")
         current = save_revised_draft_node(current, self.store)
@@ -58,10 +58,10 @@ def build_revision_graph(adapter: AgentAdapter, store: LocalStore, progress: Pro
 
     graph = StateGraph(dict)
     graph.add_node("load_revision_context", lambda data: progress_node(progress_func, "Revision 1/7", "正在读取草稿和审稿任务...", lambda: load_revision_context_node(data, store)))
-    graph.add_node("build_revision_plan", lambda data: progress_node(progress_func, "Revision 2/7", "正在生成修订计划...", lambda: build_revision_plan_node(data, adapter, store)))
-    graph.add_node("revise_targeted_sections", lambda data: progress_node(progress_func, "Revision 3/7", "正在定向改写问题段落...", lambda: revise_targeted_sections_node(data, adapter, store)))
+    graph.add_node("build_revision_plan", lambda data: progress_node(progress_func, "Revision 2/7", with_agent_metadata("正在生成修订计划...", adapter, "revision_planner"), lambda: build_revision_plan_node(data, adapter, store)))
+    graph.add_node("revise_targeted_sections", lambda data: progress_node(progress_func, "Revision 3/7", with_agent_metadata("正在定向改写问题段落...", adapter, "targeted_reviser"), lambda: revise_targeted_sections_node(data, adapter, store)))
     graph.add_node("merge_revision", lambda data: progress_node(progress_func, "Revision 4/7", "正在合并修订稿...", lambda: merge_revision_node(data, store)))
-    graph.add_node("revision_self_check", lambda data: progress_node(progress_func, "Revision 5/7", "正在做修订自检...", lambda: revision_self_check_node(data, adapter, store)))
+    graph.add_node("revision_self_check", lambda data: progress_node(progress_func, "Revision 5/7", with_agent_metadata("正在做修订自检...", adapter, "revision_self_check"), lambda: revision_self_check_node(data, adapter, store)))
     graph.add_node("save_revised_draft", lambda data: progress_node(progress_func, "Revision 6/7", "正在保存修订稿...", lambda: save_revised_draft_node(data, store)))
     graph.add_node("maybe_review_again", lambda data: progress_node(progress_func, "Revision 7/7", "正在更新下一步状态...", lambda: maybe_review_again_node(data, store)))
     graph.set_entry_point("load_revision_context")

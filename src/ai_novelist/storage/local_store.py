@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 import re
+from copy import deepcopy
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from ai_novelist.state import NovelState
 
@@ -78,6 +81,15 @@ class LocalStore:
     def artifact_registry_path(self, project_id: str) -> Path:
         return self.project_dir(project_id) / "artifacts.json"
 
+    def project_memory_path(self, project_id: str) -> Path:
+        return self.project_dir(project_id) / "project_memory.md"
+
+    def outline_debug_dir(self, project_id: str) -> Path:
+        return self.outline_dir(project_id) / "debug"
+
+    def outline_role_reviews_path(self, project_id: str, stage: str) -> Path:
+        return self.outline_debug_dir(project_id) / f"{stage}_role_reviews.md"
+
     def novel_bible_json_path(self, project_id: str) -> Path:
         return self.project_dir(project_id) / "novel_bible.json"
 
@@ -142,9 +154,60 @@ class LocalStore:
         self.chapters_dir(state.project_id).mkdir(exist_ok=True)
         self.outline_stages_dir(state.project_id).mkdir(exist_ok=True)
         self.outline_dir(state.project_id).mkdir(exist_ok=True)
+        data = self._lightweight_state_dict(state)
         with self.state_path(state.project_id).open("w", encoding="utf-8") as file:
-            json.dump(state.to_dict(), file, ensure_ascii=False, indent=2)
+            json.dump(data, file, ensure_ascii=False, indent=2)
             file.write("\n")
+        self.save_project_memory(state)
+
+    def _lightweight_state_dict(self, state: NovelState) -> dict[str, Any]:
+        data = deepcopy(state.to_dict())
+        data["messages"] = compact_messages(data.get("messages", []), max_items=12, max_chars=500)
+        summaries = dict(data.get("outline_stage_summaries") or {})
+        artifacts = data.get("outline_stage_artifacts")
+        if isinstance(artifacts, dict):
+            slim_artifacts: dict[str, Any] = {}
+            for stage, raw_item in artifacts.items():
+                if not isinstance(raw_item, dict):
+                    slim_artifacts[stage] = raw_item
+                    continue
+                item = dict(raw_item)
+                synthesis = str(item.get("synthesis", "")).strip()
+                if synthesis:
+                    self._ensure_outline_artifact_files(state.project_id, str(stage), item, synthesis)
+                summary = str(item.get("summary") or summaries.get(str(stage)) or summarize_text(synthesis)).strip()
+                stage_memory = normalize_memory_lines(item.get("stage_memory") or summary or synthesis)
+                if summary:
+                    summaries[str(stage)] = summary
+                slim = {
+                    "stage": item.get("stage") or stage,
+                    "label": item.get("label"),
+                    "status": item.get("status", "options_ready"),
+                    "path": item.get("path") or f"outline/{stage}.md",
+                    "summary": summary,
+                    "stage_memory": stage_memory,
+                    "pending_questions": normalize_text_list(item.get("pending_questions", [])),
+                    "updated_at": item.get("updated_at") or datetime.now(UTC).isoformat(timespec="seconds"),
+                }
+                if item.get("locked_at"):
+                    slim["locked_at"] = item.get("locked_at")
+                if item.get("default_discretion_summary"):
+                    slim["default_discretion_summary"] = item.get("default_discretion_summary")
+                slim_artifacts[str(stage)] = {k: v for k, v in slim.items() if v not in (None, "", [])}
+            data["outline_stage_artifacts"] = slim_artifacts
+            data["outline_stage_summaries"] = summaries
+        return data
+
+    def _ensure_outline_artifact_files(self, project_id: str, stage: str, item: dict[str, Any], synthesis: str) -> None:
+        content = synthesis
+        label = str(item.get("label") or stage).strip()
+        stripped = content.lstrip()
+        if not stripped.startswith("#") or stripped.startswith("##"):
+            content = f"# {label}\n\n{content}"
+        for path in (self.outline_artifact_path(project_id, stage), self.outline_stage_path(project_id, stage)):
+            if not path.exists():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content.rstrip() + "\n", encoding="utf-8")
 
     def save_outline(self, state: NovelState) -> Path:
         return self._write_required(self.outline_path(state.project_id), state.outline, "outline")
@@ -154,6 +217,23 @@ class LocalStore:
 
     def save_outline_artifact(self, state: NovelState, stage: str, content: str) -> Path:
         return self._write_required(self.outline_artifact_path(state.project_id, stage), content, f"outline artifact {stage}")
+
+    def save_outline_role_reviews(self, state: NovelState, stage: str, reviews: list[dict[str, str]]) -> Path | None:
+        if not reviews:
+            return None
+        lines = [f"# {stage} role reviews", ""]
+        for item in reviews:
+            role = str(item.get("role", "Agent")).strip() or "Agent"
+            content = str(item.get("content", "")).strip()
+            if content:
+                lines.extend([f"## {role}", content, ""])
+        return self._write_required(self.outline_role_reviews_path(state.project_id, stage), "\n".join(lines).strip(), f"outline role reviews {stage}")
+
+    def load_outline_artifact(self, project_id: str, stage: str) -> str:
+        path = self.outline_artifact_path(project_id, stage)
+        if not path.exists():
+            return ""
+        return path.read_text(encoding="utf-8")
 
     def load_outline_stage(self, project_id: str, stage: str) -> str:
         path = self.outline_stage_path(project_id, stage)
@@ -183,6 +263,19 @@ class LocalStore:
         if not path.exists():
             return ""
         return path.read_text(encoding="utf-8")
+
+    def load_project_memory(self, project_id: str) -> str:
+        path = self.project_memory_path(project_id)
+        if not path.exists():
+            return ""
+        return path.read_text(encoding="utf-8")
+
+    def save_project_memory(self, state: NovelState) -> Path:
+        content = build_project_memory_markdown(state)
+        path = self.project_memory_path(state.project_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content.rstrip() + "\n", encoding="utf-8")
+        return path
 
     def save_project_context(self, project_id: str, content: str) -> Path:
         path = self.project_context_path(project_id)
@@ -262,6 +355,108 @@ class LocalStore:
             file.write("\n")
         return path
 
+
+def compact_messages(messages: Any, max_items: int = 12, max_chars: int = 500) -> list[dict[str, str]]:
+    if not isinstance(messages, list):
+        return []
+    compacted: list[dict[str, str]] = []
+    for item in messages[-max_items:]:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role", "")).strip()
+        content = str(item.get("content", "")).strip()
+        if not role or not content:
+            continue
+        if len(content) > max_chars:
+            content = content[:max_chars].rstrip() + "..."
+        compacted.append({"role": role, "content": content})
+    return compacted
+
+
+def normalize_text_list(value: Any, limit: int = 12) -> list[str]:
+    if isinstance(value, str):
+        values = [value]
+    elif isinstance(value, list):
+        values = [str(item) for item in value]
+    else:
+        values = []
+    return [item.strip() for item in values if item.strip()][:limit]
+
+
+def summarize_text(text: str, max_chars: int = 420) -> str:
+    cleaned = re.sub(r"\s+", " ", text).strip()
+    if not cleaned:
+        return ""
+    return cleaned[:max_chars].rstrip() + ("..." if len(cleaned) > max_chars else "")
+
+
+def normalize_memory_lines(value: Any, max_items: int = 12, max_chars: int = 1100) -> list[str]:
+    if isinstance(value, list):
+        lines = [str(item).strip(" -•\t") for item in value]
+    else:
+        text = str(value or "")
+        lines = []
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            line = re.sub(r"^[-*+•\s]*", "", line)
+            line = re.sub(r"^\d+[.、)]\s*", "", line).strip()
+            if line and not line.startswith("#"):
+                lines.append(line)
+        if not lines and text.strip():
+            lines = [summarize_text(text, max_chars=max_chars)]
+    result: list[str] = []
+    total = 0
+    for line in lines:
+        if not line or line in result:
+            continue
+        total += len(line)
+        if total > max_chars and result:
+            break
+        result.append(line)
+        if len(result) >= max_items:
+            break
+    return result
+
+
+def build_project_memory_markdown(state: NovelState) -> str:
+    lines = ["# Project Memory", "", "## 不可压缩种子设定"]
+    seeds = []
+    if state.idea.strip():
+        seeds.append(f"原始创意：{state.idea.strip()}")
+    seeds.extend(f"锁定约束：{item}" for item in state.locked_constraints if item.strip())
+    seeds.extend(f"风格偏好：{item}" for item in state.style_preferences if item.strip())
+    if seeds:
+        lines.extend(f"- {item}" for item in dict.fromkeys(seeds))
+    else:
+        lines.append("- 暂无")
+    lines.extend(["", "## 阶段记忆"])
+    for stage, artifact in state.outline_stage_artifacts.items():
+        if not isinstance(artifact, dict):
+            continue
+        label = artifact.get("label") or stage
+        status = artifact.get("status") or "draft"
+        memory = normalize_memory_lines(artifact.get("stage_memory") or artifact.get("summary") or artifact.get("synthesis", ""))
+        if not memory:
+            continue
+        lines.append(f"### {label}（{status}）")
+        lines.extend(f"- {item}" for item in memory[:12])
+        lines.append("")
+    lines.append("## 滚动对话摘要")
+    if state.rolling_dialogue_summary.strip():
+        lines.append(state.rolling_dialogue_summary.strip())
+    else:
+        recent = compact_messages(state.messages, max_items=8, max_chars=160)
+        if recent:
+            for item in recent:
+                content = item["content"]
+                if item["role"] == "assistant" and ("之前已确认" in content or ("还剩" in content and "尚未" in content)):
+                    continue
+                lines.append(f"- {item['role']}: {content}")
+            if lines[-1] == "## 滚动对话摘要":
+                lines.append("- 暂无")
+        else:
+            lines.append("- 暂无")
+    return "\n".join(lines).rstrip() + "\n"
 
 def slugify(value: str) -> str:
     slug = re.sub(r"[^a-zA-Z0-9\u4e00-\u9fff_-]+", "-", value.strip()).strip("-")

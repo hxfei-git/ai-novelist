@@ -397,6 +397,7 @@ def build_service_director_prompt(state: NovelState, store: LocalStore, channel:
     template = load_prompt("director")
     history = format_recent_dialogue_for_director(state)
     project_context = store.load_project_context(state.project_id)
+    project_memory = store.load_project_memory(state.project_id)
     outline_stage_context = current_outline_stage_context(state)
     return (
         f"{template.rstrip()}\n\n"
@@ -404,12 +405,14 @@ def build_service_director_prompt(state: NovelState, store: LocalStore, channel:
         "优先输出一个 JSON 对象，不要包裹 Markdown 代码块。字段：action, requires_confirmation, confidence, user_message, task_args, next_steps, intent, instruction, locked_constraints。\n"
         "task_args 可包含 research_query, work_title, author, chapter, instruction, stage, default_discretion_summary。\n"
         "大纲共创阶段可用动作语义：run_current_stage（继续重写/补充当前阶段）、advance_current_stage（锁定当前阶段并进入下一阶段）、answer_pending_questions（吸收用户对待确认问题的回答后重跑当前阶段）、show_stage（查看当前或指定阶段）、ask_user（信息不足再追问）。输出时也可使用等价旧动作 revise_outline、persist_outputs、show_outline。\n"
-        "判断大纲阶段意图时必须区分：用户提供新修改意见、用户回答问题、用户把剩余问题交给系统裁量并要求推进、用户只是查看状态。待确认问题不是必须逐项回答的阻塞项；若用户明确交给系统裁量并推进，请选择 advance_current_stage，并在 default_discretion_summary 中写一段简短裁量摘要。\n"
+        "判断大纲阶段意图时必须区分：用户提供新修改意见、用户回答问题、用户把剩余问题交给系统裁量并要求推进、用户只是查看状态。待确认问题不是必须逐项回答的阻塞项；只有用户明确要求进入/推进下一阶段，或明确锁定当前阶段并继续，才选择 advance_current_stage。不要因为句子里出现‘确定/确认/同意’就推进；如果用户是在确定某个设定、回答问题或补充细节，应留在当前阶段处理。若用户明确交给系统裁量并推进，请选择 advance_current_stage，并在 default_discretion_summary 中写一段简短裁量摘要。\n"
         "如果无法输出 JSON，才使用旧的 ACTION/MESSAGE 字段格式。\n\n"
         "## 当前通道\n"
         f"{channel}\n\n"
         "## project_context.md\n"
         f"{project_context.strip() or '暂无'}\n\n"
+        "## project_memory.md\n"
+        f"{project_memory.strip() or '暂无'}\n\n"
         "## state.json 摘要\n"
         f"项目：{state.project_id}\n"
         f"标题：{state.title}\n"
@@ -442,7 +445,11 @@ def current_outline_stage_context(state: NovelState, max_chars: int = 1800) -> s
     artifact = state.outline_stage_artifacts.get(state.outline_stage)
     if not artifact:
         return "暂无"
-    synthesis = str(artifact.get("synthesis", "")).strip()
+    memory = artifact.get("stage_memory")
+    if isinstance(memory, list) and memory:
+        synthesis = "\n".join(f"- {str(item).strip()}" for item in memory if str(item).strip())
+    else:
+        synthesis = str(artifact.get("summary") or artifact.get("synthesis", "")).strip()
     if not synthesis:
         return "暂无"
     label = artifact.get("label") or state.outline_stage
@@ -719,44 +726,11 @@ def deterministic_outline_stage_decision(state: NovelState) -> DirectorDecision 
     if view is not None:
         return view
 
-    stage = detect_outline_stage_request(text)
-    wants_confirm = any(marker in text for marker in ("确定", "确认", "锁定", "通过", "认可", "定稿"))
-    if state.active_workflow == "outline" and stage and wants_confirm:
-        return DirectorDecision(
-            "persist_outputs",
-            requires_confirmation=False,
-            user_message=f"我会锁定{stage_display_name(stage)}阶段，并进入下一阶段。",
-            confidence=95,
-            task_args={"stage": stage},
-            target="outline",
-            intent="approve",
-        )
-
     if state.active_workflow != "outline" or state.outline_stage == "done":
         return None
 
-    if state.outline_stage_status == "options_ready" and is_simple_outline_stage_confirmation(text):
-        return DirectorDecision(
-            "persist_outputs",
-            requires_confirmation=False,
-            user_message="我会锁定当前大纲阶段，并进入下一阶段。",
-            confidence=96,
-            target="outline",
-            intent="approve",
-        )
-
-    if state.outline_stage_status == "options_ready" and delegates_outline_stage_decision(text):
-        summary = build_default_discretion_summary(state, text)
-        return DirectorDecision(
-            "persist_outputs",
-            requires_confirmation=False,
-            user_message="我会按当前阶段建议作默认裁量，锁定本阶段并进入下一阶段。",
-            confidence=90,
-            task_args={"default_discretion_summary": summary},
-            target="outline",
-            intent="approve",
-            locked_constraints=[summary],
-        )
+    if state.outline_stage_status == "options_ready" and should_defer_outline_confirmation_to_director(text):
+        return None
 
     if state.pending_questions and answers_pending_outline_questions(text):
         instruction = build_pending_answer_instruction(state, text)
@@ -787,6 +761,24 @@ def deterministic_outline_stage_decision(state: NovelState) -> DirectorDecision 
     return None
 
 
+
+def negates_stage_advance(text: str) -> bool:
+    return any(marker in text for marker in ("不要进入下一阶段", "不进入下一阶段", "先不进入下一阶段", "暂不进入下一阶段", "别进入下一阶段", "不要推进", "先不推进", "暂不推进"))
+
+
+def should_defer_outline_confirmation_to_director(text: str) -> bool:
+    """Let the Director model judge natural-language stage approval or delegation."""
+    if parse_numbered_answers(text):
+        return False
+    if any(marker in text for marker in ("查看", "展示", "看一下", "看下", "显示")):
+        return False
+    if negates_stage_advance(text):
+        return False
+    transition_markers = ("下一阶段", "进入下一阶段", "推进到下一阶段", "进入后续阶段", "推进后续阶段")
+    lock_and_continue = any(marker in text for marker in ("锁定当前阶段", "锁定本阶段", "通过当前阶段", "通过本阶段")) and any(marker in text for marker in ("继续", "进入", "推进", "下一阶段"))
+    delegated_advance = any(marker in text for marker in ("你决定", "由你决定", "交给你", "默认处理", "你来定")) and any(marker in text for marker in ("继续", "进入", "推进", "下一阶段"))
+    return any(marker in text for marker in transition_markers) or lock_and_continue or delegated_advance
+
 def stage_display_name(stage: str) -> str:
     labels = {
         "direction": "方向定位",
@@ -801,18 +793,14 @@ def stage_display_name(stage: str) -> str:
     return labels.get(stage, stage)
 
 def is_simple_outline_stage_confirmation(text: str) -> bool:
-    return text.strip().lower() in {
-        "确认",
-        "继续",
+    lowered = text.strip().lower()
+    return lowered in {
         "下一阶段",
         "进入下一阶段",
         "确认进入下一阶段",
-        "锁定",
-        "通过",
-        "approve",
-        "confirm",
-        "ok",
-        "yes",
+        "确定进入下一阶段",
+        "推进到下一阶段",
+        "advance",
     }
 
 
@@ -836,6 +824,8 @@ def delegates_outline_stage_decision(text: str) -> bool:
 
 
 def answers_pending_outline_questions(text: str) -> bool:
+    if is_simple_outline_stage_confirmation(text) or delegates_outline_stage_decision(text):
+        return False
     if re.search(r"(^|[\s，,；;])\d+[.、)]", text):
         return True
     return any(marker in text for marker in ("回答", "补充", "选择", "选", "采用", "接受", "接收", "同意", "设为", "改成"))
@@ -864,7 +854,7 @@ def build_pending_answer_instruction(state: NovelState, text: str) -> str:
 
 
 def parse_numbered_answers(text: str) -> dict[int, str]:
-    matches = list(re.finditer(r"(?:^|[\s，,；;])(?P<index>\d+)[.、)]\s*", text))
+    matches = list(re.finditer(r"(?<!\d)(?P<index>\d+)(?:[.、)]\s*|(?=\D))", text))
     answers: dict[int, str] = {}
     for pos, match in enumerate(matches):
         start = match.end()
@@ -879,7 +869,7 @@ def build_default_discretion_summary(state: NovelState, text: str) -> str:
     questions = [item.strip() for item in state.pending_questions if item.strip()]
     if questions:
         joined = "；".join(questions[:4])
-        return f"用户将待确认问题交由系统按当前阶段产物默认裁量并推进；待裁量问题：{joined}；用户原话：{text}"
+        return f"锁定当前阶段前，系统按当前阶段产物和连续性要求自行闭环未决问题并推进；待裁量问题：{joined}；用户原话：{text}"
     return f"用户认可当前阶段产物，并将细节交由系统按当前建议默认裁量后推进；用户原话：{text}"
 
 

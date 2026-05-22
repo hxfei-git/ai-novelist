@@ -1,3 +1,5 @@
+import json
+
 from ai_novelist.adapters.codex_cli import CodexCLIAdapter
 from ai_novelist.artifacts import load_artifacts
 from ai_novelist.graph_outline import build_outline_stage_role_prompt, build_outline_stage_synthesizer_prompt, extract_stage_confirmation_questions, format_stage_markdown, append_message, build_outline_collaboration_graph, build_outline_prompt
@@ -32,6 +34,7 @@ def test_outline_collaboration_generates_only_first_stage(tmp_path):
     assert store.outline_artifact_path("demo", "direction").exists()
     records = load_artifacts(store.project_dir("demo"))
     assert any(item.type == "direction" and item.stage == "direction" and item.path == "outline/direction.md" for item in records)
+    assert any(item.type == "direction_role_reviews" and item.stage == "direction" and item.path == "outline/debug/direction_role_reviews.md" for item in records)
 
 
 def test_outline_confirmation_advances_one_stage(tmp_path):
@@ -387,3 +390,162 @@ def test_outline_stage_advance_emits_progress_events(tmp_path):
     assert any(stage == "OutlineStage" and "进入" in message for stage, message in events)
     assert any(stage == "故事概念 Agent" for stage, _message in events)
     assert any(stage == "大纲汇总 Agent" for stage, _message in events)
+
+
+def test_save_state_slims_outline_artifacts_and_writes_memory(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.idea = "重生魔门，低调求生"
+    state.locked_constraints.append("师傅暗中吞噬主角气运")
+    long_synthesis = "## 方向定位稿\n\n" + "主角以低调求生追查真相。" * 200
+    state.messages = [{"role": "assistant", "content": "长回复" * 400} for _ in range(20)]
+    state.outline_stage_artifacts["direction"] = {
+        "stage": "direction",
+        "label": "方向定位",
+        "status": "options_ready",
+        "synthesis": long_synthesis,
+        "role_reviews": [{"role": "风险编辑 Agent", "content": "内部短评"}],
+        "stage_memory": ["低调求生追查真相", "师傅吞噬主角气运"],
+    }
+
+    store.save_state(state)
+
+    saved = json.loads(store.state_path("demo").read_text(encoding="utf-8"))
+    artifact = saved["outline_stage_artifacts"]["direction"]
+    assert "synthesis" not in artifact
+    assert "role_reviews" not in artifact
+    assert artifact["path"] == "outline/direction.md"
+    assert artifact["stage_memory"] == ["低调求生追查真相", "师傅吞噬主角气运"]
+    assert len(saved["messages"]) == 12
+    assert all(len(item["content"]) <= 503 for item in saved["messages"])
+    assert store.outline_artifact_path("demo", "direction").exists()
+    memory = store.project_memory_path("demo").read_text(encoding="utf-8")
+    assert "不可压缩种子设定" in memory
+    assert "原始创意：重生魔门，低调求生" in memory
+    assert "锁定约束：师傅暗中吞噬主角气运" in memory
+    assert "低调求生追查真相" in memory
+
+
+def test_stage_prompt_prefers_stage_memory_over_full_synthesis():
+    state = NovelState(project_id="demo", title="Demo", idea="重生魔门")
+    state.outline_stage_artifacts["direction"] = {
+        "stage": "direction",
+        "label": "方向定位",
+        "status": "locked",
+        "summary": "很短摘要",
+        "stage_memory": ["主角低调求生", "师傅吞噬气运是核心谜团"],
+        "synthesis": "完整长文不应进入 prompt。" + "污染" * 200,
+    }
+
+    prompt = build_outline_stage_role_prompt(state, "concept", "故事概念 Agent")
+
+    assert "主角低调求生" in prompt
+    assert "师傅吞噬气运是核心谜团" in prompt
+    assert "完整长文不应进入 prompt" not in prompt
+
+
+def test_non_direction_stage_markdown_hides_role_reviews_by_default():
+    markdown = format_stage_markdown(
+        {
+            "stage": "characters",
+            "label": "人物关系",
+            "synthesis": "主角与圣女互相试探。",
+            "role_reviews": [{"role": "关系冲突 Agent", "content": "内部建议"}],
+        }
+    )
+
+    assert "主角与圣女互相试探" in markdown
+    assert "角色短评" not in markdown
+    assert "内部建议" not in markdown
+
+
+def test_compact_numbered_pending_answers_are_absorbed(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.idea = "重生魔门"
+    state.active_workflow = "outline"
+    state.outline_stage = "characters"
+    state.outline_stage_status = "options_ready"
+    state.pending_questions = ["圣女保守来源？", "伏笔如何安排？", "结局阶段是否再设计？"]
+    state.outline_stage_artifacts["characters"] = {
+        "stage": "characters",
+        "label": "人物关系",
+        "status": "options_ready",
+        "summary": "主角与圣女互相试探。",
+        "stage_memory": ["主角与圣女互相试探"],
+    }
+    graph = build_outline_collaboration_graph(CodexCLIAdapter(mock=True), store)
+
+    state = run_outline_turn(graph, state, store, "1可以2伏笔3结局阶段再设计")
+
+    assert state.director_intent == "answer_pending_questions"
+    assert "圣女保守来源？ -> 可以" in state.revision_instruction
+    assert "伏笔如何安排？ -> 伏笔" in state.revision_instruction
+    assert "结局阶段是否再设计？ -> 结局阶段再设计" in state.revision_instruction
+
+def test_determine_advance_closes_pending_questions_before_next_stage(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.idea = "重生魔门"
+    state.active_workflow = "outline"
+    state.outline_stage = "story_flow"
+    state.outline_stage_status = "options_ready"
+    state.pending_questions = ["幕一确认习惯如何具象？", "终局让渡之择如何回应？"]
+    state.pending_question = "\n".join(f"{i}. {q}" for i, q in enumerate(state.pending_questions, 1))
+    state.outline_stage_artifacts["story_flow"] = {
+        "stage": "story_flow",
+        "label": "故事流程",
+        "status": "options_ready",
+        "synthesis": "## Director 汇总\n故事四幕已经成立。",
+        "pending_questions": list(state.pending_questions),
+        "stage_memory": ["四幕结构成立"],
+    }
+    graph = build_outline_collaboration_graph(CodexCLIAdapter(mock=True), store)
+
+    state = run_outline_turn(graph, state, store, "确定进入下一阶段")
+
+    locked = state.outline_stage_artifacts["story_flow"]
+    assert state.outline_stage == "volume_outline"
+    assert locked["status"] == "locked"
+    assert locked["pending_questions"] == []
+    assert "自行闭环未决问题" in locked["default_discretion_summary"]
+    assert "幕一确认习惯如何具象" in locked["default_discretion_summary"]
+    assert any("自行闭环未决问题" in item for item in state.locked_constraints)
+
+
+def test_outline_progress_prints_agent_model_metadata(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.idea = "月球城市失忆工程师"
+    events = []
+    graph = build_outline_collaboration_graph(CodexCLIAdapter(mock=True), store, progress=lambda stage, message: events.append((stage, message)))
+
+    state = run_outline_turn(graph, state, store, "生成大纲")
+
+    assert state.outline_stage == "direction"
+    assert any(stage == "类型定位 Agent" and "model=mock" in message and "effort=n/a" in message for stage, message in events)
+    assert any(stage == "大纲汇总 Agent" and "model=mock" in message and "effort=n/a" in message for stage, message in events)
+
+def test_outline_direct_entry_does_not_advance_on_bare_determine_detail(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.idea = "重生魔门"
+    state.active_workflow = "outline"
+    state.outline_stage = "story_flow"
+    state.outline_stage_status = "options_ready"
+    state.pending_questions = ["终局让渡之择如何回应？"]
+    state.outline_stage_artifacts["story_flow"] = {
+        "stage": "story_flow",
+        "label": "故事流程",
+        "status": "options_ready",
+        "summary": "四幕结构成立。",
+        "stage_memory": ["四幕结构成立"],
+    }
+    graph = build_outline_collaboration_graph(CodexCLIAdapter(mock=True), store)
+
+    state = run_outline_turn(graph, state, store, "确定终局让纪无厌拒绝一次，但不要进入下一阶段")
+
+    assert state.outline_stage == "story_flow"
+    assert state.outline_stage_artifacts["story_flow"]["status"] == "options_ready"
+    assert state.director_action == "run_outline_stage"
+

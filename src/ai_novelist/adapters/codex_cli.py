@@ -357,6 +357,32 @@ class CodexCLIAdapter(AgentAdapter):
 
         if any(word in request for word in ("退出", "结束", "quit", "exit", "stop")):
             return response("stop", "project", "stop", "已结束本次创作对话。")
+        if "active_workflow：outline" in prompt and "outline_stage_status：options_ready" in prompt:
+            negated = any(word in request for word in ("不要进入下一阶段", "不进入下一阶段", "先不进入下一阶段", "暂不进入下一阶段", "别进入下一阶段", "不要推进", "先不推进", "暂不推进"))
+            transition = any(word in request for word in ("下一阶段", "进入下一阶段", "推进到下一阶段", "进入后续阶段", "推进后续阶段"))
+            lock_and_continue = any(word in request for word in ("锁定当前阶段", "锁定本阶段", "通过当前阶段", "通过本阶段")) and any(word in request for word in ("继续", "进入", "推进", "下一阶段"))
+            delegated = any(word in request for word in ("你决定", "由你决定", "交给你", "默认处理", "你来定")) and any(word in request for word in ("继续", "进入", "推进", "下一阶段"))
+            if not negated and (transition or lock_and_continue or delegated):
+                task_args = {}
+                if "世界观" in request:
+                    task_args["stage"] = "worldbuilding"
+                elif "人物" in request or "角色" in request:
+                    task_args["stage"] = "characters"
+                elif "故事流程" in request or "流程" in request:
+                    task_args["stage"] = "story_flow"
+                elif "分卷" in request:
+                    task_args["stage"] = "volume_outline"
+                elif "章节" in request:
+                    task_args["stage"] = "chapter_outline"
+                return json.dumps({
+                    "action": "advance_current_stage",
+                    "requires_confirmation": False,
+                    "confidence": 95,
+                    "target": "outline",
+                    "intent": "approve",
+                    "user_message": "我会先让当前阶段自行闭环未决问题，再锁定并进入下一阶段。",
+                    "task_args": task_args,
+                }, ensure_ascii=False)
         if any(word in request for word in ("保存大纲", "确认大纲", "approve")):
             return response("persist_outline", "outline", "approve", "我会保存当前大纲。")
         if any(word in request for word in ("保存", "落盘", "写入文件")):

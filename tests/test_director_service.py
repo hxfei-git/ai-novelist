@@ -306,7 +306,7 @@ def test_director_service_confirms_existing_worldbuilding_stage(tmp_path):
     store.save_state(state)
     service = DirectorService(store, CodexCLIAdapter(mock=True), MockSearchBackend())
 
-    result = service.handle_turn("重生魔门", "确定世界观", channel="cli")
+    result = service.handle_turn("重生魔门", "确定世界观并进入下一阶段", channel="cli")
 
     assert result.state.outline_stage == "characters"
     assert result.state.outline_stage_artifacts["direction"]["status"] == "locked"
@@ -469,7 +469,56 @@ def test_outline_stage_simple_confirmation_advances(tmp_path):
     make_characters_options_ready_state(store)
     service = DirectorService(store, CodexCLIAdapter(mock=True), MockSearchBackend())
 
-    result = service.handle_turn("demo", "继续", channel="cli")
+    result = service.handle_turn("demo", "进入下一阶段", channel="cli")
 
     assert result.state.outline_stage == "story_flow"
     assert result.state.outline_stage_artifacts["characters"]["status"] == "locked"
+
+def test_director_treats_determine_enter_next_stage_as_approval(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.active_workflow = "outline"
+    state.outline_stage = "story_flow"
+    state.outline_stage_status = "options_ready"
+    state.pending_questions = ["幕一确认习惯如何具象？"]
+    state.outline_stage_artifacts["story_flow"] = {
+        "stage": "story_flow",
+        "label": "故事流程",
+        "status": "options_ready",
+        "summary": "四幕结构成立。",
+        "stage_memory": ["四幕结构成立"],
+    }
+    store.save_state(state)
+    service = DirectorService(store, CodexCLIAdapter(mock=True), MockSearchBackend())
+
+    result = service.handle_turn("demo", "确定进入下一阶段", channel="cli")
+
+    assert result.decision.action == "persist_outputs"
+    assert result.decision.intent == "approve"
+    assert result.state.outline_stage == "volume_outline"
+    assert result.state.outline_stage_artifacts["story_flow"]["status"] == "locked"
+    assert "自行闭环未决问题" in result.state.outline_stage_artifacts["story_flow"]["default_discretion_summary"]
+
+def test_director_does_not_advance_on_bare_determine_detail(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.active_workflow = "outline"
+    state.outline_stage = "story_flow"
+    state.outline_stage_status = "options_ready"
+    state.pending_questions = ["终局让渡之择如何回应？"]
+    state.outline_stage_artifacts["story_flow"] = {
+        "stage": "story_flow",
+        "label": "故事流程",
+        "status": "options_ready",
+        "summary": "四幕结构成立。",
+        "stage_memory": ["四幕结构成立"],
+    }
+    store.save_state(state)
+    service = DirectorService(store, CodexCLIAdapter(mock=True), MockSearchBackend())
+
+    result = service.handle_turn("demo", "确定终局让纪无厌拒绝一次，但不要进入下一阶段", channel="cli")
+
+    assert result.state.outline_stage == "story_flow"
+    assert result.state.outline_stage_artifacts["story_flow"]["status"] == "options_ready"
+    assert result.state.director_action == "run_outline_stage"
+

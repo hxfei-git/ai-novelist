@@ -7,7 +7,7 @@ from typing import Protocol
 from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
 from ai_novelist.artifacts import ArtifactRecord, get_latest_artifact, load_artifact_text, load_artifacts, register_artifact
 from ai_novelist.context_builder import build_context
-from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress
+from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, with_agent_metadata
 from ai_novelist.prompts import load_prompt
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
@@ -42,11 +42,11 @@ class SceneSequentialGraph:
         current = load_chapter_card_node(state, self.store)
         if NovelState.from_dict(current).review_status == "error":
             return current
-        emit_progress(self.progress, "SceneDesign 2/6", "正在拆分章节场景...")
+        emit_progress(self.progress, "SceneDesign 2/6", with_agent_metadata("正在拆分章节场景...", self.adapter, "scene_breakdown_agent"))
         current = scene_breakdown_agent_node(current, self.adapter, self.store)
-        emit_progress(self.progress, "SceneDesign 3/6", "正在检查场景冲突和连续性...")
+        emit_progress(self.progress, "SceneDesign 3/6", with_agent_metadata("正在检查场景冲突和连续性...", self.adapter, "scene_conflict_check_agent"))
         current = conflict_check_agent_node(current, self.adapter, self.store)
-        emit_progress(self.progress, "SceneDesign 4/6", "正在汇总场景卡...")
+        emit_progress(self.progress, "SceneDesign 4/6", with_agent_metadata("正在汇总场景卡...", self.adapter, "scene_synthesizer"))
         current = scene_synthesizer_node(current, self.adapter, self.store)
         emit_progress(self.progress, "SceneDesign 5/6", "正在校验场景卡字段...")
         current = validate_scene_cards_node(current, self.store)
@@ -64,9 +64,9 @@ def build_scene_graph(adapter: AgentAdapter, store: LocalStore, progress: Progre
 
     graph = StateGraph(dict)
     graph.add_node("load_chapter_card", lambda data: progress_node(progress_func, "SceneDesign 1/6", "正在读取章节卡...", lambda: load_chapter_card_node(data, store)))
-    graph.add_node("scene_breakdown_agent", lambda data: progress_node(progress_func, "SceneDesign 2/6", "正在拆分章节场景...", lambda: scene_breakdown_agent_node(data, adapter, store)))
-    graph.add_node("conflict_check_agent", lambda data: progress_node(progress_func, "SceneDesign 3/6", "正在检查场景冲突和连续性...", lambda: conflict_check_agent_node(data, adapter, store)))
-    graph.add_node("scene_synthesizer", lambda data: progress_node(progress_func, "SceneDesign 4/6", "正在汇总场景卡...", lambda: scene_synthesizer_node(data, adapter, store)))
+    graph.add_node("scene_breakdown_agent", lambda data: progress_node(progress_func, "SceneDesign 2/6", with_agent_metadata("正在拆分章节场景...", adapter, "scene_breakdown_agent"), lambda: scene_breakdown_agent_node(data, adapter, store)))
+    graph.add_node("conflict_check_agent", lambda data: progress_node(progress_func, "SceneDesign 3/6", with_agent_metadata("正在检查场景冲突和连续性...", adapter, "scene_conflict_check_agent"), lambda: conflict_check_agent_node(data, adapter, store)))
+    graph.add_node("scene_synthesizer", lambda data: progress_node(progress_func, "SceneDesign 4/6", with_agent_metadata("正在汇总场景卡...", adapter, "scene_synthesizer"), lambda: scene_synthesizer_node(data, adapter, store)))
     graph.add_node("validate_scene_cards", lambda data: progress_node(progress_func, "SceneDesign 5/6", "正在校验场景卡字段...", lambda: validate_scene_cards_node(data, store)))
     graph.add_node("save_scene_cards", lambda data: progress_node(progress_func, "SceneDesign 6/6", "正在保存场景卡...", lambda: save_scene_cards_node(data, store)))
     graph.set_entry_point("load_chapter_card")

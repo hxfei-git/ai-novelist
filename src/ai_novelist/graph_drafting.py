@@ -7,7 +7,7 @@ from typing import Protocol
 from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
 from ai_novelist.artifacts import ArtifactRecord, get_latest_artifact, load_artifact_text, load_artifacts, register_artifact
 from ai_novelist.context_builder import build_context
-from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress
+from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, with_agent_metadata
 from ai_novelist.prompts import load_prompt
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
@@ -29,17 +29,17 @@ class DraftingSequentialGraph:
         current = load_drafting_context_node(state, self.adapter, self.store, self.progress)
         if NovelState.from_dict(current).review_status == "error":
             return current
-        emit_progress(self.progress, "Drafting 2/8", "正在按场景生成正文草稿...")
+        emit_progress(self.progress, "Drafting 2/8", with_agent_metadata("正在按场景生成正文草稿...", self.adapter, "chapter_writer"))
         current = draft_scene_batch_node(current, self.adapter, self.store)
         emit_progress(self.progress, "Drafting 3/8", "正在合并场景草稿...")
         current = merge_scenes_node(current, self.store)
-        emit_progress(self.progress, "Drafting 4/8", "正在增强对白...")
+        emit_progress(self.progress, "Drafting 4/8", with_agent_metadata("正在增强对白...", self.adapter, "dialogue_enhancer"))
         current = dialogue_enhance_node(current, self.adapter, self.store)
-        emit_progress(self.progress, "Drafting 5/8", "正在增强氛围和感官描写...")
+        emit_progress(self.progress, "Drafting 5/8", with_agent_metadata("正在增强氛围和感官描写...", self.adapter, "atmosphere_enhancer"))
         current = atmosphere_enhance_node(current, self.adapter, self.store)
-        emit_progress(self.progress, "Drafting 6/8", "正在强化章节钩子...")
+        emit_progress(self.progress, "Drafting 6/8", with_agent_metadata("正在强化章节钩子...", self.adapter, "hook_enhancer"))
         current = hook_enhance_node(current, self.adapter, self.store)
-        emit_progress(self.progress, "Drafting 7/8", "正在统一风格...")
+        emit_progress(self.progress, "Drafting 7/8", with_agent_metadata("正在统一风格...", self.adapter, "style_normalizer"))
         current = style_normalize_node(current, self.adapter, self.store)
         emit_progress(self.progress, "Drafting 8/8", "正在保存章节草稿...")
         current = save_draft_node(current, self.store)
@@ -55,12 +55,12 @@ def build_drafting_graph(adapter: AgentAdapter, store: LocalStore, progress: Pro
 
     graph = StateGraph(dict)
     graph.add_node("load_drafting_context", lambda data: progress_node(progress_func, "Drafting 1/8", "正在准备章节卡、场景卡和写作上下文...", lambda: load_drafting_context_node(data, adapter, store, progress_func)))
-    graph.add_node("draft_scene_batch", lambda data: progress_node(progress_func, "Drafting 2/8", "正在按场景生成正文草稿...", lambda: draft_scene_batch_node(data, adapter, store)))
+    graph.add_node("draft_scene_batch", lambda data: progress_node(progress_func, "Drafting 2/8", with_agent_metadata("正在按场景生成正文草稿...", adapter, "chapter_writer"), lambda: draft_scene_batch_node(data, adapter, store)))
     graph.add_node("merge_scenes", lambda data: progress_node(progress_func, "Drafting 3/8", "正在合并场景草稿...", lambda: merge_scenes_node(data, store)))
-    graph.add_node("dialogue_enhance", lambda data: progress_node(progress_func, "Drafting 4/8", "正在增强对白...", lambda: dialogue_enhance_node(data, adapter, store)))
-    graph.add_node("atmosphere_enhance", lambda data: progress_node(progress_func, "Drafting 5/8", "正在增强氛围和感官描写...", lambda: atmosphere_enhance_node(data, adapter, store)))
-    graph.add_node("hook_enhance", lambda data: progress_node(progress_func, "Drafting 6/8", "正在强化章节钩子...", lambda: hook_enhance_node(data, adapter, store)))
-    graph.add_node("style_normalize", lambda data: progress_node(progress_func, "Drafting 7/8", "正在统一风格...", lambda: style_normalize_node(data, adapter, store)))
+    graph.add_node("dialogue_enhance", lambda data: progress_node(progress_func, "Drafting 4/8", with_agent_metadata("正在增强对白...", adapter, "dialogue_enhancer"), lambda: dialogue_enhance_node(data, adapter, store)))
+    graph.add_node("atmosphere_enhance", lambda data: progress_node(progress_func, "Drafting 5/8", with_agent_metadata("正在增强氛围和感官描写...", adapter, "atmosphere_enhancer"), lambda: atmosphere_enhance_node(data, adapter, store)))
+    graph.add_node("hook_enhance", lambda data: progress_node(progress_func, "Drafting 6/8", with_agent_metadata("正在强化章节钩子...", adapter, "hook_enhancer"), lambda: hook_enhance_node(data, adapter, store)))
+    graph.add_node("style_normalize", lambda data: progress_node(progress_func, "Drafting 7/8", with_agent_metadata("正在统一风格...", adapter, "style_normalizer"), lambda: style_normalize_node(data, adapter, store)))
     graph.add_node("save_draft", lambda data: progress_node(progress_func, "Drafting 8/8", "正在保存章节草稿...", lambda: save_draft_node(data, store)))
     graph.set_entry_point("load_drafting_context")
     graph.add_conditional_edges("load_drafting_context", route_after_load, {"continue": "draft_scene_batch", "end": END})
