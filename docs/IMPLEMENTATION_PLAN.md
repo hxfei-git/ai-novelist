@@ -1659,3 +1659,22 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Chapter writer 负责实现卡片，不负责重新规划故事。
 - 场景表现细节可以写，事实和 canon 不可改。
+
+## 64. Atmosphere Enhancer Prompt 整改
+
+目标：执行 `24_atmosphere_enhancer.md`，让氛围增强只处理描写密度、环境压力和情绪递进，不改变事实、结构或场景顺序。
+
+已完成：
+
+- `atmosphere_enhancer.md` 增加“描写层编辑边界”。
+- 允许增强环境细节、感官描写、情绪递进和危险感表达。
+- 禁止新增事件、规则、人物、组织、怪物、剧情转折或新 canon。
+- 禁止改变场景顺序、人物行动结果、信息释放顺序或结尾钩子。
+- 禁止新增超过原场景事实的剧情动作；事实缺口不补造。
+- 输出可为完整修订稿，但修改范围只限描写层，不输出分析或变更记录。
+- 新增 prompt loader 回归测试覆盖 no-new-facts guard 和描写层边界。
+
+当前边界：
+
+- Atmosphere enhancer 是语言和氛围增强器，不是剧情扩写器。
+- 事实、结构、结尾钩子和 canon 保持冻结。

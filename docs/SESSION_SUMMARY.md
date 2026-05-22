@@ -1425,3 +1425,23 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 229 passed
 ```
+
+## 68. 本轮更新：Atmosphere Enhancer Prompt 整改
+
+- 完整读取并执行 `24_atmosphere_enhancer.md`。
+- `atmosphere_enhancer.md` 现在只允许增强环境细节、感官描写、情绪递进和危险感表达。
+- 禁止新增事件、规则、人物、组织、怪物、剧情转折或新 canon。
+- 禁止改变场景顺序、人物行动结果、信息释放顺序或结尾钩子。
+- 事实缺口不补造；输出完整稿时修改范围仍只限描写层。
+- 新增回归测试覆盖 no-new-facts guard 和描写层边界。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 16 passed
+.venv/bin/python -m pytest tests/test_graph_drafting.py tests/test_graph_writer.py
+# 27 passed
+.venv/bin/python -m pytest
+# 230 passed
+```

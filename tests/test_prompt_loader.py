@@ -236,3 +236,17 @@ def test_chapter_writer_prompt_strictly_follows_cards_and_outputs_only_body():
     assert "2500-4500 中文字" in prompt
     for forbidden in ("全局设定", "世界观规则", "未规划角色/组织", "人物关系机制", "说明书式设定解释"):
         assert forbidden in prompt
+
+
+def test_atmosphere_enhancer_prompt_limits_changes_to_description_layer():
+    prompt = load_prompt("atmosphere_enhancer")
+
+    assert "描写层编辑边界" in prompt
+    assert "只能增强环境细节、感官描写、情绪递进和危险感表达" in prompt
+    assert "不得新增事件" in prompt
+    assert "不得改变场景顺序" in prompt
+    assert "不得新增超过原场景事实的剧情动作" in prompt
+    assert "不补造" in prompt
+    assert "修改范围只限描写层" in prompt
+    for forbidden in ("规则", "人物", "组织", "怪物", "剧情转折", "新 canon", "结尾钩子"):
+        assert forbidden in prompt
