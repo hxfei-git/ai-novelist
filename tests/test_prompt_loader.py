@@ -321,3 +321,17 @@ def test_continuity_editor_prompt_prefers_minimal_fixes_not_new_canon():
     assert "needs_confirmation" in prompt
     for forbidden in ("新增世界规则", "新人物", "新伏笔", "新章节事件", "长篇分析"):
         assert forbidden in prompt
+
+
+def test_structure_editor_prompt_targets_existing_scenes_without_new_canon():
+    prompt = load_prompt("structure_editor")
+
+    assert "输出 JSON" in prompt
+    assert "必须指向已有场景" in prompt
+    assert "重排、压缩、强化已有场景" in prompt
+    assert "rewrite_tasks" in prompt
+    assert "needs_confirmation" in prompt
+    assert "最多 5 个 top_issues" in prompt
+    assert "最多 5 个 rewrite_tasks" in prompt
+    for forbidden in ("新增全局反转", "新场景群", "新人物", "新组织", "新世界规则", "新 canon", "大幅重写整章"):
+        assert forbidden in prompt

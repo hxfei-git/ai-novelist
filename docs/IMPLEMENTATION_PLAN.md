@@ -1771,3 +1771,21 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Continuity editor 只修连续性，不创造新设定。
 - 需要新增信息的情况必须转为待确认。
+
+## 70. Structure Editor Prompt 整改
+
+目标：执行 `30_structure_editor.md`，让结构编辑优先调整已有场景目标、顺序、转折和钩子，不新增大剧情或全局设定。
+
+已完成：
+
+- `structure_editor.md` 明确结构建议必须指向已有场景、章节卡、场景卡或草稿位置。
+- 修复优先重排、压缩、强化已有场景目标、冲突递进、转折、信息释放和结尾钩子。
+- 禁止新增全局反转、新场景群、新人物、新组织、新世界规则或新 canon。
+- 禁止建议大幅重写整章；缺失信息写入 `needs_confirmation`。
+- 保留 JSON 输出和既有预算：top_issues<=5、rewrite_tasks<=5、keep<=3、每字符串不超过 80 中文字符。
+- 新增 prompt loader 回归测试覆盖现有场景定位和 no-new-canon 边界。
+
+当前边界：
+
+- Structure editor 调整现有结构，不发明新剧情。
+- 结构问题通过重排、压缩和强化解决。

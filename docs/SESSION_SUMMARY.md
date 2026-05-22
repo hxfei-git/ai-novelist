@@ -1547,3 +1547,23 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 235 passed
 ```
+
+## 74. 本轮更新：Structure Editor Prompt 整改
+
+- 完整读取并执行 `30_structure_editor.md`。
+- `structure_editor.md` 现在要求建议必须指向已有场景、章节卡、场景卡或草稿位置。
+- 修复优先重排、压缩、强化已有场景目标、冲突递进、转折、信息释放和结尾钩子。
+- 禁止新增全局反转、新场景群、新人物、新组织、新世界规则或新 canon。
+- 缺失信息写入 `needs_confirmation`，不建议大幅重写整章。
+- 新增回归测试覆盖现有场景定位和 no-new-canon 边界。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 22 passed
+.venv/bin/python -m pytest tests/test_graph_review.py tests/test_graph_revision.py tests/test_output_contracts.py
+# 9 passed
+.venv/bin/python -m pytest
+# 236 passed
+```
