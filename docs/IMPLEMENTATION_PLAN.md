@@ -1249,3 +1249,22 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - 扩展 adapter 返回结构，保留 DeepSeek/Codex provider 的真实 usage；没有真实 usage 时继续使用估算值。
 - 在 `scripts/show_agent_metrics.py` 增加按 token 汇总、按 graph/node/agent 聚合和单项目总消耗统计。
 - 将章节卡、场景卡、正文、审稿、修订、定稿等非大纲路径的 Agent 完成行逐步接入同一轻量用量显示；保持开始行不展示 token，因为输出消耗尚未知。
+
+## 41. Direction 阶段边界收紧
+
+目标：修复 outline 共创中“方向定位 direction 阶段”过度发散到世界观规则、组织流程、制度机制和具体剧情的问题。
+
+已完成：
+
+- Direction role prompt 增加专用边界：只允许类型定位、主角行动原则、核心爽点、核心冲突方向、情绪基调、主题边界、反转原则和禁区。
+- Direction synthesizer prompt 改为只输出 `## 方向定位稿` 下的 6-8 条方向原则；每条不超过 80 个中文字符。
+- Direction prompt 明确禁止具体世界观规则、宗门/组织流程、制度条款、申请表、审批、考评、备案、绩效、KPI、具体人物关系细则、剧情桥段、章节安排和专有名词清单。
+- 新增 `sanitize_direction_stage_output()`，在 direction synthesis 保存前和 formatter 输出时去重标题、把 `## 方向控制稿` 统一为 `## 方向定位稿`，并把常见过细制度词替换为抽象原则。
+- `format_stage_markdown()` 对 direction 不再额外添加 `# 方向定位` 或 `## 方向控制稿` 包装，避免嵌套标题。
+- Mock direction 输出改为 8 条宏观方向原则，覆盖类型、行动原则、爽点、冲突、情绪、主题、反转和禁区。
+
+当前边界：
+
+- Sanitizer 是本地规则后处理，可清理常见制度化词和重复标题，但不能理解所有真实模型可能生成的隐性具体设定；主要约束仍由 prompt 边界承担。
+- 用户原话明确包含的词不会被 sanitizer 强制替换，避免误删用户有意指定的设定方向。
+

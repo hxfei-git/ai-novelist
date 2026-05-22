@@ -398,6 +398,8 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
         ),
     )
 
+    if stage == "direction":
+        synthesis = sanitize_direction_stage_output(synthesis, state.user_request)
     questions = extract_stage_confirmation_questions(synthesis)
     artifact = {
         "stage": stage,
@@ -811,6 +813,14 @@ def record_stage_history(state: NovelState, event: str, stage: str, user_text: s
 
 
 def build_outline_stage_role_prompt(state: NovelState, stage: str, role: str) -> str:
+    direction_boundary = ""
+    if stage == "direction":
+        direction_boundary = (
+            "\n\nDIRECTION_STAGE_BOUNDARY:\n"
+            "- 方向定位只输出宏观方向原则：类型定位、主角行动原则、核心爽点、核心冲突方向、情绪基调、主题边界、反转原则、禁区。\n"
+            "- 禁止发明具体世界观规则、宗门/组织流程、制度条款、申请表/审批/考评/备案/绩效/KPI、具体人物关系细则、具体剧情桥段、章节安排、专有名词清单。\n"
+            "- 如果想写具体设定，必须改写成抽象原则；例如把“道侣绩效考评”改成“感情线必须服务主线冲突，不脱离类型爽点”。\n"
+        )
     return (
         "AGENT: outline_stage_role\n"
         f"ROLE: {role}\n"
@@ -823,6 +833,7 @@ def build_outline_stage_role_prompt(state: NovelState, stage: str, role: str) ->
         f"前序已保存阶段内容：\n{previous_stage_context(state, stage)}\n\n"
         f"当前阶段已有内容：\n{current_stage_context(state, stage)}\n\n"
         f"阶段连续性要求：\n{stage_continuity_requirement(stage)}\n\n"
+        f"{direction_boundary}"
         "OUTPUT_BUDGET:\n"
         "- 只输出短 JSON：{role, opportunities, risks, suggestions}。\n"
         "- opportunities/risks/suggestions 各最多 3 条，每条不超过 60 中文字符。\n"
@@ -842,9 +853,14 @@ def build_outline_stage_synthesizer_prompt(state: NovelState, stage: str, role_r
             "不要追加、罗列或保留历史修改记录，不要把用户意见单独堆成段落。"
             "若新意见与旧方向重复，合并去重；若冲突，以用户最新输入为准并改写旧方向。"
             "最终文本必须短、准、可执行，而不是资料汇编。"
+            "方向定位只允许确定类型定位、主角行动原则、核心爽点、核心冲突方向、情绪基调、主题边界、反转原则、禁区；"
+            "禁止输出具体世界观规则、宗门/组织流程、制度条款、申请表/审批/考评/备案/绩效/KPI、具体人物关系细则、具体剧情桥段、章节安排、专有名词清单；"
+            "如果角色短评给出具体机制，必须改写成抽象方向原则，例如把“宗门流程”改成“主角优先利用既有规则求生，具体规则留到世界观阶段展开”。"
             "请只输出一个 Markdown 小节：\n"
             "## 方向定位稿\n"
-            "用 6-10 条短句同时确定故事类型、主角行动方式、核心冲突、主题表达、反转机制、情绪基调、关键关系、主要代价、全书开篇切入、中期升级、后期终局和禁止跑偏项；"
+            "只写 6-8 条，每条不超过 80 个中文字符，每条必须是方向原则；"
+            "必须覆盖故事类型、主角行动原则、核心爽点、核心冲突、情绪基调、主题边界、反转原则和禁区；"
+            "可以用抽象原则暗示全书开篇切入、中期升级和后期终局，但不得写成具体剧情桥段；"
             "不能只写开篇局面，必须让后续故事概念、世界观、人物关系和故事流程能看见中期与结尾方向；"
             "不要再拆成“一句话方向 / 方向命令 / 不许跑偏”。"
         )
@@ -991,7 +1007,7 @@ def role_focus_instruction(stage: str, role: str) -> str:
 
 def stage_continuity_requirement(stage: str) -> str:
     requirements = {
-        "direction": "方向定位是后续所有阶段的源头：输出必须成为概念、世界观、人物关系和故事流程可执行的控制稿。",
+        "direction": "方向定位是后续所有阶段的源头：只锁定宏观创作原则，具体规则、人物细则和剧情桥段留到后续阶段展开。",
         "concept": "故事概念必须承接方向定位，明确故事概念、核心冲突、主题表达和反转机制，不能另起一个故事。",
         "worldbuilding": "世界观必须承接方向定位和故事概念提出的类型、冲突、主题与反转机制；每条规则都要服务这个故事方向。",
         "characters": "人物关系必须承接方向定位、故事概念和世界观规则；人物欲望、关系张力和阵营冲突要由已保存设定自然生长。",
@@ -1018,6 +1034,12 @@ def format_stage_markdown(artifact: dict) -> str:
     if not artifact:
         return ""
     stage = str(artifact.get("stage", ""))
+    if stage == "direction":
+        synthesis = sanitize_direction_stage_output(
+            str(artifact.get("synthesis", "")).strip(),
+            str(artifact.get("user_feedback", "")).strip(),
+        )
+        return synthesis.rstrip() + "\n" if synthesis else ""
     lines = [f"# {artifact.get('label') or STAGE_LABELS.get(stage, '阶段产物')}", ""]
     user_feedback = str(artifact.get("user_feedback", "")).strip()
     if user_feedback and stage != "direction":
@@ -1026,10 +1048,66 @@ def format_stage_markdown(artifact: dict) -> str:
         lines.append("")
     synthesis = str(artifact.get("synthesis", "")).strip()
     if synthesis:
-        heading = "## 方向控制稿" if stage == "direction" else "## Director 汇总"
-        lines.append(heading)
+        lines.append("## Director 汇总")
         lines.append(synthesis)
     return "\n".join(lines).rstrip() + "\n"
+
+
+DIRECTION_FORBIDDEN_REPLACEMENTS = {
+    "亲密行为申请表": "感情线必须服务主线冲突，不脱离类型爽点",
+    "双修项目审批": "关键关系必须推动主线冲突，不喧宾夺主",
+    "道侣绩效考评": "感情线必须服务主线冲突，不脱离类型爽点",
+    "项目审批": "关键选择必须服务核心冲突",
+    "申请表": "感情线必须服务主线冲突",
+    "审批": "关键选择必须服务核心冲突",
+    "考评": "关系压力必须服务主线推进",
+    "备案": "亲密关系不喧宾夺主",
+    "绩效": "情感线必须服务类型爽点",
+    "制度条款": "抽象规则边界",
+    "规则清单": "原则边界",
+    "KPI": "外部压力",
+    "宗门流程": "主角优先利用既有规则求生，具体规则留到世界观阶段展开",
+    "组织流程": "主角优先利用既有规则求生，具体规则留到世界观阶段展开",
+    "流程": "推进原则",
+}
+
+
+def sanitize_direction_stage_output(markdown: str, user_text: str = "") -> str:
+    text = (markdown or "").strip()
+    if not text:
+        return "## 方向定位稿\n"
+
+    text = text.replace("## 方向控制稿", "## 方向定位稿")
+    text = text.replace("# 方向控制稿", "## 方向定位稿")
+    text = re.sub(r"(?m)^#{1,6}\s*方向定位\s*$", "", text)
+
+    for forbidden, replacement in DIRECTION_FORBIDDEN_REPLACEMENTS.items():
+        if forbidden in user_text:
+            continue
+        text = text.replace(forbidden, replacement)
+
+    items: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if re.match(r"^#{1,6}\s*方向定位稿\s*$", line):
+            continue
+        if line.startswith("#"):
+            continue
+        line = re.sub(r"^[-*+•\s]*", "", line)
+        line = re.sub(r"^\d+[.、)]\s*", "", line).strip()
+        if not line:
+            continue
+        if len(line) > 80:
+            line = line[:80].rstrip("，,；;、 ") + "。"
+        if line not in items:
+            items.append(line)
+        if len(items) >= 8:
+            break
+
+    body = "\n".join(f"{index}. {item}" for index, item in enumerate(items, start=1))
+    return "## 方向定位稿\n" + (body if body else "")
 
 
 def stage_ready_message(stage: str, questions: list[str] | None = None) -> str:

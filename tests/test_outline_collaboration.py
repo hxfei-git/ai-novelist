@@ -2,7 +2,7 @@ import json
 
 from ai_novelist.adapters.codex_cli import CodexCLIAdapter
 from ai_novelist.artifacts import load_artifacts
-from ai_novelist.graph_outline import build_outline_stage_role_prompt, build_outline_stage_synthesizer_prompt, extract_stage_confirmation_questions, format_stage_markdown, append_message, build_outline_collaboration_graph, build_outline_prompt
+from ai_novelist.graph_outline import build_outline_stage_role_prompt, build_outline_stage_synthesizer_prompt, extract_stage_confirmation_questions, format_stage_markdown, sanitize_direction_stage_output, append_message, build_outline_collaboration_graph, build_outline_prompt
 from ai_novelist.graph_writer import build_chat_graph
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
@@ -216,7 +216,9 @@ def test_direction_stage_markdown_hides_role_reviews():
         }
     )
 
-    assert "## 方向控制稿" in markdown
+    assert markdown.count("## 方向定位稿") == 1
+    assert "## 方向控制稿" not in markdown
+    assert "# 方向定位" not in markdown.splitlines()
     assert "## 角色短评" not in markdown
     assert "风险编辑 Agent" not in markdown
 
@@ -230,7 +232,10 @@ def test_direction_synthesizer_prompt_demands_control_brief():
     assert "整合成一版新的方向定位稿" in prompt
     assert "不要追加、罗列或保留历史修改记录" in prompt
     assert "## 方向定位稿" in prompt
-    assert "全书开篇切入、中期升级、后期终局" in prompt
+    assert "只写 6-8 条" in prompt
+    assert "每条不超过 80 个中文字符" in prompt
+    assert "类型定位、主角行动原则、核心爽点、核心冲突" in prompt
+    assert "申请表/审批/考评/备案/绩效/KPI" in prompt
     assert "不能只写开篇局面" in prompt
     assert "## 一句话方向" not in prompt
     assert "## 方向命令" not in prompt
@@ -354,6 +359,26 @@ def test_direction_stage_markdown_integrates_without_feedback_dump():
     assert "## 用户本轮反馈" not in markdown
     assert "师傅暗中吞噬主角气运" not in markdown
     assert "整理后的方向定位" in markdown
+
+
+def test_direction_sanitizer_removes_nested_titles_and_institutional_terms():
+    markdown = sanitize_direction_stage_output(
+        "# 方向定位\n\n## 方向控制稿\n"
+        "1. 类型定位：重生魔门悬疑智斗，以低调求生追查真相。\n"
+        "2. 主角行动原则：利用宗门流程求生，不正面硬刚。\n"
+        "3. 核心爽点：用亲密行为申请表和道侣绩效考评制造反差。\n"
+        "4. 核心冲突：师傅暗中吞噬气运，主角必须破局。\n"
+        "5. 情绪基调：压抑、克制、步步反击。\n"
+        "6. 禁区：不要写成审批备案驱动的制度条款。"
+    )
+
+    assert markdown.count("## 方向定位稿") == 1
+    assert "## 方向控制稿" not in markdown
+    assert "# 方向定位" not in markdown.splitlines()
+    for forbidden in ("申请表", "审批", "考评", "备案", "绩效", "项目审批", "亲密行为申请表"):
+        assert forbidden not in markdown
+    for marker in ("类型定位", "主角行动原则", "核心冲突", "情绪基调", "禁区"):
+        assert marker in markdown
 
 
 def test_outline_stage_generation_emits_progress_events(tmp_path):

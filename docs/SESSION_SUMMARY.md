@@ -970,3 +970,21 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 202 passed
 ```
+
+## 45. 本轮修复：Direction 阶段发散过度
+
+- 修复 direction 阶段输出被包装成 `# 方向定位` + `## 方向控制稿` + `## 方向定位稿` 的嵌套标题问题；现在 direction 阶段 Markdown 只保留 `## 方向定位稿`。
+- Direction role prompt 和 synthesizer prompt 明确只产出宏观方向原则，禁止提前展开世界观规则、组织流程、制度条款、申请表、审批、考评、备案、绩效、具体人物关系细则、具体剧情桥段、章节安排和专有名词清单。
+- 新增 `sanitize_direction_stage_output()`，保存 direction synthesis 前清理重复标题，并将常见过细机制词替换为抽象原则。
+- Mock direction 输出改为 8 条短方向原则，覆盖类型定位、主角行动原则、核心爽点、核心冲突、情绪基调、主题边界、反转原则和禁区。
+- 新增回归测试覆盖 direction 标题唯一性、制度化词过滤，以及宏观方向信息保留。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_outline_collaboration.py
+# 33 passed
+.venv/bin/python -m pytest
+# 203 passed
+```
+
