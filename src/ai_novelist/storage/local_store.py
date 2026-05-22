@@ -68,6 +68,15 @@ class LocalStore:
     def project_context_path(self, project_id: str) -> Path:
         return self.project_dir(project_id) / "project_context.md"
 
+    def artifact_registry_path(self, project_id: str) -> Path:
+        return self.project_dir(project_id) / "artifacts.json"
+
+    def novel_bible_json_path(self, project_id: str) -> Path:
+        return self.project_dir(project_id) / "novel_bible.json"
+
+    def novel_bible_markdown_path(self, project_id: str) -> Path:
+        return self.project_dir(project_id) / "novel_bible.md"
+
     def chapter_path(self, project_id: str, chapter: int) -> Path:
         return self.chapters_dir(project_id) / f"chapter_{chapter:03d}.md"
 

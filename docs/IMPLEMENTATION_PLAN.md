@@ -619,3 +619,31 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 - 增加测试覆盖世界观、人物关系、故事流程和当前阶段修订 prompt 的上下文注入。
 - 方向定位阶段输出简化为单一 `## 方向定位稿`，不再拆成“一句话方向 / 方向命令 / 不许跑偏”，降低第一阶段产物噪声。
 - `## 方向定位稿` 必须覆盖全书开篇切入、中期升级和后期终局，避免只定位开篇局面。
+
+## 25. 全量工作流整改 Phase 0-3 基础设施
+
+本轮按 `plan.md` 的首批实施范围小步落地，不替换现有 `chat`、`outline`、`compose`、writer 路径，先补齐后续全量小说工作流需要的基础设施。
+
+已完成：
+
+- Phase 0 基线：重新运行全量 `pytest`、`smoke_outline_collaboration.py`、`smoke_phase2_chat.py`，确认当前行为可回归；同时发现 `.venv` editable 安装曾指向旧目录，并用 `pip install -e . --no-build-isolation` 修正到当前仓库。
+- Phase 1 Artifact Registry：新增 `src/ai_novelist/artifacts.py`，提供 `ArtifactRecord`、`load_artifacts`、`save_artifacts`、`register_artifact`、`get_latest_artifact`、`save_markdown_artifact`、`save_json_artifact`、`load_artifact_text`；registry 保存为 `projects/<project>/artifacts.json`。
+- Phase 2 Novel Bible：新增 `src/ai_novelist/bible.py`，提供小说圣经 dataclass、JSON/Markdown 保存加载、保守合并和冲突 warning；保存为 `novel_bible.json` 与 `novel_bible.md`。
+- Phase 3 ContextBuilder：新增 `src/ai_novelist/context_builder.py`，按 `director/outline_stage/chapter_planning/scene_design/drafting/review/revision/bible_update/export` 等 purpose 组装任务上下文，并支持长度裁剪。
+- `LocalStore` 增加 `artifact_registry_path`、`novel_bible_json_path`、`novel_bible_markdown_path` 路径方法。
+- `NovelState` 增加轻量索引字段：Bible 版本/更新时间、active graph/stage/chapter/scene、当前章节卡/场景卡/审稿/修订/定稿摘要、章节摘要、artifact registry 简要索引、最近上下文摘要和 Agent 报告。旧 `state.json` 缺字段时仍按默认值加载。
+
+当前边界：
+
+- 新基础设施尚未接管现有 graph；旧路径和旧字段继续作为当前生产路径。
+- 本轮不实现 `graph_bible.py`、章节卡、场景卡、drafting/review/revision/export graph；这些留给后续阶段逐步接入。
+- `state.json` 只保存轻量字段；Artifact、Bible 和大文本上下文均保存为独立文件。
+
+验证要求：
+
+```bash
+.venv/bin/python -m pytest
+.venv/bin/python tests/smoke_outline_collaboration.py
+.venv/bin/python tests/smoke_phase2_chat.py
+```
+

@@ -60,6 +60,21 @@ class NovelState:
     director_action: str = ""
     director_message: str = ""
     director_task_args: dict[str, Any] = field(default_factory=dict)
+    bible_version: int = 0
+    bible_updated_at: str = ""
+    active_graph: str = ""
+    active_stage: str = ""
+    active_chapter: int = 1
+    active_scene: str = ""
+    current_chapter_card: str = ""
+    current_scene_cards: str = ""
+    current_review_report: str = ""
+    current_revision_plan: str = ""
+    current_final_chapter: str = ""
+    chapter_summaries: dict[str, str] = field(default_factory=dict)
+    artifact_registry: list[dict[str, Any]] = field(default_factory=list)
+    last_context_digest: str = ""
+    last_agent_reports: list[dict[str, Any]] = field(default_factory=list)
     pending_director_decision: dict[str, Any] = field(default_factory=dict)
     pending_question: str = ""
     active_task: str = ""
@@ -114,6 +129,21 @@ class NovelState:
             director_action=str(data.get("director_action", "")),
             director_message=str(data.get("director_message", "")),
             director_task_args=normalize_dict(data.get("director_task_args", {})),
+            bible_version=int(data.get("bible_version", 0)),
+            bible_updated_at=str(data.get("bible_updated_at", "")),
+            active_graph=str(data.get("active_graph", "")),
+            active_stage=str(data.get("active_stage", "")),
+            active_chapter=int(data.get("active_chapter", data.get("current_chapter", 1))),
+            active_scene=str(data.get("active_scene", "")),
+            current_chapter_card=str(data.get("current_chapter_card", "")),
+            current_scene_cards=str(data.get("current_scene_cards", "")),
+            current_review_report=str(data.get("current_review_report", "")),
+            current_revision_plan=str(data.get("current_revision_plan", "")),
+            current_final_chapter=str(data.get("current_final_chapter", "")),
+            chapter_summaries=normalize_str_dict(data.get("chapter_summaries", {})),
+            artifact_registry=normalize_dict_list(data.get("artifact_registry", [])),
+            last_context_digest=str(data.get("last_context_digest", "")),
+            last_agent_reports=normalize_dict_list(data.get("last_agent_reports", [])),
             pending_director_decision=normalize_dict(data.get("pending_director_decision", {})),
             pending_question=str(data.get("pending_question", "")),
             active_task=str(data.get("active_task", "")),
@@ -180,3 +210,9 @@ def normalize_outline_stage_status(value: Any) -> OutlineStageStatus:
     status = str(value or "collecting").strip()
     allowed = {"collecting", "options_ready", "locked", "revision_requested", "done"}
     return status if status in allowed else "collecting"  # type: ignore[return-value]
+
+
+def normalize_str_dict(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): str(item) for key, item in value.items()}

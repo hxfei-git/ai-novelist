@@ -473,3 +473,29 @@ Smoke 验证：`.venv/bin/python tests/smoke_phase2_chat.py`，结果 `phase2 ch
 - 调整：方向定位阶段改为输出单一 `## 方向定位稿`，不再拆成“一句话方向 / 方向命令 / 不许跑偏”，让第一阶段更轻、更像写作基准。
 - 调整：方向定位稿必须覆盖全书开篇切入、中期升级和后期终局，避免只生成开篇故事方向。
 - 验证：`.venv/bin/python -m pytest tests/test_outline_collaboration.py tests/test_director_service.py`，结果 `31 passed`；全量 `.venv/bin/python -m pytest`，结果 `105 passed`。
+
+## 27. 本轮更新：全量工作流 Phase 0-3 基础设施
+
+- 按 `plan.md` 的首批实施计划完成 Phase 0-3，小步兼容，不替换现有 `chat`、`outline`、`compose` 和 writer 路径。
+- 基线验证通过：`.venv/bin/python -m pytest` 为 `105 passed`，`smoke_outline_collaboration.py` 与 `smoke_phase2_chat.py` 均通过。
+- 发现 `.venv` editable 安装指向旧目录 `/home/ubuntu/1.project/ai-novelist`，已用 `.venv/bin/python -m pip install -e . --no-build-isolation` 修正到当前仓库。首次不带 `--no-build-isolation` 因沙箱网络/索引无法获取 `setuptools>=68` 失败。
+- 新增 Artifact Registry：`src/ai_novelist/artifacts.py` 与 `tests/test_artifacts.py`，支持空加载、Markdown/JSON 产物保存、latest 查询和版本递增。
+- 新增 NovelBible：`src/ai_novelist/bible.py` 与 `tests/test_bible.py`，支持空加载、JSON/Markdown 保存、Markdown 渲染、保守合并和冲突 warning。
+- 新增 ContextBuilder：`src/ai_novelist/context_builder.py` 与 `tests/test_context_builder.py`，支持按任务目的组装上下文、读取 Bible/artifact/reference/chapter summary，并保证锁定约束优先保留。
+- `NovelState` 增加后续章节管线需要的轻量字段，`LocalStore` 增加 artifact registry 和 novel bible 路径方法；旧 `state.json` 保持兼容。
+
+当前限制：
+
+- 新基础设施目前是旁路能力，尚未被现有 graph 默认使用。
+- 后续应从 Bible Graph、Chapter Planning Graph 和 Scene Graph 开始逐步接入，仍需保持 mock 和旧 CLI 兼容。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_artifacts.py tests/test_local_store.py
+.venv/bin/python -m pytest tests/test_bible.py tests/test_state.py
+.venv/bin/python -m pytest tests/test_context_builder.py
+```
+
+最终验证：`.venv/bin/python -m pytest` 为 `121 passed`；`.venv/bin/python tests/smoke_outline_collaboration.py` 输出 `outline collaboration smoke ok`；`.venv/bin/python tests/smoke_phase2_chat.py` 输出 `phase2 chat smoke ok`。
+
