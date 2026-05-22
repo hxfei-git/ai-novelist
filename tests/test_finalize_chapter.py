@@ -33,6 +33,11 @@ def test_finalize_chapter_saves_final_summary_and_updates_bible(tmp_path):
     assert result.bible_version >= 2
     bible = load_bible(store.project_dir("demo"))
     assert "1" in bible.chapter_summaries
+    updates = result.director_task_args["bible_updates"]
+    assert "world_rules" not in updates
+    assert all("source_hint" in item for item in updates.get("timeline", []))
+    assert all("source_hint" in item for item in updates.get("foreshadowing", []))
+    assert all("source_hint" in item for item in updates.get("plot_threads", []))
     assert any(item.type == "final_chapter" for item in load_records(result))
     assert any(item.type == "chapter_summary" for item in load_records(result))
 

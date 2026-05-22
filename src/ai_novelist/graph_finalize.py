@@ -301,6 +301,7 @@ def fallback_bible_updates(state: NovelState) -> dict[str, Any]:
                 "event": summary,
                 "characters": extract_character_names(state.current_final_chapter),
                 "location": extract_location(state.current_final_chapter),
+                "source_hint": f"final_chapter: 第 {chapter} 章定稿",
             }
         ],
         "foreshadowing": [
@@ -309,6 +310,7 @@ def fallback_bible_updates(state: NovelState) -> dict[str, Any]:
                 "setup_chapter": chapter,
                 "setup_text": summary_line(state.current_final_chapter),
                 "status": "setup",
+                "source_hint": f"final_chapter: 第 {chapter} 章结尾钩子",
             }
         ],
         "open_questions": [f"第 {chapter} 章后续需要回收本章结尾钩子。"],

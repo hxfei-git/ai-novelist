@@ -1807,3 +1807,26 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 249 passed
 ```
+
+
+## 86. 本轮更新：Final Bible Update Extractor Prompt 整改
+
+- 完整读取并执行 `42_final_bible_update_extractor.md`。
+- `final_bible_update_extractor.md` 现在只提取定稿章节中明确发生的事实、状态变化和显性线索。
+- 禁止从修辞、比喻、氛围、情绪描写或象征物推断世界规则。
+- 禁止输出 world_rules、project 或 concept，避免从单章定稿隐含推断全局 canon。
+- 禁止覆盖旧设定为空、加入未发生事件、未来预测或读者评价。
+- 结构化条目必须包含 `source_hint`；chapter_summaries 限制为每章 80-180 中文字符。
+- mock final bible updates 与 fallback_bible_updates 同步增加 `source_hint`。
+- 新增回归测试覆盖 explicit-facts-only、no-world-rule-inference 和 source_hint 边界。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 34 passed
+.venv/bin/python -m pytest tests/test_graph_bible.py tests/test_finalize_chapter.py tests/test_director_service.py tests/test_research_workflow.py tests/test_search_backend.py tests/test_bible.py
+# 72 passed
+.venv/bin/python -m pytest
+# 250 passed
+```

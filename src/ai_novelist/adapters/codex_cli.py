@@ -726,13 +726,13 @@ class CodexCLIAdapter(AgentAdapter):
                 "1": "林澈在银湾城第三维修站醒来，发现纸质手稿预告东七气闸事故，并确认审计编号失效指向自己。他带着手稿冲向东七气闸，决定违规追查。"
             },
             "timeline": [
-                {"id": "chapter-001-final", "order": 1, "chapter": 1, "event": "林澈发现纸质手稿、失效审计编号和东七气闸事故预告。", "characters": ["林澈"], "location": "银湾城第三维修站"}
+                {"id": "chapter-001-final", "order": 1, "chapter": 1, "event": "林澈发现纸质手稿、失效审计编号和东七气闸事故预告。", "characters": ["林澈"], "location": "银湾城第三维修站", "source_hint": "final_chapter: 第1章定稿"}
             ],
             "foreshadowing": [
-                {"id": "CH001-HOOK", "setup_chapter": 1, "setup_text": "手稿第二页预告东七气闸事故坐标。", "payoff_text": "后续验证手稿来源和月背冷库线索。", "status": "setup"}
+                {"id": "CH001-HOOK", "setup_chapter": 1, "setup_text": "手稿第二页预告东七气闸事故坐标。", "payoff_text": "后续验证手稿来源和月背冷库线索。", "status": "setup", "source_hint": "final_chapter: 手稿第二页预告"}
             ],
             "plot_threads": [
-                {"name": "手稿预言", "description": "第一章确认手稿能预告真实事故。", "status": "active", "related_chapters": [1]}
+                {"name": "手稿预言", "description": "第一章确认手稿能预告真实事故。", "status": "active", "related_chapters": [1], "source_hint": "chapter_summary: 第1章摘要"}
             ],
             "open_questions": ["手稿为何能预告东七气闸事故仍待解释。"],
         }

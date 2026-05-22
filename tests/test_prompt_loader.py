@@ -472,3 +472,15 @@ def test_bible_update_synthesizer_prompt_three_way_summary():
     assert "每条不超过 90 中文字符" in prompt
     for forbidden in ("补写新设定", "把冲突当成已确认", "长篇解释"):
         assert forbidden in prompt
+
+
+def test_final_bible_update_extractor_prompt_explicit_facts_only():
+    prompt = load_prompt("final_bible_update_extractor")
+
+    assert "明确发生的稳定事实" in prompt
+    assert "不得从修辞、比喻、氛围" in prompt
+    assert "不得输出 world_rules" in prompt
+    assert "每项必须包含 `source_hint`" in prompt
+    assert "chapter_summaries 每章 80-180 中文字符" in prompt
+    for forbidden in ("推断世界规则", "覆盖旧设定为空", "未发生事件", "未来预测", "读者评价"):
+        assert forbidden in prompt

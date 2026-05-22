@@ -2011,3 +2011,24 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Bible update synthesizer 只汇总写入状态，不创造 canon。
 - 冲突和待确认项不能被表述成已写入稳定设定。
+
+
+## 82. Final Bible Update Extractor Prompt 整改
+
+目标：执行 `42_final_bible_update_extractor.md`，让定稿章节提取器只从定稿章节和摘要中提取明确发生事实，不从修辞隐含推断世界规则。
+
+已完成：
+
+- `final_bible_update_extractor.md` 明确只提取定稿章节中明确发生的事实、状态变化和显性线索。
+- 禁止从修辞、比喻、氛围、情绪描写或象征物推断世界规则。
+- 禁止输出 world_rules、project 或 concept，避免从单章定稿隐含推断全局 canon。
+- 禁止覆盖旧设定为空、加入未发生事件、未来预测或读者评价。
+- timeline、foreshadowing、characters、plot_threads 中每项必须包含 `source_hint`。
+- chapter_summaries 限制为每章 80-180 中文字符。
+- mock final bible updates 与 fallback_bible_updates 同步为结构化条目增加 `source_hint`。
+- 新增 prompt loader 和 finalize 回归测试覆盖 explicit-facts-only、no-world-rule-inference 和 source_hint 边界。
+
+当前边界：
+
+- Final bible update extractor 只记录定稿已发生事实。
+- 单章修辞、氛围和隐喻不能升级为小说圣经世界规则。
