@@ -152,3 +152,18 @@ def test_chapter_hook_agent_prompt_requires_reveal_level_and_existing_foreshadow
     assert "do_not_reveal" in prompt
     for forbidden in ("新增全局真相", "未规划大反转", "新世界规则", "新角色关系", "正文段落"):
         assert forbidden in prompt
+
+
+def test_chapter_card_synthesizer_prompt_marks_unconfirmed_context_pending():
+    prompt = load_prompt("chapter_card_synthesizer")
+
+    assert "只整合当前章节必需信息" in prompt
+    assert "不能直接写成 canon" in prompt
+    assert "必须标记为“待确认”" in prompt
+    assert "场景列表 2-5 个" in prompt
+    assert "每节不超过 120 中文字符" in prompt
+    assert "整体不超过 1200 中文字符" in prompt
+    assert "待确认" in prompt
+    assert "确认未新增全局设定" in prompt
+    for forbidden in ("新增全局设定", "吸收未确认参考资料", "写正式正文", "扩写无关角色关系", "对白", "细场景动作"):
+        assert forbidden in prompt

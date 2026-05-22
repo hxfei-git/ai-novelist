@@ -1323,3 +1323,24 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 224 passed
 ```
+
+## 63. 本轮更新：Chapter Card Synthesizer Prompt 整改
+
+- 完整读取并执行 `19_chapter_card_synthesizer.md`。
+- `chapter_card_synthesizer.md` 现在只整合当前章节必需信息，不扩写全书设定。
+- 参考资料、role reports、检索内容或临时建议不能直接写成 canon。
+- 未确认参考事实或来源不明内容必须标记为“待确认”。
+- 场景列表限制 2-5 个，只给功能，不写正文、对白或细场景动作。
+- 输出预算为每节不超过 120 中文字符、整体不超过 1200 中文字符。
+- 新增回归测试覆盖待确认、场景数量和 no-new-canon 边界。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 11 passed
+.venv/bin/python -m pytest tests/test_graph_chapter_plan.py tests/test_graph_scene.py
+# 7 passed
+.venv/bin/python -m pytest
+# 225 passed
+```

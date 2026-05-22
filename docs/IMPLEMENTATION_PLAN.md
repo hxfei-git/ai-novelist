@@ -1565,3 +1565,22 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Chapter hook agent 只设计当前章悬念呈现方式。
 - 钩子不创造新真相，只选择已有伏笔的揭露层级。
+
+## 59. Chapter Card Synthesizer Prompt 整改
+
+目标：执行 `19_chapter_card_synthesizer.md`，让章节卡只整合当前章节必需信息，避免把参考资料或临时建议直接写成 canon。
+
+已完成：
+
+- `chapter_card_synthesizer.md` 明确只整合当前章节必需信息，不扩写全书设定。
+- 参考资料、role reports、检索内容或临时建议不能直接写成 canon。
+- 新增设定、未确认参考事实或来源不明内容必须标记为“待确认”。
+- 禁止新增全局设定、吸收未确认参考资料、写正式正文和扩写无关角色关系。
+- 场景列表只给场景功能，限制 2-5 个，不写正文、对白或细场景动作。
+- 输出预算为每节不超过 120 中文字符、整体不超过 1200 中文字符。
+- 新增 prompt loader 回归测试覆盖待确认、场景数量、预算和 no-new-canon 边界。
+
+当前边界：
+
+- Chapter card 是当前章执行卡，不是小说圣经更新。
+- 未确认资料留在待确认，不转为稳定设定。
