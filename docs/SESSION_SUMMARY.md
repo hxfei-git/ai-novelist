@@ -1567,3 +1567,23 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 236 passed
 ```
+
+## 75. 本轮更新：Character Arc Editor Prompt 整改
+
+- 完整读取并执行 `31_character_arc_editor.md`。
+- `character_arc_editor.md` 现在只修当前章节已有选择、代价、情绪转折和人物状态连续性。
+- 禁止通过新增身世、感情机制、恋爱机制、长期承诺、亲密规则、新阵营关系或新关系 canon 来解释动机。
+- 修复建议必须指向已有场景、章节卡、场景卡或草稿位置。
+- 保持 JSON 输出和预算。
+- 新增回归测试覆盖当前章人物选择修复和 no-new-relationship-canon 边界。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 23 passed
+.venv/bin/python -m pytest tests/test_graph_review.py tests/test_graph_revision.py tests/test_output_contracts.py
+# 9 passed
+.venv/bin/python -m pytest
+# 237 passed
+```

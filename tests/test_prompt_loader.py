@@ -335,3 +335,16 @@ def test_structure_editor_prompt_targets_existing_scenes_without_new_canon():
     assert "最多 5 个 rewrite_tasks" in prompt
     for forbidden in ("新增全局反转", "新场景群", "新人物", "新组织", "新世界规则", "新 canon", "大幅重写整章"):
         assert forbidden in prompt
+
+
+def test_character_arc_editor_prompt_only_repairs_current_chapter_choices():
+    prompt = load_prompt("character_arc_editor")
+
+    assert "只修当前章节已有选择、代价、情绪转折" in prompt
+    assert "不得通过新增身世" in prompt
+    assert "新关系 canon" in prompt
+    assert "修复建议必须指向已有场景" in prompt
+    assert "rewrite_tasks" in prompt
+    assert "最多 5 个 top_issues" in prompt
+    for forbidden in ("感情机制", "恋爱机制", "长期承诺", "亲密规则", "新阵营关系", "未规划人物背景", "改变关系状态"):
+        assert forbidden in prompt

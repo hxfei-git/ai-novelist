@@ -1789,3 +1789,21 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Structure editor 调整现有结构，不发明新剧情。
 - 结构问题通过重排、压缩和强化解决。
+
+## 71. Character Arc Editor Prompt 整改
+
+目标：执行 `31_character_arc_editor.md`，让人物弧光编辑只修当前章人物目标、选择、代价和情绪，不通过新增关系 canon 解释动机。
+
+已完成：
+
+- `character_arc_editor.md` 明确只修当前章节已有选择、代价、情绪转折和人物状态连续性。
+- 禁止通过新增身世、感情机制、恋爱机制、长期承诺、亲密规则、新阵营关系或新关系 canon 来解释动机。
+- 禁止新增未规划人物背景或改变关系状态。
+- 修复建议必须指向已有场景、章节卡、场景卡或草稿位置。
+- 保留 JSON 输出和既有预算：top_issues<=5、rewrite_tasks<=5、keep<=3、每字符串不超过 80 中文字符。
+- 新增 prompt loader 回归测试覆盖当前章人物选择修复和 no-new-relationship-canon 边界。
+
+当前边界：
+
+- Character arc editor 只处理当前章人物选择和情绪连贯性。
+- 不用新增身世、亲密机制或阵营关系补人物动机。
