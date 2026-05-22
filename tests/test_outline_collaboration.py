@@ -426,6 +426,27 @@ def test_save_state_slims_outline_artifacts_and_writes_memory(tmp_path):
     assert "低调求生追查真相" in memory
 
 
+def test_concept_role_prompts_have_role_specific_context():
+    state = NovelState(project_id="demo", title="Demo", idea="重生魔门")
+    state.outline_stage_artifacts["direction"] = {
+        "stage": "direction",
+        "label": "方向定位",
+        "status": "locked",
+        "stage_memory": ["主角低调求生", "师傅吞噬气运是核心谜团"],
+    }
+
+    concept_prompt = build_outline_stage_role_prompt(state, "concept", "故事概念 Agent")
+    conflict_prompt = build_outline_stage_role_prompt(state, "concept", "核心冲突 Agent")
+    twist_prompt = build_outline_stage_role_prompt(state, "concept", "反转机制 Agent")
+
+    assert "角色专属关注点" in concept_prompt
+    assert "故事发动机" in concept_prompt
+    assert "中期升级" in conflict_prompt
+    assert "认知差" in twist_prompt
+    assert len({concept_prompt, conflict_prompt, twist_prompt}) == 3
+    assert len({len(concept_prompt), len(conflict_prompt), len(twist_prompt)}) == 3
+
+
 def test_stage_prompt_prefers_stage_memory_over_full_synthesis():
     state = NovelState(project_id="demo", title="Demo", idea="重生魔门")
     state.outline_stage_artifacts["direction"] = {

@@ -954,3 +954,19 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 201 passed
 ```
+
+
+## 44. 本轮修复：大纲角色 Agent 上下文区分
+
+- 修复大纲同阶段三个 role Agent 只靠 `ROLE` 行区分、进度里上下文/token 容易显示相同的问题。
+- `build_outline_stage_role_prompt()` 现在注入“角色专属关注点”，同一阶段共享阶段记忆，但故事概念、核心冲突、反转机制等角色会收到不同任务上下文。
+- 新增回归测试，确认故事概念阶段三个 role prompt 内容和长度均不同。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_outline_collaboration.py tests/test_progress.py
+# 33 passed
+.venv/bin/python -m pytest
+# 202 passed
+```
