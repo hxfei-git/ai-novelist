@@ -1630,3 +1630,25 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 239 passed
 ```
+
+
+## 78. 本轮更新：Review Synthesizer Prompt 整改
+
+- 完整读取并执行 `34_review_synthesizer.md`。
+- `review_synthesizer.md` 现在只汇总上游 editor JSON 和 simulated_reader JSON 中已提出的问题。
+- 禁止新增上游未提出的问题、风险、新设定任务或剧情方案。
+- 禁止扩写长任务、重写正文，合并时不得改变原意。
+- `rewrite_tasks` 必须去重，并按阻塞程度和修复优先级排序。
+- 同步收紧 `graph_review.py` prompt contract 与 `normalize_review_synthesis` 运行时预算：blocking_issues<=3、issues<=6、rewrite_tasks<=8、每项<=90 中文字符。
+- 新增回归测试覆盖来源约束、预算和数组/字数归一化。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 26 passed
+.venv/bin/python -m pytest tests/test_graph_review.py tests/test_graph_revision.py tests/test_output_contracts.py
+# 10 passed
+.venv/bin/python -m pytest
+# 241 passed
+```

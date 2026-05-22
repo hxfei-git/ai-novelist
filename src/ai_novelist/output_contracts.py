@@ -65,15 +65,15 @@ def normalize_review_synthesis(raw: object, fallback_text: str = "") -> dict[str
         score = int(data.get("score") or data.get("quality_score") or 0)
     except (TypeError, ValueError):
         score = 0
-    issues = normalize_string_list(data.get("issues"), max_items=8, max_item_chars=100)
+    issues = normalize_string_list(data.get("issues"), max_items=6, max_item_chars=90)
     if not issues and str(fallback).strip():
-        issues = extract_fallback_bullets(str(fallback), max_items=5, max_chars=100)
+        issues = extract_fallback_bullets(str(fallback), max_items=5, max_chars=90)
     return {
         "decision": decision,
         "score": max(0, min(score, 100)),
-        "blocking_issues": normalize_string_list(data.get("blocking_issues"), max_items=5, max_item_chars=100),
+        "blocking_issues": normalize_string_list(data.get("blocking_issues"), max_items=3, max_item_chars=90),
         "issues": issues,
-        "rewrite_tasks": normalize_string_list(data.get("rewrite_tasks"), max_items=8, max_item_chars=100),
+        "rewrite_tasks": normalize_string_list(data.get("rewrite_tasks"), max_items=8, max_item_chars=90),
         "do_not_change": normalize_string_list(data.get("do_not_change"), max_items=5, max_item_chars=80),
     }
 

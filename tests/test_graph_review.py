@@ -69,6 +69,10 @@ def test_review_synthesizer_uses_compact_json_not_full_draft(tmp_path):
 
     assert "## Chapter Draft" not in prompt
     assert "continuity_editor" in prompt
+    assert "blocking_issues 最多 3 条" in prompt
+    assert "issues 最多 6 条" in prompt
+    assert "rewrite_tasks 最多 8 条" in prompt
+    assert "不新增问题" in prompt
 
 
 def test_review_parallel_path_records_all_editor_reports(tmp_path, monkeypatch):

@@ -30,3 +30,22 @@ def test_review_synthesis_falls_back_from_markdown():
     assert report["decision"] == "revise"
     assert report["issues"]
     assert set(report) == {"decision", "score", "blocking_issues", "issues", "rewrite_tasks", "do_not_change"}
+
+
+def test_review_synthesis_limits_arrays_and_item_lengths():
+    raw = {
+        "decision": "revise",
+        "score": 88,
+        "blocking_issues": ["阻塞" * 50 for _ in range(5)],
+        "issues": ["问题" * 50 for _ in range(8)],
+        "rewrite_tasks": ["任务" * 50 for _ in range(10)],
+    }
+
+    report = normalize_review_synthesis(raw)
+
+    assert len(report["blocking_issues"]) <= 3
+    assert len(report["issues"]) <= 6
+    assert len(report["rewrite_tasks"]) <= 8
+    assert all(len(item) <= 90 for item in report["blocking_issues"])
+    assert all(len(item) <= 90 for item in report["issues"])
+    assert all(len(item) <= 90 for item in report["rewrite_tasks"])

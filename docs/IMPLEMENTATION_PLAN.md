@@ -1847,3 +1847,23 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Simulated reader 是体验反馈器，不是创作方案生成器。
 - 读者任务只能指向已有内容的澄清、强化或压缩。
+
+
+## 74. Review Synthesizer Prompt 整改
+
+目标：执行 `34_review_synthesizer.md`，让审稿汇总只汇总上游 editor JSON 的阻塞问题和高优先级任务，不新增问题或扩写任务。
+
+已完成：
+
+- `review_synthesizer.md` 明确只汇总上游 editor JSON 和 simulated_reader JSON 中已提出的问题。
+- 禁止新增上游未提出的问题、风险、新设定任务或剧情方案。
+- 禁止扩写长任务、重写正文，合并时不得改变原意。
+- `rewrite_tasks` 必须去重，并按阻塞程度和修复优先级排序。
+- `graph_review.py` 的 review_synthesizer prompt contract 同步收紧为 blocking_issues<=3、issues<=6、rewrite_tasks<=8、每项<=90 中文字符。
+- `output_contracts.normalize_review_synthesis` 同步执行相同数组和字数上限。
+- 新增 prompt loader、graph review 和 output contract 回归测试覆盖来源约束、预算和可解析 JSON 归一化。
+
+当前边界：
+
+- Review synthesizer 只做上游审稿 JSON 的优先级汇总。
+- 汇总不能创造新问题，也不能把短建议扩写成新修订方案。

@@ -371,3 +371,17 @@ def test_simulated_reader_prompt_feedback_does_not_add_story():
     assert "rewrite_tasks" in prompt
     for forbidden in ("新增剧情走向", "新人物关系", "新世界机制", "CP 福利", "长评", "新增一个", "安排一个", "让他们恋爱"):
         assert forbidden in prompt
+
+
+def test_review_synthesizer_prompt_limits_and_uses_upstream_only():
+    prompt = load_prompt("review_synthesizer")
+
+    assert "只汇总上游 editor JSON" in prompt
+    assert "不得新增上游未提出的问题" in prompt
+    assert "rewrite_tasks` 必须去重" in prompt
+    assert "blocking_issues 最多 3 条" in prompt
+    assert "issues 最多 6 条" in prompt
+    assert "rewrite_tasks 最多 8 条" in prompt
+    assert "每项不超过 90 中文字符" in prompt
+    for forbidden in ("新增上游未提出的问题", "扩写长任务", "重写正文", "改变原意", "补造原因"):
+        assert forbidden in prompt

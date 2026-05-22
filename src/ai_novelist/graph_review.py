@@ -295,9 +295,9 @@ def build_review_synthesizer_prompt(state: NovelState) -> str:
         "OUTPUT_CONTRACT:\n"
         "- 只输出 JSON，不要 Markdown。\n"
         "- schema: {decision, score, blocking_issues, issues, rewrite_tasks, do_not_change}。\n"
-        "- blocking_issues 最多 5 条，issues/rewrite_tasks 最多 8 条。\n"
-        "- 每条 blocking/issue/task 不超过 100 中文字符，do_not_change 不超过 80 中文字符。\n"
-        "- 只根据五份 compact editor JSON 汇总，不要复述上下文。"
+        "- blocking_issues 最多 3 条，issues 最多 6 条，rewrite_tasks 最多 8 条。\n"
+        "- 每条 blocking/issue/task 不超过 90 中文字符，do_not_change 不超过 80 中文字符。\n"
+        "- 只根据五份 compact editor JSON 汇总，不新增问题，不要复述上下文。"
     )
     return base_review_prompt(state, f"{template.rstrip()}\n\n{contract}", include_draft=False, reports=reports)
 
