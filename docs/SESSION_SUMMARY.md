@@ -1283,3 +1283,23 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 222 passed
 ```
+
+## 61. 本轮更新：Chapter Conflict Agent Prompt 整改
+
+- 完整读取并执行 `17_chapter_conflict_agent.md`。
+- `chapter_conflict_agent.md` 现在只允许识别、提炼和排序已有冲突。
+- 禁止新增反派、新组织、新世界规则、新长期代价机制、审批/制度机制或无依据设定。
+- 每条 conflict 必须包含 `source_hint`，可追溯到章节大纲、章节卡、小说圣经、锁定约束或已有 canon。
+- 冲突不足时只能输出 `minimal_fix_suggestions` 或 `open_questions`。
+- 新增回归测试覆盖 JSON schema、source_hint 和 no-new-conflict-source 边界。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 9 passed
+.venv/bin/python -m pytest tests/test_graph_chapter_plan.py tests/test_graph_scene.py
+# 7 passed
+.venv/bin/python -m pytest
+# 223 passed
+```

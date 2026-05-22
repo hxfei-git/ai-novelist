@@ -1529,3 +1529,21 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Chapter goal agent 只提炼当前章目标和信息增量。
 - 没有证据的目标进入 open_questions，不变成新设定。
+
+## 57. Chapter Conflict Agent Prompt 整改
+
+目标：执行 `17_chapter_conflict_agent.md`，让章节冲突 Agent 只检查和提炼已有冲突，不为了增强冲突新增反派、组织、规则或长期代价机制。
+
+已完成：
+
+- `chapter_conflict_agent.md` 明确只能基于已有章节大纲、章节卡、小说圣经、锁定约束和 Task Context 提炼冲突。
+- 禁止新增反派、新组织、新世界规则、新长期代价机制、审批/制度机制或无依据设定。
+- 冲突不足时只能写入 `open_questions` 或 `minimal_fix_suggestions`，建议强化已有冲突。
+- JSON schema 增加 `conflicts`、`minimal_fix_suggestions`、`open_questions`，每条 conflict 必须包含 `source_hint`。
+- 输出仍为 JSON，`conflicts` 最多 5 条，每条字段内容不超过 80 中文字符。
+- 新增 prompt loader 回归测试覆盖 source_hint 和 no-new-conflict-source 边界。
+
+当前边界：
+
+- Chapter conflict agent 只排序和诊断已有冲突。
+- 冲突不足时提出最小强化建议或问题，不发明新敌人和新规则。

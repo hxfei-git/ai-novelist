@@ -116,3 +116,21 @@ def test_chapter_goal_agent_prompt_requires_evidence_and_no_new_canon():
     assert "不生成完整章节卡" in prompt
     assert "最多 5 条" in prompt
     assert "不超过 80 中文字符" in prompt
+
+
+def test_chapter_conflict_agent_prompt_requires_source_hints_and_existing_conflicts():
+    prompt = load_prompt("chapter_conflict_agent")
+
+    assert "只输出 JSON" in prompt
+    assert "conflicts" in prompt
+    assert "source_hint" in prompt
+    assert "每条 conflict 必须包含" in prompt
+    assert "只能识别、提炼和排序已有冲突" in prompt
+    assert "不得新增反派" in prompt
+    assert "新组织" in prompt
+    assert "新世界规则" in prompt
+    assert "新长期代价机制" in prompt
+    assert "审批/制度机制" in prompt
+    assert "minimal_fix_suggestions" in prompt
+    assert "最多 5 条" in prompt
+    assert "不超过 80 中文字符" in prompt
