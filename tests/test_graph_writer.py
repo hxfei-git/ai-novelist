@@ -135,7 +135,7 @@ def test_composer_graph_stops_when_revision_is_not_allowed(tmp_path):
 
     assert result["review_status"] == "stopped"
     assert result["editor_decision"] == "revise"
-    assert not store.chapter_path("demo", 1).exists()
+    assert store.chapter_draft_path("demo", 1, 1).exists()
 
 
 
@@ -228,7 +228,7 @@ def test_chat_graph_routes_write_and_review(tmp_path):
     written["messages"].append({"role": "user", "content": "让编辑审稿"})
     reviewed = graph.invoke(written)
 
-    assert reviewed["director_action"] == "review"
+    assert reviewed["director_action"] == "review_chapter"
     assert reviewed["editor_decision"] in {"pass", "revise"}
     assert reviewed["quality_score"] > 0
 

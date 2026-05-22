@@ -170,6 +170,15 @@ def route_after_editor_review(data: dict) -> str:
 
 def run_agent_task(data: dict, adapter: AgentAdapter, store: LocalStore, task: AgentTask) -> dict:
     state = NovelState.from_dict(data)
+    if task == "write_chapter":
+        from ai_novelist.graph_drafting import build_drafting_graph
+
+        return build_drafting_graph(adapter, store).invoke(state.to_dict())
+    if task == "review":
+        from ai_novelist.graph_review import build_review_graph
+
+        return build_review_graph(adapter, store).invoke(state.to_dict())
+
     spec = TASKS[task]
     prompt = build_task_prompt(state, spec.prompt_name)
     try:
@@ -209,11 +218,12 @@ def editor_review_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> 
 
 def rewrite_chapter_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
-    state.revision_count += 1
+    from ai_novelist.graph_revision import build_revision_graph
+
     state.next_action = "continue"
     state.review_status = "draft"
     store.save_state(state)
-    return run_agent_task(state.to_dict(), adapter, store, "write_chapter")
+    return build_revision_graph(adapter, store).invoke(state.to_dict())
 
 
 def human_review_task(data: dict, task: AgentTask, review_func: ReviewFunc) -> dict:
@@ -351,8 +361,11 @@ DIRECTOR_ACTIONS = {
     "compare_versions",
     "plan_outline",
     "plan_chapters",
+    "plan_chapter",
+    "plan_scenes",
     "write_chapter",
     "review",
+    "review_chapter",
     "revise_chapter",
     "persist_outputs",
     "init_bible",
@@ -370,6 +383,7 @@ AGENT_ACTION_TO_TASK: dict[str, AgentTask] = {
     "plan_chapters": "plan_chapters",
     "write_chapter": "write_chapter",
     "review": "review",
+    "review_chapter": "review",
 }
 
 OUTLINE_WORKFLOW_ACTIONS = {
@@ -497,7 +511,7 @@ def director_node(data: dict, adapter: AgentAdapter, store: LocalStore, progress
 
 def route_after_director(data: dict) -> str:
     action = data.get("director_action", "")
-    if action in AGENT_ACTION_TO_TASK or action == "revise_chapter" or action in (OUTLINE_WORKFLOW_ACTIONS - {"show_outline"}):
+    if action in AGENT_ACTION_TO_TASK or action in {"revise_chapter", "plan_chapter", "plan_scenes"} or action in (OUTLINE_WORKFLOW_ACTIONS - {"show_outline"}):
         return "run_selected_agent"
     if action == "persist_outputs":
         return "persist_outputs"
@@ -515,17 +529,37 @@ def run_selected_agent(data: dict, adapter: AgentAdapter, store: LocalStore, pro
     action = state.director_action
     if action in (OUTLINE_WORKFLOW_ACTIONS - {"show_outline"}):
         return run_selected_outline_agent(state, adapter, store, action, progress)
-    if action == "revise_chapter":
-        state.revision_count += 1
-        state.active_task = "write_chapter"
+    if action == "plan_chapter":
+        from ai_novelist.graph_chapter_plan import build_chapter_plan_graph
+
+        state.active_task = "plan_chapter"
         store.save_state(state)
-        progress("ChapterWriter", "正在按反馈修订章节...")
-        result = run_agent_task(state.to_dict(), adapter, store, "write_chapter")
-        state = NovelState.from_dict(result)
+        progress("ChapterPlan", "正在生成章节卡...")
+        result = NovelState.from_dict(build_chapter_plan_graph(adapter, store).invoke(state.to_dict()))
+        append_message(result, "assistant", result.director_message)
+        store.save_state(result)
+        return result.to_dict()
+    if action == "plan_scenes":
+        from ai_novelist.graph_scene import build_scene_graph
+
+        state.active_task = "plan_scenes"
+        store.save_state(state)
+        progress("SceneDesign", "正在生成场景卡...")
+        result = NovelState.from_dict(build_scene_graph(adapter, store).invoke(state.to_dict()))
+        append_message(result, "assistant", result.director_message)
+        store.save_state(result)
+        return result.to_dict()
+    if action == "revise_chapter":
+        from ai_novelist.graph_revision import build_revision_graph
+
+        state.active_task = "revise_chapter"
+        store.save_state(state)
+        progress("Revision", "正在按审稿任务修订章节...")
+        state = NovelState.from_dict(build_revision_graph(adapter, store).invoke(state.to_dict()))
         if state.error:
             state.director_message = summarize_agent_error(state, "write_chapter")
         else:
-            state.director_message = summarize_agent_result(state, "write_chapter", revised=True)
+            state.director_message = state.director_message or summarize_agent_result(state, "write_chapter", revised=True)
     else:
         task = AGENT_ACTION_TO_TASK.get(action)
         if not task:
@@ -542,6 +576,7 @@ def run_selected_agent(data: dict, adapter: AgentAdapter, store: LocalStore, pro
             decision, score = parse_editor_review(state.editor_notes)
             state.editor_decision = decision
             state.quality_score = score
+            state.director_action = "review_chapter"
             state.director_message = summarize_agent_result(state, task)
         else:
             state.director_message = summarize_agent_result(state, task)
@@ -777,8 +812,12 @@ def parse_director_decision(output: str) -> dict:
     action = extract_director_field(output, "ACTION").strip().lower()
     if action == "persist_outline":
         action = "persist_outputs"
+    if action == "review":
+        action = "review_chapter"
     if action == "plan_outline":
         action = "generate_outline"
+    if action == "plan_chapters":
+        action = "plan_chapter"
     message = extract_director_field(output, "MESSAGE").strip()
     chapter_text = extract_director_field(output, "CHAPTER").strip()
     if action not in DIRECTOR_ACTIONS:

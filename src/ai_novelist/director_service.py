@@ -38,8 +38,11 @@ CONFIRMATION_ACTIONS = {
     "revise_outline",
     "compare_versions",
     "plan_chapters",
+    "plan_chapter",
+    "plan_scenes",
     "write_chapter",
     "review",
+    "review_chapter",
     "revise_chapter",
     "persist_outputs",
 }
@@ -84,6 +87,10 @@ class DirectorDecision:
             action = "persist_outputs"
         if action == "plan_outline":
             action = "generate_outline"
+        if action == "plan_chapters":
+            action = "plan_chapter"
+        if action == "review":
+            action = "review_chapter"
         if action not in DIRECTOR_ACTIONS:
             action = "ask_user"
         task_args = data.get("task_args") if isinstance(data.get("task_args"), dict) else {}
@@ -195,6 +202,9 @@ class DirectorService:
         direct = deterministic_bible_decision(state, self.store)
         if direct is not None:
             return direct
+        direct = deterministic_chapter_pipeline_decision(state)
+        if direct is not None:
+            return direct
         direct = deterministic_outline_stage_decision(state)
         if direct is not None:
             return direct
@@ -226,6 +236,10 @@ class DirectorService:
                 result_state = NovelState.from_dict(persist_available_outputs(state.to_dict(), self.store))
         elif decision.action in {"init_bible", "update_bible"}:
             result_state = self._run_bible(state)
+        elif decision.action == "plan_chapter":
+            result_state = self._run_chapter_plan(state)
+        elif decision.action == "plan_scenes":
+            result_state = self._run_scene_plan(state)
         elif decision.action == "show_bible":
             result_state = show_bible_state(state, self.store)
         elif decision.action == "show_status":
@@ -267,6 +281,18 @@ class DirectorService:
             self.store.save_state(state)
             return state
         graph = build_bible_graph(self.adapter, self.store)
+        return NovelState.from_dict(graph.invoke(state.to_dict()))
+
+    def _run_chapter_plan(self, state: NovelState) -> NovelState:
+        from ai_novelist.graph_chapter_plan import build_chapter_plan_graph
+
+        graph = build_chapter_plan_graph(self.adapter, self.store)
+        return NovelState.from_dict(graph.invoke(state.to_dict()))
+
+    def _run_scene_plan(self, state: NovelState) -> NovelState:
+        from ai_novelist.graph_scene import build_scene_graph
+
+        graph = build_scene_graph(self.adapter, self.store)
         return NovelState.from_dict(graph.invoke(state.to_dict()))
 
     def _run_research(self, state: NovelState) -> NovelState:
@@ -504,6 +530,49 @@ def parse_json_object(output: str) -> dict[str, Any]:
 
 
 
+def deterministic_chapter_pipeline_decision(state: NovelState) -> DirectorDecision | None:
+    text = state.user_request.strip()
+    if not text:
+        return None
+    lowered = text.lower()
+    chapter = extract_chapter_from_text(text) or state.current_chapter
+    wants_scene = "章" in text and ("场景" in text or "scene" in lowered)
+    if wants_scene:
+        return DirectorDecision(
+            "plan_scenes",
+            requires_confirmation=False,
+            user_message=f"我会为第 {chapter} 章生成场景卡。",
+            confidence=95,
+            task_args={"chapter": chapter},
+            target="scene_cards",
+            intent="create",
+            chapter=chapter,
+        )
+    wants_chapter_card = "章节卡" in text or ("规划" in text and "章" in text and "场景" not in text) or "chapter card" in lowered
+    if wants_chapter_card:
+        return DirectorDecision(
+            "plan_chapter",
+            requires_confirmation=False,
+            user_message=f"我会为第 {chapter} 章生成章节卡。",
+            confidence=95,
+            task_args={"chapter": chapter},
+            target="chapter_card",
+            intent="create",
+            chapter=chapter,
+        )
+    return None
+
+
+def extract_chapter_from_text(text: str) -> int | None:
+    match = re.search(r"第\s*(\d+)\s*章", text)
+    if match:
+        return max(1, int(match.group(1)))
+    match = re.search(r"chapter\s*(\d+)", text, re.IGNORECASE)
+    if match:
+        return max(1, int(match.group(1)))
+    return None
+
+
 def deterministic_bible_decision(state: NovelState, store: LocalStore) -> DirectorDecision | None:
     text = state.user_request.strip()
     lowered = text.lower()
@@ -622,7 +691,7 @@ def hydrate_decision_args(decision: DirectorDecision, state: NovelState) -> None
         query = first_text(decision.task_args, "research_query", "work_title", "author") or extract_research_query(state.user_request)
         if query:
             decision.task_args["research_query"] = query
-    if decision.action in {"write_chapter", "review", "revise_chapter"} and not decision.task_args.get("chapter"):
+    if decision.action in {"plan_chapter", "plan_scenes", "write_chapter", "review", "review_chapter", "revise_chapter"} and not decision.task_args.get("chapter"):
         decision.task_args["chapter"] = state.current_chapter
 
 
@@ -650,6 +719,8 @@ def update_project_context(state: NovelState, store: LocalStore, decision: Direc
         f"- 世界观：{'已有' if state.worldbuilding.strip() else '暂无'}\n"
         f"- 总大纲：{'已有' if state.outline.strip() else '暂无'}\n"
         f"- 章节细纲：{'已有' if state.chapter_plan.strip() else '暂无'}\n"
+        f"- 章节卡：{'已有' if state.current_chapter_card.strip() else '暂无'}\n"
+        f"- 场景卡：{'已有' if state.current_scene_cards.strip() else '暂无'}\n"
         f"- 章节正文：{'已有' if state.chapter_draft.strip() else '暂无'}\n"
         f"- 编辑意见：{'已有' if state.editor_notes.strip() else '暂无'}\n"
         f"- 小说圣经：{'已有' if store.novel_bible_markdown_path(state.project_id).exists() else '暂无'}\n\n"
@@ -709,6 +780,8 @@ def artifact_paths(state: NovelState, store: LocalStore) -> list[str]:
         (state.worldbuilding, store.worldbuilding_path(state.project_id)),
         (state.outline, store.outline_path(state.project_id)),
         (state.chapter_plan, store.chapter_plan_path(state.project_id)),
+        (state.current_chapter_card, store.chapter_card_path(state.project_id, state.active_chapter or state.current_chapter)),
+        (state.current_scene_cards, store.scene_cards_path(state.project_id, state.active_chapter or state.current_chapter)),
         (state.chapter_draft, store.chapter_path(state.project_id, state.current_chapter)),
         (state.editor_notes, store.editor_notes_path(state.project_id, state.current_chapter)),
     ]

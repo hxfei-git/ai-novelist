@@ -131,12 +131,56 @@ class CodexCLIAdapter(AgentAdapter):
             return self._mock_worldbuilding()
         if "AGENT: outline_planner" in prompt:
             return self._mock_outline_plan()
+        if "AGENT: chapter_goal_agent" in prompt:
+            return self._mock_chapter_goal_report()
+        if "AGENT: chapter_conflict_agent" in prompt:
+            return self._mock_chapter_conflict_report()
+        if "AGENT: chapter_hook_agent" in prompt:
+            return self._mock_chapter_hook_report()
+        if "AGENT: chapter_card_synthesizer" in prompt:
+            return self._mock_chapter_card()
+        if "AGENT: scene_breakdown_agent" in prompt:
+            return self._mock_scene_breakdown_report()
+        if "AGENT: scene_conflict_check_agent" in prompt:
+            return self._mock_scene_conflict_report()
+        if "AGENT: scene_synthesizer" in prompt:
+            return self._mock_scene_cards()
         if "AGENT: chapter_planner" in prompt:
             return self._mock_chapter_plan()
         if "AGENT: chapter_writer" in prompt:
-            return self._mock_chapter(revised="修订次数：0" not in prompt)
+            return self._mock_chapter(revised=self._is_revised_prompt(prompt))
+        if "AGENT: dialogue_enhancer" in prompt:
+            return self._mock_chapter(revised=self._is_revised_prompt(prompt))
+        if "AGENT: atmosphere_enhancer" in prompt:
+            return self._mock_chapter(revised=self._is_revised_prompt(prompt))
+        if "AGENT: hook_enhancer" in prompt:
+            return self._mock_chapter(revised=self._is_revised_prompt(prompt))
+        if "AGENT: style_normalizer" in prompt:
+            return self._mock_chapter(revised=self._is_revised_prompt(prompt))
+        if "AGENT: continuity_editor" in prompt:
+            return self._mock_review_role("连续性", revised=self._is_revised_prompt(prompt))
+        if "AGENT: structure_editor" in prompt:
+            return self._mock_review_role("结构", revised=self._is_revised_prompt(prompt))
+        if "AGENT: character_arc_editor" in prompt:
+            return self._mock_review_role("人物弧光", revised=self._is_revised_prompt(prompt))
+        if "AGENT: style_editor" in prompt:
+            return self._mock_review_role("风格", revised=self._is_revised_prompt(prompt))
+        if "AGENT: simulated_reader" in prompt:
+            return self._mock_review_role("模拟读者", revised=self._is_revised_prompt(prompt))
+        if "AGENT: review_synthesizer" in prompt:
+            return self._mock_review_synthesizer(revised=self._is_revised_prompt(prompt))
+        if "AGENT: revision_planner" in prompt:
+            return self._mock_revision_plan()
+        if "AGENT: targeted_reviser" in prompt:
+            return self._mock_chapter(revised=True)
+        if "AGENT: revision_self_check" in prompt:
+            return (
+                "## 修订自检\n"
+                "- 已补强审计编号查询、纸质文本禁忌和东七气闸倒计时。\n"
+                "- 未提前揭露月背冷库真相。"
+            )
         if "AGENT: editor" in prompt:
-            return self._mock_editor_review(revised="修订次数：0" not in prompt)
+            return self._mock_editor_review(revised=self._is_revised_prompt(prompt))
         return self._mock_outline(prompt)
 
 
@@ -247,6 +291,14 @@ class CodexCLIAdapter(AgentAdapter):
         match = re.search(rf"^{name}:\s*(.*)$", prompt, re.MULTILINE)
         return match.group(1).strip() if match else ""
 
+
+    def _is_revised_prompt(self, prompt: str) -> bool:
+        if re.search(r"^REVISION_COUNT:\s*[1-9]", prompt, re.MULTILINE):
+            return True
+        if "draft_v2" in prompt or "修订版" in prompt or "revision_plan_v1" in prompt:
+            return True
+        return "修订次数：0" not in prompt and "REVISION_COUNT: 0" not in prompt
+
     def _mock_research_intent(self, prompt: str) -> str:
         request = self._extract_director_request(prompt)
         query = ""
@@ -330,6 +382,10 @@ class CodexCLIAdapter(AgentAdapter):
             intent = "revise" if action == "revise_outline" else "create"
             instruction = request if intent == "revise" else ""
             return response(action, "outline", intent, "我会处理大纲，并把你的要求转成可执行修订。", instruction, styles="，".join(styles))
+        if any(word in request for word in ("场景卡", "规划场景", "拆场景", "场景规划", "场景")) and "章" in request:
+            return response("plan_scenes", "scene_cards", "create", f"我会为第 {chapter or 1} 章规划场景卡。", chapter_value=chapter or "1")
+        if any(word in request for word in ("章节卡", "规划第", "章规划")) and "章" in request:
+            return response("plan_chapter", "chapter_card", "create", f"我会为第 {chapter or 1} 章生成章节卡。", chapter_value=chapter or "1")
         if any(word in request for word in ("世界观", "设定", "背景")):
             return response("worldbuild", "worldbuilding", "create", "我会先调度世界观 Agent，建立可持续写作的规则、冲突和素材。")
         if any(word in request for word in ("细纲", "章节规划", "章节计划")):
@@ -448,6 +504,132 @@ class CodexCLIAdapter(AgentAdapter):
             "4. 许岚拒绝备份：第 3 章出现，第 9 章解释她是灰籍后代。\n"
             "5. 沈博士的旧签名：第 4 章出现，终章回收为篡改授权。\n\n"
             "## 风险自检\n需要控制设定解释密度，保持林澈主动行动，并让每次真相揭露带来现实代价。"
+        )
+
+    def _mock_chapter_goal_report(self) -> str:
+        return (
+            "## 章节目标报告\n"
+            "- 外在目标：林澈确认纸质手稿预告是否真实，并查清自己审计编号失效的原因。\n"
+            "- 内在目标：从自保和上报冲动，转向主动怀疑自己的过去。\n"
+            "- 信息增量：手稿、失效审计编号、东七气闸事故倒计时同时出现。\n"
+        )
+
+    def _mock_chapter_conflict_report(self) -> str:
+        return (
+            "## 冲突报告\n"
+            "- 主要冲突：公共上报规则与私自追查冲动对撞。\n"
+            "- 外部阻碍：档案局扫描规则、维修站倒计时、身份待确认提示。\n"
+            "- 连续性风险：不能提前说明林澈曾参与记忆删除，月背冷库只保留传闻。\n"
+        )
+
+    def _mock_chapter_hook_report(self) -> str:
+        return (
+            "## 钩子报告\n"
+            "- 开场钩子：林澈在维修站醒来，工具箱里只有纸质手稿。\n"
+            "- 中段转折：审计编号查询失败，待确认人员指向林澈。\n"
+            "- 结尾钩子：手稿第二页写出十分钟后的事故坐标。\n"
+        )
+
+    def _mock_chapter_card(self) -> str:
+        return (
+            "# 第 1 章章节卡：空白手稿\n\n"
+            "## 章节目标\n让林澈发现纸质手稿、失效审计编号和即将发生的东七气闸事故，完成从自保到主动追查的转向。\n\n"
+            "## 场景列表\n"
+            "1. 维修站醒来：林澈发现工具箱里的纸质手稿。\n"
+            "2. 审计编号查询：终端提示编号不存在，相关人员身份待确认。\n"
+            "3. 气闸倒计时：东七气闸压力曲线开始下坠，验证手稿预告。\n"
+            "4. 冲出维修站：林澈带着手稿赶往事故坐标。\n\n"
+            "## 关键冲突\n林澈必须在立刻上报未登记文本和私自追查身份异常之间选择；城市规则要求透明，而纸质手稿逼他隐藏。\n\n"
+            "## 人物变化\n林澈从相信系统记录、优先自保，转向怀疑自己的身份和过去，并愿意承担违规追查的风险。\n\n"
+            "## 结尾钩子\n手稿第二页写出十分钟后的东七气闸事故坐标，现实警报与纸面预言同步发生。\n\n"
+            "## 连续性约束\n不能提前揭露林澈曾参与关键记忆删除；月背冷库只作为月尘和传闻出现；许岚暂不正式登场。\n\n"
+            "## 本章写作输入\n按醒来、发现手稿、查询失败、事故倒计时四段推进；情绪从困惑到恐惧，再到主动行动；设定信息必须通过操作和警报呈现。\n\n"
+            "## 自检\n章节完成异常发现、规则展示、身份疑问和行动钩子，能直接拆成场景卡。"
+        )
+
+    def _mock_scene_breakdown_report(self) -> str:
+        return (
+            "## 场景拆分报告\n"
+            "- 场景 1：维修站醒来，建立异常物和纸质文本禁忌。\n"
+            "- 场景 2：审计编号查询失败，把异常转为身份危机。\n"
+            "- 场景 3：气闸警报验证预言，推动主角违规行动。\n"
+        )
+
+    def _mock_scene_conflict_report(self) -> str:
+        return (
+            "## 冲突检查报告\n"
+            "- 三个场景分别承担物证异常、身份异常和公共事故，冲突不重复。\n"
+            "- 不提前揭露月背冷库真相，只保留月尘线索。\n"
+        )
+
+    def _mock_scene_cards(self) -> str:
+        return (
+            "# 第 1 章场景卡\n\n"
+            "## 场景 1：维修站醒来\n"
+            "- 地点：银湾城第三维修站。\n"
+            "- 出场人物：林澈。\n"
+            "- 场景目的：建立主角失忆醒来和纸质手稿异常。\n"
+            "- 人物目标：确认自己为什么躺在维修站地板上。\n"
+            "- 冲突对象：空白记忆、值班系统和未登记纸质文本。\n"
+            "- 关键信息：手稿第一页写着林澈的名字，纸质文本不能被系统即时追踪。\n"
+            "- 情绪变化：茫然 -> 警觉。\n"
+            "- 场景转折：工具箱里没有工具，只有纸质手稿。\n"
+            "- 退出状态：林澈决定翻阅手稿并查询夹页编号。\n\n"
+            "## 场景 2：审计编号查询\n"
+            "- 地点：维修站终端台。\n"
+            "- 出场人物：林澈，值班系统语音。\n"
+            "- 场景目的：把物件异常升级成身份危机。\n"
+            "- 人物目标：用审计编号证明手稿来源。\n"
+            "- 冲突对象：档案局系统和失效编号。\n"
+            "- 关键信息：终端返回编号不存在，相关人员身份待确认，待确认人员是林澈。\n"
+            "- 情绪变化：警觉 -> 恐惧。\n"
+            "- 场景转折：身份异常指向主角本人。\n"
+            "- 退出状态：林澈暂时放弃上报，准备核对手稿预言。\n\n"
+            "## 场景 3：气闸倒计时\n"
+            "- 地点：第三维修站通道和东七气闸方向。\n"
+            "- 出场人物：林澈，远处维修队。\n"
+            "- 场景目的：验证预言有效并迫使主角行动。\n"
+            "- 人物目标：赶到事故坐标阻止误操作。\n"
+            "- 冲突对象：倒计时、城市上报规则和即将泄压的气闸。\n"
+            "- 关键信息：手稿第二页的压力折线与现实警报一致。\n"
+            "- 情绪变化：恐惧 -> 决断。\n"
+            "- 场景转折：东七气闸压力曲线开始下坠。\n"
+            "- 退出状态：林澈带着手稿冲向东七气闸，进入下一章事故验证。"
+        )
+
+
+    def _mock_review_role(self, role: str, revised: bool) -> str:
+        if revised:
+            return f"## {role}审稿\n- 通过点：修订稿已经补足关键细节。\n- 风险：后续章节继续铺垫许岚即可。"
+        return f"## {role}审稿\n- 问题：初稿需要补强维修站异常记录、纸质文本禁忌和事故倒计时。\n- 建议：进入定向修订。"
+
+    def _mock_review_synthesizer(self, revised: bool) -> str:
+        if revised:
+            data = {
+                "decision": "pass",
+                "score": 88,
+                "blocking_issues": [],
+                "issues": ["后续章节继续补强许岚登场铺垫。"],
+                "rewrite_tasks": [],
+            }
+        else:
+            data = {
+                "decision": "revise",
+                "score": 72,
+                "blocking_issues": ["场景压力和规则展示不足。"],
+                "issues": ["主角醒来的环境压力不足。", "纸质手稿为什么危险还不够清楚。", "事故倒计时可以更强。"],
+                "rewrite_tasks": ["增加审计编号查询失败。", "补明纸质文本禁忌。", "强化东七气闸倒计时。"],
+            }
+        return json.dumps(data, ensure_ascii=False)
+
+    def _mock_revision_plan(self) -> str:
+        return (
+            "# revision_plan_v1\n\n"
+            "## 修订目标\n补强维修站异常记录、纸质文本禁忌和东七气闸倒计时。\n\n"
+            "## 定向任务\n"
+            "1. 在醒来场景增加值班系统和审计编号异常。\n"
+            "2. 在手稿场景说明纸质文本不可被系统即时追踪。\n"
+            "3. 在结尾强化压力曲线下坠和违规行动。\n"
         )
 
     def _mock_chapter_plan(self) -> str:

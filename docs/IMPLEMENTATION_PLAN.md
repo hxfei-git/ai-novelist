@@ -18,6 +18,7 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
 - mock 模式：不依赖外部模型即可端到端验证。
 - 真实模式：Codex CLI 或 DeepSeek API。
 - 阶段 3 飞书长连接机器人最小闭环：支持飞书单聊文本、`/project` 项目切换、纯文本确认选项和同步调用 DirectorService。
+- 阶段 6+7 章节卡与场景卡管线：新增 Chapter Planning Graph 和 Scene Design Graph，可从锁定大纲/NovelBible 生成 `chapter_card.md`，再拆成 `scene_cards.md`。
 
 未完成：
 - 真实联网搜索后端已实现：`WebSearchBackend` 支持 SerpAPI、Tavily、Exa；默认仍是 mock，需要 API Key 才会联网。
@@ -77,6 +78,15 @@ LangGraph 编排层
   |       -> review_outline / revise_outline / compare_versions
   |       -> show_outline / show_status / persist_outline / END
   |
+  |-- graph_chapter_plan.py
+  |     select_chapter -> load_chapter_context
+  |       -> chapter_goal_agent -> chapter_conflict_agent -> chapter_hook_agent
+  |       -> chapter_card_synthesizer -> validate_chapter_card -> save_chapter_card
+  |
+  |-- graph_scene.py
+  |     load_chapter_card -> scene_breakdown_agent -> conflict_check_agent
+  |       -> scene_synthesizer -> validate_scene_cards -> save_scene_cards
+  |
   `-- graph_writer.py
         |-- build_writer_graph: 单 Agent 兼容图
         |-- build_composer_graph: 完整 compose 图
@@ -105,6 +115,10 @@ Prompt 模板层
         |-- outline.md
         |-- chapter_plan.md
         `-- chapters/
+              |-- chapter_001.md                 # 旧正文路径
+              `-- chapter_001/
+                    |-- chapter_card.md
+                    `-- scene_cards.md
 ```
 
 ## 3. Chat 主入口调度
@@ -241,6 +255,55 @@ worldbuild
 
 compose 仍保留一次性自动推进能力，适合快速 smoke 或批处理式验证；推荐日常创作从 `chat` 入口进入。
 
+## 6A. 章节卡与场景卡流程
+
+Phase 6+7 已新增两条为后续 Drafting Graph 准备的规划管线，旧 `write_chapter` 正文生成路径不变。
+
+Chapter Planning Graph：
+
+```text
+select_chapter
+  -> load_chapter_context
+  -> chapter_goal_agent
+  -> chapter_conflict_agent
+  -> chapter_hook_agent
+  -> chapter_card_synthesizer
+  -> validate_chapter_card
+  -> save_chapter_card
+```
+
+关键行为：
+
+- 使用 `build_context(..., purpose="chapter_planning")` 读取锁定约束、NovelBible、章节大纲 artifact、项目上下文和参考资料。
+- 保存到 `projects/<project>/chapters/chapter_XXX/chapter_card.md`。
+- 更新 `state.current_chapter_card`、`state.active_chapter`、`state.active_graph="chapter_plan"`、`state.active_stage="chapter_card"`。
+- 注册 artifact：`type="chapter_card"`、`graph="chapter_plan"`、`stage="chapter_card"`、`chapter=N`、`source_agent="chapter_card_synthesizer"`。
+
+Scene Design Graph：
+
+```text
+load_chapter_card
+  -> scene_breakdown_agent
+  -> conflict_check_agent
+  -> scene_synthesizer
+  -> validate_scene_cards
+  -> save_scene_cards
+```
+
+关键行为：
+
+- 使用 `build_context(..., purpose="scene_design")` 读取章节卡、NovelBible、锁定约束、项目上下文和参考资料。
+- 保存到 `projects/<project>/chapters/chapter_XXX/scene_cards.md`。
+- 更新 `state.current_scene_cards`、`state.active_chapter`、`state.active_graph="scene"`、`state.active_stage="scene_cards"`。
+- 注册 artifact：`type="scene_cards"`、`graph="scene"`、`stage="scene_cards"`、`chapter=N`、`source_agent="scene_synthesizer"`。
+- 缺少章节卡时返回可读提示，要求先运行章节卡规划；当前不会自动补齐章节卡。
+
+Director 新增动作：
+
+- `plan_chapter`：用户说“规划第 N 章 / 生成第 N 章章节卡”时触发。
+- `plan_scenes`：用户说“拆第 N 章场景 / 规划第 N 章场景”时触发。
+- `plan_chapters` 在 DirectorService 中作为 `plan_chapter` alias 处理；CLI `plan-chapters` 仍保留旧章节细纲行为。
+
 ## 7. 状态字段
 
 `NovelState.from_dict/to_dict` 保持旧 `state.json` 向后兼容。
@@ -252,6 +315,8 @@ compose 仍保留一次性自动推进能力，适合快速 smoke 或批处理�
 - `outline`
 - `chapter_plan`
 - `chapter_draft`
+- `current_chapter_card`
+- `current_scene_cards`
 - `editor_notes`
 
 工作流字段：
@@ -260,6 +325,9 @@ compose 仍保留一次性自动推进能力，适合快速 smoke 或批处理�
 - `current_stage`
 - `active_artifact`
 - `active_task`
+- `active_graph`
+- `active_stage`
+- `active_chapter`
 - `director_action`
 - `director_intent`
 - `director_message`
@@ -306,6 +374,8 @@ chat 历史字段：
 选择方向 1，强化主角罪感
 查看大纲
 保存大纲
+规划第 1 章
+规划第 1 章场景
 写第 1 章
 让编辑审稿
 保存当前结果
@@ -339,6 +409,8 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 
 - `tests/test_graph_minimal.py`：阶段 1 最小图。
 - `tests/test_graph_writer.py`：单 Agent、compose、chat、Director 路由、chat 主入口 workflow。
+- `tests/test_graph_chapter_plan.py`：章节卡生成、必需小节、状态更新、artifact 注册、`plan_chapters` alias。
+- `tests/test_graph_scene.py`：场景卡生成、必需字段、状态更新、artifact 注册、缺章节卡提示。
 - `tests/test_outline_collaboration.py`：大纲 approve、revise、lock、variant、旧 state 兼容、chat 路由到大纲修订。
 - `tests/test_research_workflow.py`：research 触发、mock 搜索、参考简报持久化、research 后进入 outline、本地优先后端配置和回退。
 - `tests/test_search_backend.py`：WebSearchBackend、本地 `.txt/.md` 检索、切片 metadata、关键词排序、本地优先 fallback。
@@ -358,7 +430,7 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 .venv/bin/python tests/smoke_phase2_chat.py
 ```
 
-当前已验证：`65 passed`。本轮目标测试 `tests/test_search_backend.py tests/test_research_workflow.py` 为 `24 passed`。
+当前已验证：新增章节/场景管线相关回归 `tests/test_graph_chapter_plan.py tests/test_graph_scene.py tests/test_director_service.py tests/test_graph_writer.py` 为 `46 passed`。
 
 ## 10. 当前限制
 
@@ -370,6 +442,8 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 - 真实模式每个 Agent 独立调用一次模型，没有流式 token 展示。
 - `persist_outputs` 只保存当前已有产物，不会自动补齐缺失产物。
 - `compose` 只围绕指定章节运行，不批量生成多章。
+- Phase 8 Drafting Graph 尚未实现；正文草稿仍由旧 `write_chapter` / `compose` writer 路径生成。
+- `plan_scenes` 不自动生成缺失章节卡，必须先运行 `plan_chapter`。
 - 本地文件存储没有并发锁。
 - 飞书入口暂为长连接单聊文本机器人；群聊 @、交互卡片、Webhook、后台队列未实现。
 - 没有数据库、队列、Web UI、多租户权限或 Claude Code Adapter。
@@ -636,7 +710,7 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 当前边界：
 
 - 新基础设施尚未接管现有 graph；旧路径和旧字段继续作为当前生产路径。
-- 本轮不实现 `graph_bible.py`、章节卡、场景卡、drafting/review/revision/export graph；这些留给后续阶段逐步接入。
+- Phase 5 已接入 `graph_bible.py`，Phase 6+7 已接入章节卡和场景卡；drafting/review/revision/export graph 仍留给后续阶段逐步接入。
 - `state.json` 只保存轻量字段；Artifact、Bible 和大文本上下文均保存为独立文件。
 
 验证要求：
@@ -695,7 +769,7 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 当前边界：
 
 - 冲突检测第一版只记录到 `open_questions` 和 `last_agent_reports`，不阻塞 mock 主流程。
-- Bible Graph 已可消费 outline artifacts，但后续章节卡、场景卡、正文管线尚未默认消费 Bible；这留给 Phase 6 之后。
+- Bible Graph 已可消费 outline artifacts；章节卡和场景卡管线已默认通过 ContextBuilder 消费 Bible，正文管线尚未默认消费这些新产物。
 - `state.json` 只保存 Bible 版本、更新时间、轻量 artifact 索引和报告，不保存 Bible 全文。
 
 验证：
@@ -707,4 +781,85 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 # outline collaboration smoke ok
 .venv/bin/python tests/smoke_phase2_chat.py
 # phase2 chat smoke ok
+```
+
+## 28. Phase 6+7：章节卡与场景卡管线
+
+本轮合并实施 `plan.md` 的 Phase 6 和 Phase 7，不实现 Phase 8 Drafting Graph，不改写旧 `write_chapter` 正文生成路径。
+
+已完成：
+
+- 新增 `src/ai_novelist/graph_chapter_plan.py`，按 `select_chapter -> load_chapter_context -> chapter_goal_agent -> chapter_conflict_agent -> chapter_hook_agent -> chapter_card_synthesizer -> validate_chapter_card -> save_chapter_card` 生成章节卡。
+- 新增 `src/ai_novelist/graph_scene.py`，按 `load_chapter_card -> scene_breakdown_agent -> conflict_check_agent -> scene_synthesizer -> validate_scene_cards -> save_scene_cards` 生成场景卡。
+- `LocalStore` 新增 `chapter_artifact_dir`、`chapter_card_path`、`scene_cards_path`、`save_chapter_card`、`save_scene_cards`。
+- DirectorService 新增 `plan_chapter` 和 `plan_scenes`，并把旧 `plan_chapters` action 规范化为 `plan_chapter`。
+- `graph_writer.py` 的旧 chat graph 可路由 `plan_chapter` / `plan_scenes`；旧 CLI `plan-chapters` 仍走原 `chapter_planner` 写入 `chapter_plan.md`。
+- 新增 prompts：`chapter_goal_agent.md`、`chapter_conflict_agent.md`、`chapter_hook_agent.md`、`chapter_card_synthesizer.md`、`scene_breakdown_agent.md`、`scene_conflict_check_agent.md`、`scene_synthesizer.md`。
+- Mock adapter 增加章节卡和场景卡稳定输出，章节卡包含 8 个必需小节，场景卡至少 2 个场景且每个场景包含 9 类字段。
+- 章节卡保存到 `chapters/chapter_XXX/chapter_card.md`，注册 `chapter_card` artifact。
+- 场景卡保存到 `chapters/chapter_XXX/scene_cards.md`，注册 `scene_cards` artifact。
+
+当前边界：
+
+- `plan_scenes` 缺少章节卡时只返回提示，不自动调用章节卡规划。
+- 旧正文生成和 compose 暂不消费章节卡/场景卡；后续 Phase 8 再接 Drafting Graph。
+- `state.json` 当前保存当前章节卡和场景卡正文，后续内容过大时可改为只保存摘要和路径。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest
+# 134 passed
+.venv/bin/python tests/smoke_outline_collaboration.py
+.venv/bin/python tests/smoke_phase2_chat.py
+.venv/bin/python tests/smoke_phase2.py
+.venv/bin/python tests/smoke_phase2_compose.py
+```
+
+
+
+## 29. Phase 8-10：写章、审稿、修订闭环
+
+本轮合并实施 `plan.md` 的 Phase 8-10，不实现 Phase 11-13 的定稿、Bible 写回、导出或完整 UX smoke；`plan.md` 保持未修改。
+
+已完成：
+
+- 新增 `src/ai_novelist/graph_drafting.py`，按 `load_drafting_context -> draft_scene_batch -> merge_scenes -> dialogue_enhance -> atmosphere_enhance -> hook_enhance -> style_normalize -> save_draft` 生成章节草稿。
+- `write_chapter` 会自动补齐前置章节卡和场景卡：缺章节卡时运行 Chapter Planning Graph，缺场景卡时运行 Scene Graph。
+- Drafting Graph 使用 `ContextBuilder(purpose="drafting")`，读取章节卡、场景卡、小说圣经、锁定约束、参考资料和前文摘要。
+- 草稿保存到 `chapters/chapter_XXX/draft_v1.md`，并同步旧兼容路径 `chapters/chapter_XXX.md`；注册 `chapter_draft` artifact，`graph="drafting"`、`stage="draft"`、`source_agent="style_normalizer"`。
+- 新增 `src/ai_novelist/graph_review.py`，按连续性、结构、人物弧光、风格、模拟读者和汇总审稿生成审稿报告。
+- 审稿保存到 `chapters/chapter_XXX/review_v1.md` 与 `review_v1.json`，JSON 固定包含 `decision`、`score`、`blocking_issues`、`issues`、`rewrite_tasks`；同步旧 `chapters/chapter_XXX_review.md`。
+- `state.editor_notes` 保持旧兼容格式，顶部包含 `STATUS:` 和 `QUALITY_SCORE:`；同时写入 `editor_decision`、`quality_score`、`current_review_report`。
+- Review Graph 注册 `review_report` artifact，`graph="review"`、`stage="review"`、`source_agent="review_synthesizer"`。
+- 新增 `src/ai_novelist/graph_revision.py`，按 `load_revision_context -> build_revision_plan -> revise_targeted_sections -> merge_revision -> revision_self_check -> save_revised_draft -> maybe_review_again` 生成定向修订。
+- Revision Graph 读取最新 `review_v1.json`，缺 JSON 时从 `state.editor_notes` 兜底；达到 `max_revisions` 时停止并给出用户可读提示。
+- 修订保存到 `revision_plan_v1.md` 和 `draft_v2.md`，同步旧章节正文路径；写入 `current_revision_plan`、`chapter_draft` 并递增 `revision_count`。
+- `graph_writer.py` 中旧 `write_chapter`、`review`、`revise_chapter` 路径改为薄 wrapper，旧 CLI 和 composer 继续可用；Director 新动作 `review_chapter` 已接入，旧 `review` 作为 alias 规范化。
+- 新增 drafting、review、revision 所需 prompt，并更新 `chapter_writer.md` 为基于场景卡批量写正文。
+- Mock adapter 增加稳定输出：`draft_v1`、`review_v1`、`revision_plan_v1`、`draft_v2`，mock compose 首次审稿返回 `revise`，修订后二次审稿返回 `pass`。
+
+当前边界：
+
+- 重复运行会覆盖固定文件名 `draft_v1.md`、`review_v1.*`、`revision_plan_v1.md`、`draft_v2.md`，artifact registry 仍按版本递增。
+- `review_v1.json` 是结构化审稿结果的主来源；`state.current_review_report` 保存 Markdown 报告正文。
+- 本阶段不做 final chapter、chapter summary、Bible 写回、导出或完整全书 UX 流程。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_graph_drafting.py tests/test_graph_review.py tests/test_graph_revision.py tests/test_graph_writer.py
+# 30 passed
+.venv/bin/python -m pytest
+# 140 passed
+.venv/bin/python tests/smoke_chapter_pipeline_mock.py
+# chapter pipeline mock smoke passed
+.venv/bin/python tests/smoke_outline_collaboration.py
+# outline collaboration smoke ok
+.venv/bin/python tests/smoke_phase2_chat.py
+# phase2 chat smoke ok
+.venv/bin/python tests/smoke_phase2.py
+# phase2 smoke ok
+.venv/bin/python tests/smoke_phase2_compose.py
+# phase2 compose smoke ok
 ```

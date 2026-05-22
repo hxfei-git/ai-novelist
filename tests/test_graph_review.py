@@ -1,0 +1,50 @@
+import json
+
+from ai_novelist.adapters.codex_cli import CodexCLIAdapter
+from ai_novelist.graph_drafting import build_drafting_graph
+from ai_novelist.graph_review import build_review_graph
+from ai_novelist.graph_writer import build_writer_graph
+from ai_novelist.state import NovelState
+from ai_novelist.storage.local_store import LocalStore
+
+
+def prepared_draft(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.idea = "月球城市失忆工程师"
+    state.current_chapter = 1
+    state = NovelState.from_dict(build_drafting_graph(CodexCLIAdapter(mock=True), store).invoke(state.to_dict()))
+    return store, state
+
+
+def test_review_generates_markdown_json_and_legacy_notes(tmp_path):
+    store, state = prepared_draft(tmp_path)
+
+    result = NovelState.from_dict(build_review_graph(CodexCLIAdapter(mock=True), store).invoke(state.to_dict()))
+
+    assert store.review_report_path("demo", 1, 1).exists()
+    assert store.review_json_path("demo", 1, 1).exists()
+    payload = json.loads(store.review_json_path("demo", 1, 1).read_text(encoding="utf-8"))
+    assert set(payload) == {"decision", "score", "blocking_issues", "issues", "rewrite_tasks"}
+    assert payload["decision"] == "revise"
+    assert "STATUS:" in result.editor_notes
+    assert "QUALITY_SCORE:" in result.editor_notes
+    assert result.editor_decision == "revise"
+    assert result.quality_score == 72
+    assert any(item["type"] == "review_report" and item["graph"] == "review" for item in result.artifact_registry)
+
+
+def test_legacy_review_action_is_alias_for_review_chapter(tmp_path):
+    store, state = prepared_draft(tmp_path)
+    state.director_action = "review"
+    store.save_state(state)
+
+    result = build_writer_graph(
+        CodexCLIAdapter(mock=True),
+        store,
+        "review",
+        review_func=lambda _state, _task: "approve",
+    ).invoke(state.to_dict())
+
+    assert result["director_action"] == "review_chapter"
+    assert store.review_json_path("demo", 1, 1).exists()

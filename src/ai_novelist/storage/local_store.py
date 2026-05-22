@@ -87,6 +87,27 @@ class LocalStore:
     def chapter_path(self, project_id: str, chapter: int) -> Path:
         return self.chapters_dir(project_id) / f"chapter_{chapter:03d}.md"
 
+    def chapter_artifact_dir(self, project_id: str, chapter: int) -> Path:
+        return self.chapters_dir(project_id) / f"chapter_{chapter:03d}"
+
+    def chapter_card_path(self, project_id: str, chapter: int) -> Path:
+        return self.chapter_artifact_dir(project_id, chapter) / "chapter_card.md"
+
+    def scene_cards_path(self, project_id: str, chapter: int) -> Path:
+        return self.chapter_artifact_dir(project_id, chapter) / "scene_cards.md"
+
+    def chapter_draft_path(self, project_id: str, chapter: int, version: int = 1) -> Path:
+        return self.chapter_artifact_dir(project_id, chapter) / f"draft_v{version}.md"
+
+    def review_report_path(self, project_id: str, chapter: int, version: int = 1) -> Path:
+        return self.chapter_artifact_dir(project_id, chapter) / f"review_v{version}.md"
+
+    def review_json_path(self, project_id: str, chapter: int, version: int = 1) -> Path:
+        return self.chapter_artifact_dir(project_id, chapter) / f"review_v{version}.json"
+
+    def revision_plan_path(self, project_id: str, chapter: int, version: int = 1) -> Path:
+        return self.chapter_artifact_dir(project_id, chapter) / f"revision_plan_v{version}.md"
+
     def editor_notes_path(self, project_id: str, chapter: int) -> Path:
         return self.chapters_dir(project_id) / f"chapter_{chapter:03d}_review.md"
 
@@ -156,6 +177,41 @@ class LocalStore:
             self.chapter_path(state.project_id, state.current_chapter),
             state.chapter_draft,
             "chapter draft",
+        )
+
+    def save_chapter_card(self, state: NovelState) -> Path:
+        return self._write_required(
+            self.chapter_card_path(state.project_id, state.active_chapter or state.current_chapter),
+            state.current_chapter_card,
+            "chapter card",
+        )
+
+    def save_scene_cards(self, state: NovelState) -> Path:
+        return self._write_required(
+            self.scene_cards_path(state.project_id, state.active_chapter or state.current_chapter),
+            state.current_scene_cards,
+            "scene cards",
+        )
+
+    def save_chapter_draft(self, state: NovelState, version: int = 1) -> Path:
+        return self._write_required(
+            self.chapter_draft_path(state.project_id, state.active_chapter or state.current_chapter, version),
+            state.chapter_draft,
+            "chapter draft",
+        )
+
+    def save_review_report(self, state: NovelState, version: int = 1) -> Path:
+        return self._write_required(
+            self.review_report_path(state.project_id, state.active_chapter or state.current_chapter, version),
+            state.current_review_report,
+            "review report",
+        )
+
+    def save_revision_plan(self, state: NovelState, version: int = 1) -> Path:
+        return self._write_required(
+            self.revision_plan_path(state.project_id, state.active_chapter or state.current_chapter, version),
+            state.current_revision_plan,
+            "revision plan",
         )
 
     def save_editor_notes(self, state: NovelState) -> Path:

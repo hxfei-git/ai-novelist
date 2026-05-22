@@ -1,7 +1,7 @@
 # 会话摘要与上下文压缩记录
 
-更新时间：2026-05-21
-项目路径：`/home/ubuntu/1.project/ai-novelist`
+更新时间：2026-05-22
+项目路径：`/home/ubuntu/1.project/ai-novelist-v1`
 
 ## 1. 项目目标
 
@@ -31,6 +31,7 @@
 - Director 交互转译增强：所有用户输入仍先进入 Director；Director prompt 现在包含最近编辑意见和待确认项，并能把“答案 + 接收/接受/同意”的多项确认合并成下游可执行约束。
 - `compose`：一次性完整多 Agent 创作图。
 - 单步 Agent 命令：`worldbuild`、`plan-outline`、`plan-chapters`、`write-chapter`、`review`。
+- Phase 6+7：新增章节卡与场景卡管线，DirectorService 支持 `plan_chapter` 和 `plan_scenes`，旧 `plan-chapters` CLI 保持兼容。
 
 ## 3. 最新架构摘要
 
@@ -103,6 +104,34 @@ director
 
 多轮循环由 CLI/chat 的下一轮用户输入驱动，避免单次 graph invoke 内无限自动修订。
 
+### Chapter Planning 图
+
+```text
+select_chapter
+  -> load_chapter_context
+  -> chapter_goal_agent
+  -> chapter_conflict_agent
+  -> chapter_hook_agent
+  -> chapter_card_synthesizer
+  -> validate_chapter_card
+  -> save_chapter_card
+```
+
+输出 `chapters/chapter_XXX/chapter_card.md`，同步 `state.current_chapter_card` 并注册 `chapter_card` artifact。
+
+### Scene Design 图
+
+```text
+load_chapter_card
+  -> scene_breakdown_agent
+  -> conflict_check_agent
+  -> scene_synthesizer
+  -> validate_scene_cards
+  -> save_scene_cards
+```
+
+输出 `chapters/chapter_XXX/scene_cards.md`，同步 `state.current_scene_cards` 并注册 `scene_cards` artifact。缺少章节卡时返回提示，不自动补齐。
+
 ### Director Chat 图
 
 ```text
@@ -136,6 +165,8 @@ worldbuild
 - `src/ai_novelist/graph_research.py`
 - `src/ai_novelist/graph_outline.py`
 - `src/ai_novelist/graph_writer.py`
+- `src/ai_novelist/graph_chapter_plan.py`
+- `src/ai_novelist/graph_scene.py`
 - `src/ai_novelist/graph_minimal.py`
 - `src/ai_novelist/research/search_backend.py`：包含 `MockSearchBackend`、`WebSearchBackend`、`LocalRAGSearchBackend`、`LocalFirstSearchBackend`。
 - `src/ai_novelist/adapters/codex_cli.py`
@@ -154,6 +185,8 @@ worldbuild
 - `tests/test_research_workflow.py`
 - `tests/test_outline_collaboration.py`
 - `tests/test_graph_writer.py`
+- `tests/test_graph_chapter_plan.py`
+- `tests/test_graph_scene.py`
 - `tests/smoke_outline_collaboration.py`
 - `tests/smoke_phase2_chat.py`
 - 既有阶段 1/2 测试全部保留。
@@ -179,6 +212,11 @@ worldbuild
 - `user_request`
 - `director_action`
 - `director_message`
+- `active_graph`
+- `active_stage`
+- `active_chapter`
+- `current_chapter_card`
+- `current_scene_cards`
 
 `from_dict/to_dict` 兼容旧 `state.json`，缺字段时使用默认值。
 
@@ -199,6 +237,8 @@ worldbuild
 给我三个不同方向
 查看大纲
 保存大纲
+规划第 1 章
+规划第 1 章场景
 写第 1 章
 让编辑审稿
 保存当前结果
@@ -223,7 +263,7 @@ worldbuild
 # phase2 chat smoke ok
 ```
 
-当前验证结果：`75 passed`。本轮新增验证：`tests/test_director_service.py` 为 `6 passed`，覆盖多项确认转译和“接收/接受”确认词。
+当前验证结果：全量 `.venv/bin/python -m pytest` 为 `134 passed`；新增 Phase 6+7 相关回归 `tests/test_graph_chapter_plan.py tests/test_graph_scene.py tests/test_director_service.py tests/test_graph_writer.py` 为 `46 passed`。
 
 ## 8. 设计决策
 
@@ -241,13 +281,15 @@ worldbuild
 ## 9. 当前限制
 
 - 本地 CLI，不是服务端。
-- 飞书未接入。
+- 飞书长连接单聊入口已接入，群聊 @、交互卡片、Webhook 和后台队列仍未实现。
 - research 默认不联网；配置 SerpAPI、Tavily 或 Exa 后可使用真实搜索。
 - 本地 RAG 首版无向量库、索引缓存、增量更新、证据分层 prompt 强化或任务级深度检索。
 - 通用检索上下文只复用已有 `/research` 结果，不会主动补搜或按任务刷新。
 - 无数据库、队列、权限、多用户隔离或并发锁。
 - 真实模式每个 Agent 单独调用一次模型。
 - `chat` 的 `persist_outputs` 只保存已有产物，不会自动补齐缺失产物。
+- Phase 8 Drafting Graph 未实现；章节卡和场景卡暂作为后续正文生成前置产物，旧正文生成路径不读取它们。
+- `plan_scenes` 缺章节卡时只提示先生成章节卡，不自动调用 `plan_chapter`。
 - `compose` 不批量生成多章。
 - Claude Code Adapter 未实现。
 
@@ -544,3 +586,39 @@ Smoke 验证：`.venv/bin/python tests/smoke_phase2_chat.py`，结果 `phase2 ch
 .venv/bin/python tests/smoke_phase2_chat.py
 # phase2 chat smoke ok
 ```
+
+
+## 30. 本轮更新：Phase 8-10 章节创作闭环
+
+- 新增 Drafting Graph、Review Graph、Revision Graph，打通“章节卡/场景卡 -> 正文草稿 -> 多编辑审稿 -> 定向修订”的 mock 可验证闭环。
+- `write_chapter` 现在会自动补齐缺失章节卡和场景卡，并生成 `chapters/chapter_XXX/draft_v1.md`，同时写旧兼容路径 `chapters/chapter_XXX.md`。
+- 审稿新增 `review_chapter` 动作，旧 `review` 仍可作为 alias；审稿输出 `review_v1.md`、`review_v1.json` 和旧兼容 `chapter_XXX_review.md`。
+- 修订读取 `review_v1.json` 生成 `revision_plan_v1.md` 和 `draft_v2.md`；达到 `max_revisions` 时停止自动修订。
+- `compose --mock --auto-approve` 仍可跑通，mock 下首次审稿要求修订，修订后再次审稿通过。
+- 新增 prompts 和 mock responses，确保 `STATUS`、`QUALITY_SCORE` 以及审稿 JSON 字段稳定可解析。
+- 新增测试：`tests/test_graph_drafting.py`、`tests/test_graph_review.py`、`tests/test_graph_revision.py`、`tests/smoke_chapter_pipeline_mock.py`；同步更新旧 writer 测试以适配 `review_chapter` 和 draft_v1 持久化。
+
+验证已完成：
+
+```bash
+.venv/bin/python -m pytest tests/test_graph_drafting.py tests/test_graph_review.py tests/test_graph_revision.py tests/test_graph_writer.py
+# 30 passed
+.venv/bin/python -m pytest
+# 140 passed
+.venv/bin/python tests/smoke_chapter_pipeline_mock.py
+# chapter pipeline mock smoke passed
+.venv/bin/python tests/smoke_outline_collaboration.py
+# outline collaboration smoke ok
+.venv/bin/python tests/smoke_phase2_chat.py
+# phase2 chat smoke ok
+.venv/bin/python tests/smoke_phase2.py
+# phase2 smoke ok
+.venv/bin/python tests/smoke_phase2_compose.py
+# phase2 compose smoke ok
+```
+
+剩余限制：
+
+- 本轮不实现定稿、章节摘要、Bible 写回和导出。
+- 固定版本文件重复运行会被覆盖，版本历史以 artifact registry 为准。
+- 大文本仍同时保存在 `state.json` 的当前字段和 Markdown/JSON artifact 中，后续内容变大时应改为摘要加路径。
