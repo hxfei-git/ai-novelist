@@ -18,4 +18,4 @@ def test_with_agent_metadata_adds_compact_context_and_token_usage():
         estimated_tokens=7100,
     )
 
-    assert message == "已完成「故事概念」角色短评（deepseek-v4-pro/disabled-medium/9.9s/ctx=12k字/tok≈7.1k）"
+    assert message == "已完成「故事概念」角色短评（deepseek-v4-pro | disabled-medium | 9.9s | ctx=6.2K/1M | tok≈7.1K）"

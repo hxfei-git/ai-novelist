@@ -59,10 +59,10 @@ def describe_agent_call(
     if elapsed_seconds is not None:
         parts.append(format_elapsed(elapsed_seconds))
     if context_chars is not None:
-        parts.append(f"ctx={format_compact_number(context_chars)}字")
+        parts.append(f"ctx={format_compact_number(estimate_context_tokens(context_chars))}/{context_capacity_label(parts[0])}")
     if estimated_tokens is not None:
         parts.append(f"tok≈{format_compact_number(estimated_tokens)}")
-    return "/".join(parts)
+    return " | ".join(parts)
 
 
 def with_agent_metadata(
@@ -76,12 +76,29 @@ def with_agent_metadata(
     return f"{message}（{describe_agent_call(adapter, agent, elapsed_seconds, context_chars, estimated_tokens)}）"
 
 
+def estimate_context_tokens(context_chars: int) -> int:
+    if context_chars <= 0:
+        return 0
+    return max(1, context_chars // 2)
+
+
+def context_capacity_label(model: str) -> str:
+    normalized = model.strip().lower()
+    if normalized in {"deepseek-v4-pro", "deepseek-v4-flash"}:
+        return "1M"
+    if normalized == "deepseek-chat":
+        return "64K"
+    return "?"
+
+
 def format_compact_number(value: int) -> str:
     if value < 1000:
         return str(value)
-    if value < 10_000:
-        return f"{value / 1000:.1f}k"
-    return f"{round(value / 1000)}k"
+    if value < 1_000_000:
+        amount = value / 1000
+        return f"{amount:.1f}K" if amount < 10 else f"{round(amount)}K"
+    amount = value / 1_000_000
+    return f"{amount:.1f}M" if amount < 10 else f"{round(amount)}M"
 
 
 def completion_progress_message(message: str, elapsed_seconds: float) -> str:

@@ -523,10 +523,10 @@ def test_outline_progress_prints_agent_model_metadata(tmp_path):
     state = run_outline_turn(graph, state, store, "生成大纲")
 
     assert state.outline_stage == "direction"
-    assert any(stage == "类型定位 Agent" and "mock/n/a" in message for stage, message in events)
-    assert any(stage == "类型定位 Agent" and "mock/n/a/" in message for stage, message in events)
-    assert any(stage == "大纲汇总 Agent" and "mock/n/a" in message for stage, message in events)
-    assert any(stage == "大纲汇总 Agent" and "mock/n/a/" in message for stage, message in events)
+    assert any(stage == "类型定位 Agent" and "mock | n/a" in message for stage, message in events)
+    assert any(stage == "类型定位 Agent" and "mock | n/a | " in message for stage, message in events)
+    assert any(stage == "大纲汇总 Agent" and "mock | n/a" in message for stage, message in events)
+    assert any(stage == "大纲汇总 Agent" and "mock | n/a | " in message for stage, message in events)
 
 def test_outline_direct_entry_does_not_advance_on_bare_determine_detail(tmp_path):
     store = LocalStore(tmp_path)

@@ -1238,9 +1238,9 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 已完成：
 
-- Agent 完成进度行在现有 `模型/effort/耗时` 后追加轻量用量：`ctx=<prompt_chars>字/tok≈<estimated_total_tokens>`。
-- `ctx` 表示本次实际发送给 adapter 的完整 prompt 字符数；`tok≈` 表示 prompt + output 的估算 token，继续使用当前 `estimate_tokens()` 规则。
-- 大纲阶段 role Agent 和大纲汇总 Agent 已接入该显示，示例：`deepseek-v4-pro/disabled-medium/9.9s/ctx=12k字/tok≈7.1k`。
+- Agent 完成进度行在现有 `模型/effort/耗时` 后追加轻量用量：`ctx=<estimated_prompt_tokens>/<model_context_capacity> | tok≈<estimated_total_tokens>`。
+- `ctx` 表示本次 prompt 估算 token / 模型上下文总容量；`tok≈` 表示 prompt + output 的估算 token，继续使用当前 `estimate_tokens()` 规则。
+- 大纲阶段 role Agent 和大纲汇总 Agent 已接入该显示，示例：`deepseek-v4-pro | disabled-medium | 9.9s | ctx=6.2K/1M | tok≈7.1K`。
 - `agent_runs.jsonl` trace 新增 `estimated_output_tokens`，继续不保存完整 prompt 或 output。
 
 后续待办：
