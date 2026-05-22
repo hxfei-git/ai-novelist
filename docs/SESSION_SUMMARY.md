@@ -1122,3 +1122,22 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 214 passed
 ```
+
+## 53. 本轮更新：Review Lock 阶段专项边界整改
+
+- 完整读取并执行 `07_outline_stage_review_lock.md`。
+- 审稿锁定阶段 prompt 现在只允许一致性问题、阶段承接检查、锁定约束、待确认问题、风险标注、进入章节卡前的准备条件和锁定建议。
+- 明确禁止新增世界规则、新增 canon、重写人物关系、重写剧情流程、生成章节卡、生成正文和二次创作。
+- Synthesizer 改为 STATUS-first，包含 `STATUS: pass|revise|stop`，问题最多 8 条，每条不超过 90 中文字符。
+- 新增回归测试覆盖 STATUS 可解析结论和不新增 canon/章节卡/正文禁区。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 1 passed
+.venv/bin/python -m pytest tests/test_outline_collaboration.py
+# 45 passed
+.venv/bin/python -m pytest
+# 215 passed
+```

@@ -490,6 +490,26 @@ def test_chapter_outline_prompt_limits_output_to_chapter_level_plan():
         assert forbidden in role_prompt or forbidden in synth_prompt
 
 
+def test_review_lock_prompt_is_status_first_and_non_creative():
+    state = NovelState(project_id="demo", title="Demo", idea="重生魔门")
+
+    role_prompt = build_outline_stage_role_prompt(state, "review_lock", "总编辑 Agent")
+    synth_prompt = build_outline_stage_synthesizer_prompt(state, "review_lock", [])
+
+    assert "只做一致性检查、风险标注、锁定建议和章节卡准备度判断" in role_prompt
+    assert "STATUS: pass|revise|stop" in synth_prompt
+    assert "STATUS: pass" in synth_prompt
+    assert "STATUS: revise" in synth_prompt
+    assert "STATUS: stop" in synth_prompt
+    assert "一致性检查" in synth_prompt
+    assert "锁定建议" in synth_prompt
+    assert "问题最多 8 条" in synth_prompt
+    assert "每条不超过 90 中文字符" in synth_prompt
+    assert "进入章节卡前的准备条件" in synth_prompt
+    for forbidden in ("新增世界规则", "新增 canon", "重写人物关系", "重写剧情流程", "生成章节卡", "生成正文", "二次创作"):
+        assert forbidden in role_prompt or forbidden in synth_prompt
+
+
 def test_current_stage_draft_enters_synthesizer_prompt():
     state = NovelState(project_id="demo", title="Demo", idea="重生魔门")
     state.outline_stage_artifacts["characters"] = {
