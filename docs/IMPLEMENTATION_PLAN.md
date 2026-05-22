@@ -1887,3 +1887,24 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Revision planner 是 review JSON 到任务清单的转换器。
 - 修订计划中的任务必须可追溯到 review_v1.json。
+
+
+## 76. Targeted Reviser Prompt 整改
+
+目标：执行 `36_targeted_reviser.md`，让定向修订只改 `revision_plan_v1` 指定区域，未涉及段落保持原意和顺序。
+
+已完成：
+
+- `targeted_reviser.md` 增加“最小编辑规则”。
+- 明确只改 `revision_plan_v1.tasks` 指定的问题区域。
+- 未涉及段落必须保持原意、叙事顺序、信息释放和人物状态。
+- 允许输出完整 `draft_v2` Markdown 正文，但修改范围必须受 revision_plan 限制。
+- 禁止全章大改、重排无关段落或改动未列入任务的段落。
+- 禁止新增世界观、新 canon、新人物关系、新伏笔或未在修订计划中要求的剧情。
+- 要求保留 `revision_plan_v1.keep` 和 `do_not_touch` 中列出的内容。
+- 新增 prompt loader 回归测试覆盖 minimal edit guard 和 no-unrelated-rewrite 边界。
+
+当前边界：
+
+- Targeted reviser 可输出完整稿，但不是全章重写器。
+- 修订范围必须受 revision_plan_v1 指定任务约束。

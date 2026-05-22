@@ -1674,3 +1674,25 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 242 passed
 ```
+
+
+## 80. 本轮更新：Targeted Reviser Prompt 整改
+
+- 完整读取并执行 `36_targeted_reviser.md`。
+- `targeted_reviser.md` 现在增加“最小编辑规则”。
+- 只改 `revision_plan_v1.tasks` 指定的问题区域。
+- 未涉及段落必须保持原意、叙事顺序、信息释放和人物状态。
+- 允许输出完整 `draft_v2` Markdown 正文，但修改范围必须受 revision_plan 限制。
+- 禁止全章大改、重排无关段落、改动未列入任务的段落或新增 canon。
+- 新增回归测试覆盖 minimal edit guard 和 no-unrelated-rewrite 边界。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 28 passed
+.venv/bin/python -m pytest tests/test_graph_review.py tests/test_graph_revision.py tests/test_output_contracts.py
+# 10 passed
+.venv/bin/python -m pytest
+# 243 passed
+```

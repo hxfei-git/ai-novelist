@@ -398,3 +398,15 @@ def test_revision_planner_prompt_requires_review_traceable_json_tasks():
     assert "每条字符串不超过 100 中文字符" in prompt
     for forbidden in ("新增剧情", "世界观", "人物关系", "未在 review 中出现的大改", "补造任务"):
         assert forbidden in prompt
+
+
+def test_targeted_reviser_prompt_enforces_minimal_edit_scope():
+    prompt = load_prompt("targeted_reviser")
+
+    assert "最小编辑规则" in prompt
+    assert "只改 revision_plan_v1.tasks 指定的问题区域" in prompt
+    assert "未涉及段落必须保持原意" in prompt
+    assert "修改范围必须受 revision_plan 限制" in prompt
+    assert "do_not_touch" in prompt
+    for forbidden in ("全章大改", "重排无关段落", "改动未列入任务的段落", "新增世界观", "新 canon", "新人物关系", "新伏笔"):
+        assert forbidden in prompt
