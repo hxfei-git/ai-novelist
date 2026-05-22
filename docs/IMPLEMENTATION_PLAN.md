@@ -568,3 +568,44 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 ```
 
 结果：`78 passed`；两个 smoke 均通过。
+
+## 18. 本轮修复：阶段产物查看路由
+
+- 修复 DirectorService 对“查看世界观”的确定性识别：现在会映射到六阶段大纲中的 `worldbuilding` 阶段，而不是误判为参考简报展示。
+- 修正阶段名映射键，确保“故事流程”和“审稿锁定”返回有效的阶段枚举 `story_flow`、`review_lock`。
+- `show_outline_stage_node` 增加世界观兜底：当 `outline_stages/worldbuilding.md` 尚未生成、但 `state.worldbuilding` 已有正文时，直接展示已有世界观草案。
+- 增加 DirectorService 回归测试，覆盖“查看世界观”不会返回“当前还没有参考简报”。
+
+## 19. 本轮修复：世界观确认阶段校准
+
+- 修复“确定世界观”在已有 `state.worldbuilding` 但 `outline_stage` 仍为 `direction` 时被误判为澄清问题的情况。
+- DirectorService 现在对“确认/确定/锁定 + 阶段名”做确定性阶段确认，直接锁定对应阶段并推进。
+- `advance_outline_stage_node` 增加旧字段兼容：当确认 `worldbuilding` 阶段但阶段产物缺失时，会把 `state.worldbuilding` 转换为 `outline_stage_artifacts["worldbuilding"]` 并保存到 `outline_stages/worldbuilding.md`。
+- 阶段跳转确认时会自动锁定此前已有阶段产物，避免方向定位已完成但状态未同步造成最终大纲缺段。
+
+## 20. 本轮修复：确认词保留原始修订意图
+
+- 修复待确认决策中用户回复“开始修订”不被识别为确认的问题。
+- `is_confirmation` 新增“开始”“开始修订”“修订”“开始执行”等确认词，避免二次意图判断覆盖上一轮详细修订指令。
+- 已补回归测试，确保“开始修订”在待确认场景中按确认执行处理。
+- 本轮同时手动修补 `重生魔门` 的人物关系阶段产物，将魔宗圣女与剑宗天才少女两条持续登场关系线写入 `outline_stages/characters.md`。
+
+## 21. 本轮调整：减少大纲阶段确认菜单
+
+- 大纲共创阶段中的普通生成、修订、审查和版本比较不再弹出“1. 确认执行 / 2. 取消”，避免用户反馈被二次确认流程截断。
+- 待确认决策改为通用处理：用户明确取消才取消；其他非取消回复会沿用上一轮完整 `original_user_text` 执行，并把回复作为补充确认文本保留，不再依赖不断扩充确认词词典。
+- 移除“开始修订”作为特殊确认词的思路，改由 pending decision 的通用规则处理未来类似表达。
+- 修复大纲阶段直接执行路径中 `progress=None` 的兜底问题。
+
+## 22. 本轮调整：阶段产物不再伪装成选择菜单
+
+- 非方向阶段的 synthesizer prompt 不再要求输出“候选项或决策”，避免产物中出现 A/B/C 但系统并不等待用户逐项选择的错觉。
+- 新格式改为 `Director 汇总 / 已采用设定 / 仍需确认的问题`，其中“仍需确认的问题”只保留真正需要用户补充或拍板的事项。
+- 该调整作用于后续新生成或修订的阶段产物；既有 Markdown 不会被自动重写。
+
+## 23. 本轮调整：阶段确认问题进入真实追问状态
+
+- `run_outline_stage_node` 现在会从阶段汇总中的 `仍需确认的问题` / `待确认问题` 小节抽取编号或列表问题。
+- 抽取到的问题会写入 `state.pending_questions` 和 `state.pending_question`，并进入 Director 后续上下文，不再只停留在 Markdown 产物中。
+- 阶段完成回复会明确列出这些问题，引导用户直接逐条回答；如果没有问题，才回到“继续修改或确认进入下一阶段”。
+- 新增测试覆盖确认问题抽取。

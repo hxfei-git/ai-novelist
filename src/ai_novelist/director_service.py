@@ -145,12 +145,6 @@ class DirectorService:
             return DirectorTurnResult(immediate_message="请输入你的需求。", requires_followup=True, state=state)
 
         pending = DirectorDecision.from_dict(state.pending_director_decision) if state.pending_director_decision else None
-        if pending and is_confirmation(text):
-            state.pending_director_decision = {}
-            state.user_request = str(pending.task_args.get("original_user_text") or state.user_request or text)
-            append_message(state, "user", text)
-            self.store.save_state(state)
-            return self._execute_decision(state, pending, channel)
         if pending and is_rejection(text):
             state.pending_director_decision = {}
             state.director_message = "已取消上一步计划。你可以重新说明想做什么。"
@@ -158,6 +152,14 @@ class DirectorService:
             append_message(state, "assistant", state.director_message)
             self.store.save_state(state)
             return DirectorTurnResult(final_message=state.director_message, requires_followup=True, state=state)
+        if pending and should_execute_pending_decision(text):
+            state.pending_director_decision = {}
+            state.user_request = merged_pending_user_request(pending, text, state.user_request)
+            if not is_confirmation(text):
+                pending.task_args["confirmation_reply"] = text
+            append_message(state, "user", text)
+            self.store.save_state(state)
+            return self._execute_decision(state, pending, channel)
 
         state.user_request = text
         append_message(state, "user", text)
@@ -171,7 +173,7 @@ class DirectorService:
         state.director_task_args = decision.task_args
         self._apply_decision_metadata(state, decision)
 
-        if decision.requires_confirmation and decision.action not in DIRECT_ACTIONS:
+        if should_prompt_for_confirmation(decision, state):
             state.pending_director_decision = decision.to_dict()
             state.director_message = confirmation_message(decision)
             append_message(state, "assistant", state.director_message)
@@ -189,7 +191,7 @@ class DirectorService:
         return self._execute_decision(state, decision, channel)
 
     def _decide(self, state: NovelState, channel: Channel) -> DirectorDecision:
-        direct = deterministic_view_decision(state)
+        direct = deterministic_outline_stage_decision(state)
         if direct is not None:
             return direct
         prompt = build_service_director_prompt(state, self.store, channel)
@@ -209,8 +211,12 @@ class DirectorService:
             result_state = self._run_research(state)
         elif decision.action == "persist_outputs":
             if state.active_workflow == "outline" and state.outline_stage != "done":
-                from ai_novelist.graph_outline import advance_outline_stage_node
+                from ai_novelist.graph_outline import OUTLINE_STAGES, advance_outline_stage_node
 
+                requested_stage = str(decision.task_args.get("stage", "")).strip()
+                if requested_stage in OUTLINE_STAGES:
+                    state.outline_stage = requested_stage  # type: ignore[assignment]
+                    state.current_stage = requested_stage
                 result_state = NovelState.from_dict(advance_outline_stage_node(state.to_dict(), self.adapter, self.store))
             else:
                 result_state = NovelState.from_dict(persist_available_outputs(state.to_dict(), self.store))
@@ -234,7 +240,7 @@ class DirectorService:
             self.store.save_state(state)
             result_state = state
         else:
-            result_state = NovelState.from_dict(run_selected_agent(state.to_dict(), self.adapter, self.store, self.progress))
+            result_state = NovelState.from_dict(run_selected_agent(state.to_dict(), self.adapter, self.store, self.progress or noop_progress))
 
         update_project_context(result_state, self.store, decision)
         return DirectorTurnResult(
@@ -274,6 +280,10 @@ class DirectorService:
         if chapter:
             state.current_chapter = chapter
 
+
+
+def noop_progress(_stage: str, _message: str) -> None:
+    return
 
 def load_or_create_project(store: LocalStore, project_id: str) -> NovelState:
     try:
@@ -475,6 +485,37 @@ def parse_json_object(output: str) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+
+def deterministic_outline_stage_decision(state: NovelState) -> DirectorDecision | None:
+    text = state.user_request.strip()
+    if not text:
+        return None
+    stage = detect_outline_stage_request(text)
+    wants_confirm = any(marker in text for marker in ("确定", "确认", "锁定", "通过", "认可", "定稿"))
+    if state.active_workflow == "outline" and stage and wants_confirm:
+        return DirectorDecision(
+            "persist_outputs",
+            requires_confirmation=False,
+            user_message=f"我会锁定{stage_display_name(stage)}阶段，并进入下一阶段。",
+            confidence=95,
+            task_args={"stage": stage},
+            target="outline",
+            intent="approve",
+        )
+    return deterministic_view_decision(state)
+
+
+def stage_display_name(stage: str) -> str:
+    labels = {
+        "direction": "方向定位",
+        "worldbuilding": "世界观设定",
+        "characters": "人物关系",
+        "story_flow": "故事流程",
+        "outline_draft": "总大纲草案",
+        "review_lock": "审稿锁定",
+    }
+    return labels.get(stage, stage)
+
 def deterministic_view_decision(state: NovelState) -> DirectorDecision | None:
     text = state.user_request.strip()
     lowered = text.lower()
@@ -503,11 +544,11 @@ def deterministic_view_decision(state: NovelState) -> DirectorDecision | None:
 def detect_outline_stage_request(text: str) -> str:
     stage_markers = {
         "direction": ("方向定位", "创作方向", "方向阶段"),
-        "worldbuilding": ("世界观设定", "世界观阶段"),
+        "worldbuilding": ("世界观", "世界观设定", "世界观阶段"),
         "characters": ("人物关系", "人物阶段", "角色关系"),
-        "plot_flow": ("故事流程", "流程阶段", "剧情流程"),
+        "story_flow": ("故事流程", "流程阶段", "剧情流程"),
         "outline_draft": ("总大纲草案", "大纲草案"),
-        "final_review": ("审稿锁定", "终审阶段"),
+        "review_lock": ("审稿锁定", "终审阶段"),
     }
     for stage, markers in stage_markers.items():
         if any(marker in text for marker in markers):
@@ -516,7 +557,7 @@ def detect_outline_stage_request(text: str) -> str:
 
 
 def fallback_decision(state: NovelState) -> DirectorDecision:
-    direct = deterministic_view_decision(state)
+    direct = deterministic_outline_stage_decision(state)
     if direct is not None:
         return direct
     text = state.user_request
@@ -647,6 +688,38 @@ def confirmation_choices() -> list[DirectorChoice]:
         DirectorChoice(id="confirm", label="确认执行", value="1"),
         DirectorChoice(id="cancel", label="取消", value="2"),
     ]
+
+
+def should_prompt_for_confirmation(decision: DirectorDecision, state: NovelState) -> bool:
+    if not decision.requires_confirmation or decision.action in DIRECT_ACTIONS:
+        return False
+    if state.active_workflow == "outline" and state.outline_stage != "done" and decision.action in OUTLINE_STAGE_EDIT_ACTIONS:
+        return False
+    return True
+
+
+OUTLINE_STAGE_EDIT_ACTIONS = {
+    "propose_directions",
+    "worldbuild",
+    "generate_outline",
+    "review_outline",
+    "revise_outline",
+    "compare_versions",
+}
+
+
+def should_execute_pending_decision(text: str) -> bool:
+    return not is_rejection(text)
+
+
+def merged_pending_user_request(pending: DirectorDecision, text: str, fallback: str) -> str:
+    original = str(pending.task_args.get("original_user_text") or fallback or text).strip()
+    if is_confirmation(text):
+        return original
+    reply = text.strip()
+    if not reply or reply in original:
+        return original
+    return f"{original}\n补充确认：{reply}"
 
 
 def is_confirmation(text: str) -> bool:

@@ -405,9 +405,14 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore)
     state.current_stage = stage
     state.active_artifact = "outline_stage"
     state.director_action = "run_outline_stage"
-    state.director_message = stage_ready_message(stage)
-    state.pending_question = f"请确认是否锁定{STAGE_LABELS[stage]}并进入下一阶段，或继续提出修改。"
-    state.pending_questions = [state.pending_question]
+    questions = extract_stage_confirmation_questions(synthesis)
+    state.director_message = stage_ready_message(stage, questions)
+    if questions:
+        state.pending_questions = questions
+        state.pending_question = "\n".join(f"{index}. {question}" for index, question in enumerate(questions, start=1))
+    else:
+        state.pending_question = f"请确认是否锁定{STAGE_LABELS[stage]}并进入下一阶段，或继续提出修改。"
+        state.pending_questions = [state.pending_question]
     record_stage_history(state, "run", stage, state.user_request)
     store.save_outline_stage(state, stage, format_stage_markdown(artifact))
     store.save_state(state)
@@ -418,6 +423,8 @@ def advance_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalSt
     state = NovelState.from_dict(data)
     ensure_outline_stage(state)
     stage = state.outline_stage
+    hydrate_stage_artifact_from_legacy_fields(state, stage, store)
+    lock_previous_stage_artifacts(state, stage)
     if stage == "done":
         state.director_message = "最终大纲已经锁定，无需再次推进。"
         store.save_state(state)
@@ -451,6 +458,36 @@ def advance_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalSt
     return run_outline_stage_node(state.to_dict(), adapter, store)
 
 
+
+def hydrate_stage_artifact_from_legacy_fields(state: NovelState, stage: str, store: LocalStore) -> None:
+    if stage in state.outline_stage_artifacts:
+        return
+    if stage != "worldbuilding" or not state.worldbuilding.strip():
+        return
+    artifact = {
+        "stage": "worldbuilding",
+        "label": STAGE_LABELS["worldbuilding"],
+        "status": "options_ready",
+        "role_reviews": [],
+        "synthesis": state.worldbuilding.strip(),
+        "user_feedback": state.user_request,
+        "updated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+    }
+    state.outline_stage_artifacts["worldbuilding"] = artifact
+    store.save_outline_stage(state, "worldbuilding", format_stage_markdown(artifact))
+
+
+def lock_previous_stage_artifacts(state: NovelState, stage: str) -> None:
+    if stage not in OUTLINE_STAGES:
+        return
+    for previous_stage in OUTLINE_STAGES[: OUTLINE_STAGES.index(stage)]:
+        artifact = state.outline_stage_artifacts.get(previous_stage)
+        if isinstance(artifact, dict) and artifact.get("status") != "locked":
+            artifact = dict(artifact)
+            artifact["status"] = "locked"
+            artifact.setdefault("locked_at", datetime.now(UTC).isoformat(timespec="seconds"))
+            state.outline_stage_artifacts[previous_stage] = artifact
+
 def show_outline_stage_node(data: dict, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
     stage = str(state.director_task_args.get("stage") or detect_stage_reference(state.user_request) or state.outline_stage)
@@ -459,7 +496,12 @@ def show_outline_stage_node(data: dict, store: LocalStore) -> dict:
         state.director_message = format_stage_markdown(artifact)
     else:
         saved = store.load_outline_stage(state.project_id, stage)
-        state.director_message = saved or f"{STAGE_LABELS.get(stage, stage)}阶段还没有产物。"
+        if saved:
+            state.director_message = saved
+        elif stage == "worldbuilding" and state.worldbuilding.strip():
+            state.director_message = "# 世界观设定\n\n" + state.worldbuilding.strip()
+        else:
+            state.director_message = f"{STAGE_LABELS.get(stage, stage)}阶段还没有产物。"
     store.save_state(state)
     return state.to_dict()
 
@@ -606,7 +648,20 @@ def build_outline_stage_synthesizer_prompt(state: NovelState, stage: str, role_r
             "只列 2-3 条世界观阶段必须回答的问题。"
         )
     else:
-        output_rule = "请综合为用户可读的阶段产物，包含：Director 汇总、候选项或决策、推荐选择、待确认问题。"
+        output_rule = (
+            "请综合为用户可读的阶段产物，但不要输出让用户误以为必须逐项选择的“候选项 A/B/C”。"
+            "如果有多个方案，请直接以“已采用设定”写明本轮建议采用哪一版，以及为什么适合当前故事；"
+            "未采用方案只在必要时用一句话说明，不要展开成选择菜单。"
+            "最后必须输出“仍需确认的问题”，只列真正需要用户补充或拍板的问题；"
+            "如果没有必须确认的问题，写“暂无，当前阶段可继续修改或确认进入下一阶段”。"
+            "请只输出以下 Markdown 结构：\n"
+            "## Director 汇总\n"
+            "整合本阶段的核心关系、规则或流程，不写机会/风险/建议。\n"
+            "## 已采用设定\n"
+            "列出本轮已经纳入阶段产物的明确设定。\n"
+            "## 仍需确认的问题\n"
+            "只列用户下一步真正需要回答的问题，不要伪装成候选菜单。"
+        )
     return (
         "AGENT: outline_stage_synthesizer\n"
         f"STAGE: {stage}\n"
@@ -656,11 +711,45 @@ def format_stage_markdown(artifact: dict) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def stage_ready_message(stage: str) -> str:
-    return (
-        f"第 {stage_number(stage)} 阶段「{STAGE_LABELS[stage]}」已完成本轮共创。"
-        "你可以继续反馈修改，或明确说“确认进入下一阶段”来锁定。"
-    )
+def stage_ready_message(stage: str, questions: list[str] | None = None) -> str:
+    message = f"第 {stage_number(stage)} 阶段「{STAGE_LABELS[stage]}」已完成本轮共创。"
+    if questions:
+        question_lines = "\n".join(f"{index}. {question}" for index, question in enumerate(questions, start=1))
+        return (
+            message
+            + "\n\n本阶段还有这些需要你确认的问题：\n"
+            + question_lines
+            + "\n\n你可以直接逐条回答；如果认可当前设定，也可以说“确认进入下一阶段”。"
+        )
+    return message + "你可以继续反馈修改，或明确说“确认进入下一阶段”来锁定。"
+
+
+def extract_stage_confirmation_questions(markdown: str) -> list[str]:
+    lines = markdown.splitlines()
+    collecting = False
+    questions: list[str] = []
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            if collecting and questions:
+                continue
+            continue
+        if line.startswith("## ") or line.startswith("### "):
+            title = line.lstrip("#").strip()
+            collecting = title in {"仍需确认的问题", "待确认问题", "待确认的问题"}
+            continue
+        if not collecting:
+            continue
+        if line.startswith("#"):
+            break
+        if line in {"暂无", "暂无。", "无", "无。"} or "暂无" in line:
+            continue
+        cleaned = re.sub(r"^[-*+•\s]*", "", line)
+        cleaned = re.sub(r"^\d+[.、)]\s*", "", cleaned).strip()
+        cleaned = cleaned.strip(" ：:")
+        if cleaned:
+            questions.append(cleaned)
+    return list(dict.fromkeys(questions))[:8]
 
 
 def finalize_locked_outline(state: NovelState, store: LocalStore) -> None:

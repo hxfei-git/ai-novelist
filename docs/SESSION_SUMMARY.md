@@ -424,3 +424,43 @@ Smoke 验证：`.venv/bin/python tests/smoke_phase2_chat.py`，结果 `phase2 ch
 ```bash
 .venv/bin/python -m pytest tests/test_feishu_integration.py
 ```
+
+## 20. 本轮修复：查看世界观误路由
+
+- 问题：用户在六阶段共创中输入“查看世界观”时，Director 可能返回 `show_reference`，导致已有世界观草案不展示，只提示没有参考简报或大纲。
+- 修复：`detect_outline_stage_request` 现在识别“世界观”本身，并修正故事流程、审稿锁定的阶段枚举名。
+- 兼容：若世界观正文已存在于 `state.worldbuilding`，但尚未落为 `outline_stages/worldbuilding.md`，展示阶段时会回退输出该正文。
+- 验证：`.venv/bin/python -m pytest tests/test_director_service.py`，结果 `10 passed`。
+
+## 21. 本轮修复：确定世界观仍显示方向定位
+
+- 问题：某些对话会把世界观生成成普通 `worldbuild` 产物，写入 `state.worldbuilding`，但没有同步 `outline_stage=worldbuilding` 和阶段产物，导致用户说“确定世界观”时仍被提示处于方向定位。
+- 修复：新增确定性阶段确认逻辑；“确定世界观/确认世界观/锁定世界观”等会按 `worldbuilding` 阶段确认执行。
+- 兼容：确认世界观时若缺少 `outline_stage_artifacts["worldbuilding"]`，自动由已有 `state.worldbuilding` 补建并落盘；同时锁定此前已有阶段。
+- 验证：`.venv/bin/python -m pytest tests/test_director_service.py tests/test_outline_collaboration.py`，结果 `23 passed`。
+
+## 22. 本轮修复：开始修订导致人物关系细节丢失
+
+- 问题：飞书返回确认选项后，用户回复“开始修订”没有被识别为确认词，系统重新进入 Director 判断，导致原始详细要求被覆盖为“开始修订”，人物关系阶段没有收到“魔宗圣女、剑宗天才少女”的具体约束。
+- 修复：`is_confirmation` 现在接受“开始修订”等表达，待确认决策会沿用上一轮 `original_user_text` 执行。
+- 项目修补：已将两名持续登场女性关系线写入 `projects/重生魔门/outline_stages/characters.md`，分别承担魔门内部高位试探与正道外部审判功能。
+- 验证：`.venv/bin/python -m pytest tests/test_director_service.py`，结果 `11 passed`。
+
+## 23. 本轮调整：确认流程去特殊词化
+
+- 问题：频繁弹出 1/2 确认菜单会打断大纲共创；用户回复“开始修订”等自然表达时，容易触发二次意图判断并丢失上一轮详细要求。
+- 调整：大纲阶段的普通修订类任务直接执行，不再要求确认菜单。
+- 调整：已有 pending decision 时，除明确取消外，用户回复都会执行原 pending 决策，并保留原始详细请求；非标准确认回复会作为补充确认文本记录。
+- 验证：`.venv/bin/python -m pytest tests/test_director_service.py tests/test_outline_collaboration.py`，结果 `25 passed`。
+
+## 24. 本轮调整：候选项展示语义修正
+
+- 问题：人物关系等阶段产物中会出现“候选项 A/B/C”和“推荐选择”，但系统没有真正进入逐项选择流程，用户容易以为漏掉了选择步骤。
+- 调整：非方向阶段的汇总 prompt 改为输出“已采用设定”和“仍需确认的问题”，不再把分析过程伪装成菜单。
+- 验证：`.venv/bin/python -m pytest tests/test_outline_collaboration.py tests/test_director_service.py`，结果 `26 passed`。
+
+## 25. 本轮调整：仍需确认的问题不再只写在 Markdown 里
+
+- 问题：阶段产物写了“仍需确认的问题”，但系统没有真正把这些问题作为待回答事项追问用户。
+- 调整：生成阶段产物后会解析确认问题，并写入 `pending_questions/pending_question`；回复中也会直接列出问题，用户可逐条回答。
+- 验证：`.venv/bin/python -m pytest tests/test_outline_collaboration.py tests/test_director_service.py`，结果 `27 passed`。

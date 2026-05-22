@@ -1,5 +1,5 @@
 from ai_novelist.adapters.codex_cli import CodexCLIAdapter
-from ai_novelist.graph_outline import build_outline_stage_synthesizer_prompt, format_stage_markdown, append_message, build_outline_collaboration_graph, build_outline_prompt
+from ai_novelist.graph_outline import build_outline_stage_synthesizer_prompt, extract_stage_confirmation_questions, format_stage_markdown, append_message, build_outline_collaboration_graph, build_outline_prompt
 from ai_novelist.graph_writer import build_chat_graph
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
@@ -180,6 +180,37 @@ def test_direction_synthesizer_prompt_demands_control_brief():
     assert "## 一句话方向" in prompt
     assert "## 方向命令" in prompt
     assert "不写机会/风险/建议" in prompt
+
+
+def test_non_direction_synthesizer_prompt_avoids_fake_choice_menu():
+    state = NovelState(project_id="demo", title="Demo", idea="重生魔门")
+
+    prompt = build_outline_stage_synthesizer_prompt(state, "characters", [])
+
+    assert "不要输出让用户误以为必须逐项选择" in prompt
+    assert "## 已采用设定" in prompt
+    assert "## 仍需确认的问题" in prompt
+    assert "候选项或决策" not in prompt
+
+
+def test_extract_stage_confirmation_questions_from_synthesis():
+    markdown = """## Director 汇总
+人物关系已整理。
+
+## 已采用设定
+魔宗圣女诱惑但保守。
+
+## 仍需确认的问题
+1. 魔宗圣女的保守来源是心魔誓约还是派系规则？
+2. 剑宗圣女事件是否发生在葬魂谷？
+"""
+
+    questions = extract_stage_confirmation_questions(markdown)
+
+    assert questions == [
+        "魔宗圣女的保守来源是心魔誓约还是派系规则？",
+        "剑宗圣女事件是否发生在葬魂谷？",
+    ]
 
 
 def test_direction_stage_markdown_integrates_without_feedback_dump():

@@ -104,6 +104,53 @@ def test_director_service_can_cancel_with_choice_number(tmp_path):
     assert not store.load_state("demo").pending_director_decision
 
 
+def test_pending_decision_executes_on_freeform_non_cancel_reply(tmp_path):
+    store = LocalStore(tmp_path)
+    store.create_project("Demo", "demo")
+    service = DirectorService(store, JsonDirectorAdapter(mock=True), MockSearchBackend())
+
+    service.handle_turn("demo", "我想写苟在初圣同人", channel="cli")
+    result = service.handle_turn("demo", "开始调研", channel="cli")
+
+    assert result.state.director_action == "research"
+    assert result.state.retrieval_query == "苟在初圣"
+    assert not store.load_state("demo").pending_director_decision
+
+
+class OutlineReviseDirectorAdapter(CodexCLIAdapter):
+    def _mock_director(self, prompt: str) -> str:
+        return json.dumps(
+            {
+                "action": "revise_outline",
+                "requires_confirmation": True,
+                "confidence": 90,
+                "user_message": "我会修订当前人物关系。",
+                "task_args": {"instruction": "加入魔宗圣女与剑宗天才少女"},
+                "next_steps": [],
+            },
+            ensure_ascii=False,
+        )
+
+
+def test_outline_stage_revision_runs_without_confirmation_menu(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("重生魔门", "重生魔门")
+    state.active_workflow = "outline"
+    state.outline_stage = "characters"
+    state.outline_stage_status = "options_ready"
+    store.save_state(state)
+    service = DirectorService(store, OutlineReviseDirectorAdapter(mock=True), MockSearchBackend())
+
+    result = service.handle_turn("重生魔门", "加入魔宗圣女与剑宗天才少女", channel="cli")
+
+    assert result.immediate_message == ""
+    assert not result.choices
+    assert result.state.director_action == "run_outline_stage"
+    assert result.state.outline_stage == "characters"
+    assert "characters" in result.state.outline_stage_artifacts
+    assert not store.load_state("重生魔门").pending_director_decision
+
+
 class AskUserDirectorAdapter(CodexCLIAdapter):
     def _mock_director(self, prompt: str) -> str:
         return json.dumps(
@@ -222,8 +269,54 @@ def test_director_service_shows_named_outline_stage(tmp_path):
     assert "项目：重生魔门" not in result.final_message
 
 
+
+
+def test_director_service_shows_worldbuilding_by_plain_name(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("重生魔门", "重生魔门")
+    state.active_workflow = "outline"
+    state.outline_stage = "direction"
+    state.worldbuilding = "# 世界观蓝图\n\n气运可以被观测和借贷。"
+    store.save_state(state)
+    service = DirectorService(store, CodexCLIAdapter(mock=True), MockSearchBackend())
+
+    result = service.handle_turn("重生魔门", "查看世界观", channel="cli")
+
+    assert result.state.director_action == "show_outline"
+    assert "# 世界观设定" in result.final_message
+    assert "气运可以被观测和借贷" in result.final_message
+    assert "当前还没有参考简报" not in result.final_message
+
+
+
+def test_director_service_confirms_existing_worldbuilding_stage(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("重生魔门", "重生魔门")
+    state.active_workflow = "outline"
+    state.outline_stage = "direction"
+    state.outline_stage_status = "options_ready"
+    state.worldbuilding = "# 世界观蓝图\n\n气运可以被观测和借贷。"
+    state.outline_stage_artifacts["direction"] = {
+        "stage": "direction",
+        "label": "方向定位",
+        "status": "options_ready",
+        "synthesis": "黑暗魔门悬疑智斗。",
+        "role_reviews": [],
+    }
+    store.save_state(state)
+    service = DirectorService(store, CodexCLIAdapter(mock=True), MockSearchBackend())
+
+    result = service.handle_turn("重生魔门", "确定世界观", channel="cli")
+
+    assert result.state.outline_stage == "characters"
+    assert result.state.outline_stage_artifacts["direction"]["status"] == "locked"
+    assert result.state.outline_stage_artifacts["worldbuilding"]["status"] == "locked"
+    assert "气运可以被观测和借贷" in result.state.outline_stage_artifacts["worldbuilding"]["synthesis"]
+    assert store.outline_stage_path("重生魔门", "worldbuilding").exists()
+
 def test_confirmation_accepts_receive_words():
     from ai_novelist.director_service import is_confirmation
 
     assert is_confirmation("接收")
     assert is_confirmation("接受")
+    assert not is_confirmation("开始修订")
