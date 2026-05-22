@@ -33,6 +33,10 @@ def test_revision_generates_plan_and_draft_v2(tmp_path):
     assert 1 <= len(plan["tasks"]) <= 8
     assert all("source" in item for item in plan["tasks"])
     assert all("review_v1.json" in item["source"] for item in plan["tasks"])
+    self_check = json.loads(result.director_task_args["revision_self_check"])
+    assert set(self_check) == {"tasks_status", "new_risks", "decision"}
+    assert self_check["decision"] == "pass"
+    assert len(self_check["new_risks"]) <= 5
     assert any(item["type"] == "revision_plan" and item["graph"] == "revision" for item in result.artifact_registry)
     assert any(item["type"] == "chapter_draft" and item["graph"] == "revision" for item in result.artifact_registry)
 

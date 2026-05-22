@@ -1696,3 +1696,25 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 243 passed
 ```
+
+
+## 81. 本轮更新：Revision Self Check Prompt 整改
+
+- 完整读取并执行 `37_revision_self_check.md`。
+- `revision_self_check.md` 现在输出严格 JSON。
+- 输出字段限定为 `tasks_status`、`new_risks`、`decision`。
+- 每个 revision_plan_v1 task 对应一个完成状态；新风险最多 5 条且只标记不扩写方案。
+- 禁止提出新增剧情建议、重写正文、新设定、新世界观或 revision_plan_v1 外的新修订任务。
+- mock revision self check 同步改为可解析 JSON。
+- 新增回归测试覆盖 JSON 可解析、自检状态和 no-new-creation 边界。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 29 passed
+.venv/bin/python -m pytest tests/test_graph_review.py tests/test_graph_revision.py tests/test_output_contracts.py
+# 10 passed
+.venv/bin/python -m pytest
+# 244 passed
+```

@@ -1908,3 +1908,23 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Targeted reviser 可输出完整稿，但不是全章重写器。
 - 修订范围必须受 revision_plan_v1 指定任务约束。
+
+
+## 77. Revision Self Check Prompt 整改
+
+目标：执行 `37_revision_self_check.md`，让修订自检只检查 revision_plan 是否完成，发现新问题只标记，不扩写方案。
+
+已完成：
+
+- `revision_self_check.md` 改为严格 JSON 输出。
+- 输出字段限定为 `tasks_status`、`new_risks`、`decision`。
+- 每个 revision_plan_v1 task 对应一个完成状态：done、partial 或 missing。
+- 新风险只标记，不扩写修复方案；`new_risks` 最多 5 条。
+- 禁止提出新增剧情建议、重写正文、新设定、新世界观或 revision_plan_v1 外的新修订任务。
+- mock revision self check 同步改为可解析 JSON。
+- 新增 prompt loader 和 graph revision 回归测试覆盖 JSON 可解析、自检状态和 no-new-creation 边界。
+
+当前边界：
+
+- Revision self check 是任务完成核验器，不是二次审稿或创作规划器。
+- 新问题只能进入风险标记，并通过 decision 返回 review_again。

@@ -410,3 +410,16 @@ def test_targeted_reviser_prompt_enforces_minimal_edit_scope():
     assert "do_not_touch" in prompt
     for forbidden in ("全章大改", "重排无关段落", "改动未列入任务的段落", "新增世界观", "新 canon", "新人物关系", "新伏笔"):
         assert forbidden in prompt
+
+
+def test_revision_self_check_prompt_json_first_no_new_creation():
+    prompt = load_prompt("revision_self_check")
+
+    assert "只检查 revision_plan_v1 的任务完成状态" in prompt
+    assert "tasks_status" in prompt
+    assert "new_risks" in prompt
+    assert "decision" in prompt
+    assert "输出严格 JSON" in prompt
+    assert "new_risks 最多 5 条" in prompt
+    for forbidden in ("新增剧情建议", "重写正文", "新设定", "新世界观", "新增 revision_plan_v1 之外的新修订任务", "扩写修复方案"):
+        assert forbidden in prompt

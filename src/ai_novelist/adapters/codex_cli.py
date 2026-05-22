@@ -175,10 +175,17 @@ class CodexCLIAdapter(AgentAdapter):
         if "AGENT: targeted_reviser" in prompt:
             return self._mock_chapter(revised=True)
         if "AGENT: revision_self_check" in prompt:
-            return (
-                "## 修订自检\n"
-                "- 已补强审计编号查询、纸质文本禁忌和东七气闸倒计时。\n"
-                "- 未提前揭露月背冷库真相。"
+            return json.dumps(
+                {
+                    "tasks_status": [
+                        {"task": "补强维修站异常记录。", "status": "done", "evidence": "醒来场景已出现审计编号异常。"},
+                        {"task": "补明纸质文本禁忌。", "status": "done", "evidence": "手稿场景已说明纸质文本不可即时追踪。"},
+                        {"task": "强化东七气闸倒计时。", "status": "done", "evidence": "结尾场景已强化倒计时压力。"},
+                    ],
+                    "new_risks": [],
+                    "decision": "pass",
+                },
+                ensure_ascii=False,
             )
         if "AGENT: chapter_summarizer" in prompt:
             return self._mock_chapter_summary()
