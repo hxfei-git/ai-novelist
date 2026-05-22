@@ -291,3 +291,18 @@ def test_style_normalizer_prompt_freezes_facts_and_hooks():
     assert "不能删除线索" in prompt
     for forbidden in ("增删情节", "增删世界观", "添加新 canon", "删除关键信息"):
         assert forbidden in prompt
+
+
+def test_editor_prompt_keeps_parseable_status_and_routeable_suggestions():
+    prompt = load_prompt("editor")
+
+    assert "STATUS: pass|revise|stop" in prompt
+    assert "QUALITY_SCORE: 0-100" in prompt
+    assert "只审稿，不重写正文，不新增 canon" in prompt
+    assert "必须能映射到现有章节卡、场景卡或草稿位置" in prompt
+    assert "主要问题最多 6 条" in prompt
+    assert "修改建议 3-6 条" in prompt
+    assert "每条不超过 90 中文字符" in prompt
+    assert "不得提出与细纲无关的大改建议" in prompt
+    for forbidden in ("发明新设定", "新角色", "新世界规则", "新剧情"):
+        assert forbidden in prompt

@@ -1506,3 +1506,24 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 233 passed
 ```
+
+## 72. 本轮更新：Legacy Editor Prompt 整改
+
+- 完整读取并执行 `28_editor.md`。
+- `editor.md` 保留 `STATUS: pass|revise|stop` 和 `QUALITY_SCORE: 0-100` 可解析结构。
+- 明确只审稿，不重写正文，不新增 canon。
+- 修改建议必须能映射到现有章节卡、场景卡或草稿位置。
+- 主要问题最多 6 条，修改建议 3-6 条，每条不超过 90 中文字符。
+- 禁止发明新设定、新角色、新世界规则或新剧情。
+- 新增回归测试覆盖状态字段、预算和可路由建议边界。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 20 passed
+.venv/bin/python -m pytest tests/test_graph_review.py tests/test_graph_drafting.py tests/test_graph_writer.py
+# 32 passed
+.venv/bin/python -m pytest
+# 234 passed
+```

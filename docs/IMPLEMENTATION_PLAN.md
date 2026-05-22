@@ -1734,3 +1734,21 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Style normalizer 是语言格式处理器，不是剧情修订器。
 - 正文事实、伏笔、人物状态、场景顺序和结尾钩子保持冻结。
+
+## 68. Legacy Editor Prompt 整改
+
+目标：执行 `28_editor.md`，让 legacy editor 只输出可路由、可执行、短建议，不重写正文或新增 canon。
+
+已完成：
+
+- `editor.md` 保留兼容 Markdown 结构和可解析 `STATUS` / `QUALITY_SCORE`。
+- 明确只审稿，不重写正文，不新增 canon。
+- 修改建议必须能映射到现有章节卡、场景卡或草稿位置。
+- 禁止与细纲无关的大改建议，禁止发明新设定、新角色、新世界规则或新剧情。
+- 输出预算限制为主要问题最多 6 条、修改建议 3-6 条、每条不超过 90 中文字符，连续性风险最多 4 条。
+- 新增 prompt loader 回归测试覆盖可解析状态、预算和可路由建议边界。
+
+当前边界：
+
+- Editor 只诊断和路由修复，不生成替代正文。
+- 审稿建议必须指向已有章节卡、场景卡或草稿位置。
