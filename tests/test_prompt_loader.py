@@ -18,3 +18,19 @@ def test_direction_proposer_prompt_marks_directions_as_candidates():
     assert "建议选择不超过 120 中文字符" in prompt
     for forbidden in ("审批", "备案", "绩效", "申请表", "KPI", "章节剧情", "人物亲密制度", "已锁定 canon 口吻"):
         assert forbidden in prompt
+
+
+def test_world_builder_prompt_limits_rules_to_conflict_principles():
+    prompt = load_prompt("world_builder")
+
+    assert "3-5 条与主线冲突直接相关的运行原则" in prompt
+    assert "每条不超过 100 中文字符" in prompt
+    assert "如何制造冲突/代价" in prompt
+    assert "具体机制必须来自用户原话、锁定大纲或已有小说圣经" in prompt
+    assert "不要补造 canon" in prompt
+    assert "可复用素材最多 5 个" in prompt
+    assert "说明书式规则清单" in prompt
+    for forbidden in ("行政流程", "审批", "备案", "绩效", "申请表", "KPI", "考评"):
+        assert forbidden in prompt
+    assert "至少 5 条" not in prompt
+    assert "硬规则" not in prompt

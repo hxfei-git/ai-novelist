@@ -1161,3 +1161,24 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 216 passed
 ```
+
+## 55. 本轮更新：World Builder Prompt 整改
+
+- 完整读取并执行 `11_world_builder.md`。
+- `world_builder.md` 现在把世界规则限制为 3-5 条与主线冲突直接相关的运行原则，每条不超过 100 中文字符。
+- 每条原则必须包含“如何制造冲突/代价”和适用边界。
+- 具体机制必须来自用户原话、锁定大纲或已有小说圣经；信息不足时标注待确认，不补造 canon。
+- 默认禁止行政流程、审批、备案、绩效、申请表、KPI 和考评等细则。
+- 可持续写作素材最多 5 个，且必须说明剧情功能。
+- 新增回归测试覆盖规则数量、冲突/代价字段和清单式设定禁区。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 3 passed
+.venv/bin/python -m pytest tests/test_graph_writer.py tests/test_outline_collaboration.py
+# 69 passed
+.venv/bin/python -m pytest
+# 217 passed
+```
