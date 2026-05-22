@@ -423,3 +423,14 @@ def test_revision_self_check_prompt_json_first_no_new_creation():
     assert "new_risks 最多 5 条" in prompt
     for forbidden in ("新增剧情建议", "重写正文", "新设定", "新世界观", "新增 revision_plan_v1 之外的新修订任务", "扩写修复方案"):
         assert forbidden in prompt
+
+
+def test_version_comparator_prompt_compares_without_third_version():
+    prompt = load_prompt("version_comparator")
+
+    assert "只比较差异，不创作第三版大纲" in prompt
+    assert "用户偏好、locked_constraints 和差异风险" in prompt
+    assert "每节最多 3 条" in prompt
+    assert "每条不超过 80 中文字符" in prompt
+    for forbidden in ("新增第三版大纲", "新设定", "详细改写方案", "正文", "改成全新版", "第三版内容"):
+        assert forbidden in prompt

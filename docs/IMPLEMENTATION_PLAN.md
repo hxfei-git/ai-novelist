@@ -1928,3 +1928,24 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Revision self check 是任务完成核验器，不是二次审稿或创作规划器。
 - 新问题只能进入风险标记，并通过 decision 返回 review_again。
+
+
+## 78. Version Comparator Prompt 整改
+
+目标：执行 `38_version_comparator.md`，让版本比较只比较旧版和新版差异，给出采用建议，不生成第三版。
+
+已完成：
+
+- `version_comparator.md` 明确只比较差异，不创作第三版大纲。
+- 采用建议必须基于用户偏好、locked_constraints 和差异风险。
+- 禁止新增第三版大纲、新设定、详细改写方案或正文。
+- 禁止建议“改成全新版”或展开长方案。
+- 输出保留核心变化、人物变化、冲突变化、风格变化、风险变化和是否建议采用新版。
+- 输出预算限制为每节最多 3 条、每条不超过 80 中文字符。
+- mock version comparison 同步改为短条目形式。
+- 新增 prompt loader 回归测试覆盖 no-third-version 和每节预算边界。
+
+当前边界：
+
+- Version comparator 是差异分析器，不是新版创作器。
+- 采用建议只能基于已有版本差异、用户偏好和锁定约束。

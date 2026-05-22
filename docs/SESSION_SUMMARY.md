@@ -1718,3 +1718,25 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 244 passed
 ```
+
+
+## 82. 本轮更新：Version Comparator Prompt 整改
+
+- 完整读取并执行 `38_version_comparator.md`。
+- `version_comparator.md` 现在只比较旧版和新版差异，不创作第三版大纲。
+- 采用建议必须基于用户偏好、locked_constraints 和差异风险。
+- 禁止新增第三版大纲、新设定、详细改写方案或正文。
+- 输出预算限制为每节最多 3 条、每条不超过 80 中文字符。
+- mock version comparison 同步改为短条目形式。
+- 新增回归测试覆盖 no-third-version 和预算边界。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 30 passed
+.venv/bin/python -m pytest tests/test_graph_review.py tests/test_graph_revision.py tests/test_output_contracts.py
+# 10 passed
+.venv/bin/python -m pytest
+# 245 passed
+```
