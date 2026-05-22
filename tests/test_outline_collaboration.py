@@ -436,6 +436,25 @@ def test_story_flow_prompt_uses_all_prior_stage_contexts():
     assert "故事流程必须承接方向定位、故事概念、世界观代价和人物关系冲突" in prompt
 
 
+def test_story_flow_prompt_limits_flow_to_narrative_structure():
+    state = NovelState(project_id="demo", title="Demo", idea="重生魔门")
+
+    role_prompt = build_outline_stage_role_prompt(state, "story_flow", "主线结构 Agent")
+    synth_prompt = build_outline_stage_synthesizer_prompt(state, "story_flow", [])
+
+    assert "流程只表示叙事流程" in role_prompt
+    assert "这里的“流程”只指叙事流程" in synth_prompt
+    assert "阶段目标" in synth_prompt
+    assert "关键转折" in synth_prompt
+    assert "伏笔布置/回收方向" in synth_prompt
+    assert "失败代价" in synth_prompt
+    assert "三幕或四段结构" in synth_prompt
+    assert "每段最多 4 个要点" in synth_prompt
+    assert "每点不超过 90 中文字符" in synth_prompt
+    for forbidden in ("完整章节正文", "细场景动作", "未确立新规则", "新增世界观 canon", "突然新增人物关系", "行政流程", "办理", "审批", "备案", "绩效", "申请表"):
+        assert forbidden in role_prompt or forbidden in synth_prompt
+
+
 def test_current_stage_draft_enters_synthesizer_prompt():
     state = NovelState(project_id="demo", title="Demo", idea="重生魔门")
     state.outline_stage_artifacts["characters"] = {

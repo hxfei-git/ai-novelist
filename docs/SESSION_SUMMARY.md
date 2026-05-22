@@ -1064,3 +1064,23 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 211 passed
 ```
+
+## 50. 本轮更新：Story Flow 阶段专项边界整改
+
+- 完整读取并执行 `04_outline_stage_story_flow.md`。
+- 故事流程阶段 prompt 明确“流程”只指叙事流程，不是组织流程、制度流程或行政流程。
+- 允许输出主线阶段、阶段目标、关键转折、信息释放节奏、伏笔布置与回收方向、失败代价和高潮方向。
+- 禁止完整章节正文、细场景动作、未确立新规则、新增世界观 canon、突然新增人物关系、行政流程、办理、审批、备案、绩效和申请表。
+- Synthesizer 固定为三幕或四段结构，每段最多 4 个要点，每点不超过 90 中文字符，并要求阶段目标、转折、伏笔回收和代价。
+- 新增回归测试覆盖 story_flow 的叙事流程边界和禁区。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 1 passed
+.venv/bin/python -m pytest tests/test_outline_collaboration.py
+# 42 passed
+.venv/bin/python -m pytest
+# 212 passed
+```
