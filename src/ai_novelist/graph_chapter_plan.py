@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Protocol
 
 from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
+from ai_novelist.agent_metrics import complete_with_metrics
+from ai_novelist.agent_parallel import AgentJob, run_agent_jobs
 from ai_novelist.artifacts import ArtifactRecord, load_artifacts, register_artifact
 from ai_novelist.context_builder import build_context
 from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, run_with_progress, run_with_progress, with_agent_metadata
@@ -41,12 +43,8 @@ class ChapterPlanSequentialGraph:
         current = select_chapter_node(state, self.store)
         emit_progress(self.progress, "ChapterPlan 2/8", "正在读取章节大纲、小说圣经和项目上下文...")
         current = load_chapter_context_node(current, self.store)
-        emit_progress(self.progress, "ChapterPlan 3/8", with_agent_metadata("正在分析本章目标...", self.adapter, "chapter_goal_agent"))
-        current = chapter_goal_agent_node(current, self.adapter, self.store)
-        emit_progress(self.progress, "ChapterPlan 4/8", with_agent_metadata("正在分析本章核心冲突...", self.adapter, "chapter_conflict_agent"))
-        current = chapter_conflict_agent_node(current, self.adapter, self.store)
-        emit_progress(self.progress, "ChapterPlan 5/8", with_agent_metadata("正在设计本章钩子...", self.adapter, "chapter_hook_agent"))
-        current = chapter_hook_agent_node(current, self.adapter, self.store)
+        emit_progress(self.progress, "ChapterPlan 3/8", with_agent_metadata("正在执行章节目标、冲突和钩子 Agent...", self.adapter, "chapter_goal_agent"))
+        current = run_chapter_planning_agents_node(current, self.adapter, self.store)
         emit_progress(self.progress, "ChapterPlan 6/8", with_agent_metadata("正在汇总章节卡...", self.adapter, "chapter_card_synthesizer"))
         current = chapter_card_synthesizer_node(current, self.adapter, self.store)
         emit_progress(self.progress, "ChapterPlan 7/8", "正在校验章节卡必需小节...")
@@ -66,18 +64,14 @@ def build_chapter_plan_graph(adapter: AgentAdapter, store: LocalStore, progress:
     graph = StateGraph(dict)
     graph.add_node("select_chapter", lambda data: progress_node(progress_func, "ChapterPlan 1/8", "正在选择章节...", lambda: select_chapter_node(data, store)))
     graph.add_node("load_chapter_context", lambda data: progress_node(progress_func, "ChapterPlan 2/8", "正在读取章节大纲、小说圣经和项目上下文...", lambda: load_chapter_context_node(data, store)))
-    graph.add_node("chapter_goal_agent", lambda data: progress_node(progress_func, "ChapterPlan 3/8", with_agent_metadata("正在分析本章目标...", adapter, "chapter_goal_agent"), lambda: chapter_goal_agent_node(data, adapter, store)))
-    graph.add_node("chapter_conflict_agent", lambda data: progress_node(progress_func, "ChapterPlan 4/8", with_agent_metadata("正在分析本章核心冲突...", adapter, "chapter_conflict_agent"), lambda: chapter_conflict_agent_node(data, adapter, store)))
-    graph.add_node("chapter_hook_agent", lambda data: progress_node(progress_func, "ChapterPlan 5/8", with_agent_metadata("正在设计本章钩子...", adapter, "chapter_hook_agent"), lambda: chapter_hook_agent_node(data, adapter, store)))
+    graph.add_node("chapter_planning_agents", lambda data: progress_node(progress_func, "ChapterPlan 3/8", with_agent_metadata("正在执行章节目标、冲突和钩子 Agent...", adapter, "chapter_goal_agent"), lambda: run_chapter_planning_agents_node(data, adapter, store)))
     graph.add_node("chapter_card_synthesizer", lambda data: progress_node(progress_func, "ChapterPlan 6/8", with_agent_metadata("正在汇总章节卡...", adapter, "chapter_card_synthesizer"), lambda: chapter_card_synthesizer_node(data, adapter, store)))
     graph.add_node("validate_chapter_card", lambda data: progress_node(progress_func, "ChapterPlan 7/8", "正在校验章节卡必需小节...", lambda: validate_chapter_card_node(data, store)))
     graph.add_node("save_chapter_card", lambda data: progress_node(progress_func, "ChapterPlan 8/8", "正在保存章节卡...", lambda: save_chapter_card_node(data, store)))
     graph.set_entry_point("select_chapter")
     graph.add_edge("select_chapter", "load_chapter_context")
-    graph.add_edge("load_chapter_context", "chapter_goal_agent")
-    graph.add_edge("chapter_goal_agent", "chapter_conflict_agent")
-    graph.add_edge("chapter_conflict_agent", "chapter_hook_agent")
-    graph.add_edge("chapter_hook_agent", "chapter_card_synthesizer")
+    graph.add_edge("load_chapter_context", "chapter_planning_agents")
+    graph.add_edge("chapter_planning_agents", "chapter_card_synthesizer")
     graph.add_edge("chapter_card_synthesizer", "validate_chapter_card")
     graph.add_edge("validate_chapter_card", "save_chapter_card")
     graph.add_edge("save_chapter_card", END)
@@ -112,6 +106,44 @@ def load_chapter_context_node(data: dict, store: LocalStore) -> dict:
     return state.to_dict()
 
 
+def run_chapter_planning_agents_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
+    state = NovelState.from_dict(data)
+    specs = [
+        ("chapter_goal_report", "chapter_goal_agent"),
+        ("chapter_conflict_report", "chapter_conflict_agent"),
+        ("chapter_hook_report", "chapter_hook_agent"),
+    ]
+    jobs = [
+        AgentJob(
+            key=field,
+            agent=prompt_name,
+            prompt=build_agent_prompt(state, prompt_name),
+            graph="chapter_plan",
+            node=prompt_name,
+            prompt_profile="chapter_planning",
+        )
+        for field, prompt_name in specs
+    ]
+    try:
+        results = run_agent_jobs(
+            adapter=adapter,
+            project_dir=store.project_dir(state.project_id),
+            project_id=state.project_id,
+            jobs=jobs,
+        )
+    except AgentAdapterError as exc:
+        state.error = str(exc)
+        state.review_status = "error"
+        store.save_state(state)
+        return state.to_dict()
+    for result in results:
+        state.director_task_args[result.key] = result.output.strip()
+        state.last_agent_reports = append_agent_report(state.last_agent_reports, result.agent, "ok", {"chars": len(result.output), "elapsed_ms": result.elapsed_ms or 0})
+    state.active_stage = "chapter_planning_agents"
+    store.save_state(state)
+    return state.to_dict()
+
+
 def chapter_goal_agent_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
     return run_report_agent(data, adapter, store, "chapter_goal_agent", "chapter_goal_report")
 
@@ -128,7 +160,16 @@ def chapter_card_synthesizer_node(data: dict, adapter: AgentAdapter, store: Loca
     state = NovelState.from_dict(data)
     prompt = build_agent_prompt(state, "chapter_card_synthesizer")
     try:
-        output = adapter.complete(prompt, store.project_dir(state.project_id))
+        output = complete_with_metrics(
+            adapter=adapter,
+            prompt=prompt,
+            project_dir=store.project_dir(state.project_id),
+            project_id=state.project_id,
+            graph="chapter_plan",
+            node="chapter_card_synthesizer",
+            agent="chapter_card_synthesizer",
+            prompt_profile="chapter_planning",
+        )
     except AgentAdapterError as exc:
         state.error = str(exc)
         state.review_status = "error"
@@ -186,7 +227,16 @@ def run_report_agent(data: dict, adapter: AgentAdapter, store: LocalStore, promp
     state = NovelState.from_dict(data)
     prompt = build_agent_prompt(state, prompt_name)
     try:
-        output = adapter.complete(prompt, store.project_dir(state.project_id))
+        output = complete_with_metrics(
+            adapter=adapter,
+            prompt=prompt,
+            project_dir=store.project_dir(state.project_id),
+            project_id=state.project_id,
+            graph="chapter_plan",
+            node=prompt_name,
+            agent=prompt_name,
+            prompt_profile="chapter_planning",
+        )
     except AgentAdapterError as exc:
         state.error = str(exc)
         state.review_status = "error"
@@ -203,14 +253,24 @@ def build_agent_prompt(state: NovelState, prompt_name: str) -> str:
     template = load_prompt(prompt_name)
     context = str(state.director_task_args.get("chapter_planning_context", ""))
     reports = format_reports(state)
+    report_section = "" if prompt_name in {"chapter_goal_agent", "chapter_conflict_agent", "chapter_hook_agent"} else f"\n\n## Agent Reports\n{reports or '暂无'}"
+    contract = ""
+    if prompt_name in {"chapter_goal_agent", "chapter_conflict_agent", "chapter_hook_agent"}:
+        contract = (
+            "\n\nOUTPUT_CONTRACT:\n"
+            "- 只输出 JSON。\n"
+            "- 最多 5 条要点，每条不超过 80 中文字符。\n"
+            "- 只输出本 Agent 负责的局部判断，不要生成完整章节卡。\n"
+            "- 不要复述小说圣经、参考资料或章节大纲。"
+        )
     return (
-        f"{template.rstrip()}\n\n"
+        f"{template.rstrip()}{contract}\n\n"
         f"PROJECT_ID: {state.project_id}\n"
         f"TITLE: {state.title}\n"
         f"CHAPTER: {state.active_chapter or state.current_chapter}\n\n"
         f"## Task Context\n{context or '暂无'}\n\n"
-        f"## Selected Chapter Outline\n{state.director_task_args.get('selected_chapter_outline') or '暂无'}\n\n"
-        f"## Agent Reports\n{reports or '暂无'}\n"
+        f"## Selected Chapter Outline\n{state.director_task_args.get('selected_chapter_outline') or '暂无'}"
+        f"{report_section}\n"
     )
 
 

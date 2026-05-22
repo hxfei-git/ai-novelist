@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
+from ai_novelist.agent_metrics import complete_with_metrics
+from ai_novelist.agent_parallel import AgentJob, run_agent_jobs
 from ai_novelist.artifacts import ArtifactRecord, register_artifact
 from ai_novelist.progress import ProgressFunc, complete_with_timing, emit_progress, noop_progress, with_agent_metadata
 from ai_novelist.prompts import load_prompt
@@ -322,22 +324,50 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
 
     label = STAGE_LABELS[stage]
     emit_progress(progress, "OutlineStage", f"正在准备第 {stage_number(stage)} 阶段「{label}」上下文...")
+    role_jobs = [
+        AgentJob(
+            key=role,
+            agent="outline_stage_role",
+            prompt=build_outline_stage_role_prompt(state, stage, role),
+            graph="outline",
+            node="outline_stage_role",
+            prompt_profile="outline_role",
+        )
+        for role in STAGE_ROLES[stage]
+    ]
+    emit_progress(progress, "OutlineStage", with_agent_metadata(f"正在执行「{label}」角色短评 Agent...", adapter, "outline_stage_role"))
+    try:
+        role_results = run_agent_jobs(
+            adapter=adapter,
+            project_dir=store.project_dir(state.project_id),
+            project_id=state.project_id,
+            jobs=role_jobs,
+        )
+    except AgentAdapterError as exc:
+        state.error = str(exc)
+        state.review_status = "error"
+        store.save_state(state)
+        return state.to_dict()
     role_reviews: list[dict[str, str]] = []
-    for role in STAGE_ROLES[stage]:
-        emit_progress(progress, role, with_agent_metadata(f"正在生成「{label}」角色短评...", adapter, "outline_stage_role"))
-        try:
-            output, elapsed = complete_with_timing(adapter, build_outline_stage_role_prompt(state, stage, role), store.project_dir(state.project_id))
-        except AgentAdapterError as exc:
-            state.error = str(exc)
-            state.review_status = "error"
-            store.save_state(state)
-            return state.to_dict()
-        emit_progress(progress, role, with_agent_metadata(f"已完成「{label}」角色短评", adapter, "outline_stage_role", elapsed))
-        role_reviews.append({"role": role, "content": output})
+    for result in role_results:
+        emit_progress(progress, result.key, with_agent_metadata(f"已完成「{label}」角色短评", adapter, "outline_stage_role", (result.elapsed_ms or 0) / 1000))
+        role_reviews.append({"role": result.key, "content": result.output})
+
 
     emit_progress(progress, "大纲汇总 Agent", with_agent_metadata(f"正在汇总「{label}」阶段产物...", adapter, "outline_stage_synthesizer"))
     try:
-        synthesis, elapsed = complete_with_timing(adapter, build_outline_stage_synthesizer_prompt(state, stage, role_reviews), store.project_dir(state.project_id))
+        start = datetime.now(UTC)
+        synthesis = complete_with_metrics(
+            adapter=adapter,
+            prompt=build_outline_stage_synthesizer_prompt(state, stage, role_reviews),
+            project_dir=store.project_dir(state.project_id),
+            project_id=state.project_id,
+            graph="outline",
+            node="outline_stage_synthesizer",
+            agent="outline_stage_synthesizer",
+            prompt_profile="outline_synthesizer",
+        )
+        elapsed = (datetime.now(UTC) - start).total_seconds()
     except AgentAdapterError as exc:
         state.error = str(exc)
         state.review_status = "error"
@@ -769,7 +799,11 @@ def build_outline_stage_role_prompt(state: NovelState, stage: str, role: str) ->
         f"前序已保存阶段内容：\n{previous_stage_context(state, stage)}\n\n"
         f"当前阶段已有内容：\n{current_stage_context(state, stage)}\n\n"
         f"阶段连续性要求：\n{stage_continuity_requirement(stage)}\n\n"
-        "请只输出该角色的短评：机会、风险、建议各 1-3 条。"
+        "OUTPUT_BUDGET:\n"
+        "- 只输出短 JSON：{role, opportunities, risks, suggestions}。\n"
+        "- opportunities/risks/suggestions 各最多 3 条，每条不超过 60 中文字符。\n"
+        "- 总输出不超过 600 中文字符。\n"
+        "- 不要复述上下文，不要输出分析过程。\n"
         "建议必须基于前序已保存阶段内容和当前阶段已有内容继续创作，"
         "不得把本阶段写成与前序设定割裂的新故事。"
     )

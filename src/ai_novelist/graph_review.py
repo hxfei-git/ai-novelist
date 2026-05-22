@@ -7,9 +7,12 @@ import re
 from typing import Any, Protocol
 
 from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
+from ai_novelist.agent_metrics import complete_with_metrics
+from ai_novelist.agent_parallel import AgentJob, run_agent_jobs
 from ai_novelist.artifacts import ArtifactRecord, get_latest_artifact, load_artifact_text, load_artifacts, register_artifact
 from ai_novelist.context_builder import build_context
 from ai_novelist.graph_writer import parse_editor_review
+from ai_novelist.output_contracts import normalize_review_editor_report, normalize_review_synthesis
 from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, run_with_progress, run_with_progress, with_agent_metadata
 from ai_novelist.prompts import load_prompt
 from ai_novelist.state import NovelState
@@ -21,7 +24,8 @@ class CompiledGraph(Protocol):
         """Invoke the graph with a dict state."""
 
 
-REVIEW_FIELDS = ("decision", "score", "blocking_issues", "issues", "rewrite_tasks")
+REVIEW_FIELDS = ("decision", "score", "blocking_issues", "issues", "rewrite_tasks", "do_not_change")
+REVIEW_EDITOR_PROMPTS = {"continuity_editor", "structure_editor", "character_arc_editor", "style_editor", "simulated_reader"}
 
 
 class ReviewSequentialGraph:
@@ -31,26 +35,18 @@ class ReviewSequentialGraph:
         self.progress = progress
 
     def invoke(self, state: dict) -> dict:
-        emit_progress(self.progress, "Review 1/8", "正在读取章节草稿和审稿上下文...")
+        emit_progress(self.progress, "Review 1/5", "正在读取章节草稿和审稿上下文...")
         current = load_review_context_node(state, self.store)
         if NovelState.from_dict(current).review_status == "error":
             return current
-        steps = [
-            ("Review 2/8", "正在做连续性审稿...", "continuity_editor", "continuity_review"),
-            ("Review 3/8", "正在做结构审稿...", "structure_editor", "structure_review"),
-            ("Review 4/8", "正在检查人物弧光...", "character_arc_editor", "character_arc_review"),
-            ("Review 5/8", "正在检查风格一致性...", "style_editor", "style_review"),
-            ("Review 6/8", "正在模拟读者反馈...", "simulated_reader", "simulated_reader_review"),
-        ]
-        for stage, message, prompt_name, field in steps:
-            emit_progress(self.progress, stage, with_agent_metadata(message, self.adapter, prompt_name))
-            current = run_review_agent(current, self.adapter, self.store, prompt_name, field)
-            if NovelState.from_dict(current).review_status == "error":
-                return current
-        emit_progress(self.progress, "Review 7/8", with_agent_metadata("正在汇总审稿结论...", self.adapter, "review_synthesizer"))
+        emit_progress(self.progress, "Review 2/5", with_agent_metadata("正在执行 5 个编辑审稿 Agent...", self.adapter, "continuity_editor"))
+        current = run_review_editors_node(current, self.adapter, self.store)
+        if NovelState.from_dict(current).review_status == "error":
+            return current
+        emit_progress(self.progress, "Review 3/5", with_agent_metadata("正在汇总审稿结论...", self.adapter, "review_synthesizer"))
         current = review_synthesizer_node(current, self.adapter, self.store)
         current = decide_pass_or_revise_node(current, self.store)
-        emit_progress(self.progress, "Review 8/8", "正在保存审稿报告...")
+        emit_progress(self.progress, "Review 5/5", "正在保存审稿报告...")
         current = save_review_report_node(current, self.store)
         return current
 
@@ -63,22 +59,14 @@ def build_review_graph(adapter: AgentAdapter, store: LocalStore, progress: Progr
         return ReviewSequentialGraph(adapter, store, progress_func)
 
     graph = StateGraph(dict)
-    graph.add_node("load_review_context", lambda data: progress_node(progress_func, "Review 1/8", "正在读取章节草稿和审稿上下文...", lambda: load_review_context_node(data, store)))
-    graph.add_node("continuity_review_agent", lambda data: progress_node(progress_func, "Review 2/8", with_agent_metadata("正在做连续性审稿...", adapter, "continuity_editor"), lambda: run_review_agent(data, adapter, store, "continuity_editor", "continuity_review")))
-    graph.add_node("structure_review_agent", lambda data: progress_node(progress_func, "Review 3/8", with_agent_metadata("正在做结构审稿...", adapter, "structure_editor"), lambda: run_review_agent(data, adapter, store, "structure_editor", "structure_review")))
-    graph.add_node("character_arc_review_agent", lambda data: progress_node(progress_func, "Review 4/8", with_agent_metadata("正在检查人物弧光...", adapter, "character_arc_editor"), lambda: run_review_agent(data, adapter, store, "character_arc_editor", "character_arc_review")))
-    graph.add_node("style_review_agent", lambda data: progress_node(progress_func, "Review 5/8", with_agent_metadata("正在检查风格一致性...", adapter, "style_editor"), lambda: run_review_agent(data, adapter, store, "style_editor", "style_review")))
-    graph.add_node("simulated_reader_agent", lambda data: progress_node(progress_func, "Review 6/8", with_agent_metadata("正在模拟读者反馈...", adapter, "simulated_reader"), lambda: run_review_agent(data, adapter, store, "simulated_reader", "simulated_reader_review")))
-    graph.add_node("review_synthesizer", lambda data: progress_node(progress_func, "Review 7/8", with_agent_metadata("正在汇总审稿结论...", adapter, "review_synthesizer"), lambda: review_synthesizer_node(data, adapter, store)))
+    graph.add_node("load_review_context", lambda data: progress_node(progress_func, "Review 1/5", "正在读取章节草稿和审稿上下文...", lambda: load_review_context_node(data, store)))
+    graph.add_node("review_editors", lambda data: progress_node(progress_func, "Review 2/5", with_agent_metadata("正在执行 5 个编辑审稿 Agent...", adapter, "continuity_editor"), lambda: run_review_editors_node(data, adapter, store)))
+    graph.add_node("review_synthesizer", lambda data: progress_node(progress_func, "Review 3/5", with_agent_metadata("正在汇总审稿结论...", adapter, "review_synthesizer"), lambda: review_synthesizer_node(data, adapter, store)))
     graph.add_node("decide_pass_or_revise", lambda data: decide_pass_or_revise_node(data, store))
-    graph.add_node("save_review_report", lambda data: progress_node(progress_func, "Review 8/8", "正在保存审稿报告...", lambda: save_review_report_node(data, store)))
+    graph.add_node("save_review_report", lambda data: progress_node(progress_func, "Review 5/5", "正在保存审稿报告...", lambda: save_review_report_node(data, store)))
     graph.set_entry_point("load_review_context")
-    graph.add_conditional_edges("load_review_context", route_after_load, {"continue": "continuity_review_agent", "end": END})
-    graph.add_edge("continuity_review_agent", "structure_review_agent")
-    graph.add_edge("structure_review_agent", "character_arc_review_agent")
-    graph.add_edge("character_arc_review_agent", "style_review_agent")
-    graph.add_edge("style_review_agent", "simulated_reader_agent")
-    graph.add_edge("simulated_reader_agent", "review_synthesizer")
+    graph.add_conditional_edges("load_review_context", route_after_load, {"continue": "review_editors", "end": END})
+    graph.add_edge("review_editors", "review_synthesizer")
     graph.add_edge("review_synthesizer", "decide_pass_or_revise")
     graph.add_edge("decide_pass_or_revise", "save_review_report")
     graph.add_edge("save_review_report", END)
@@ -118,19 +106,78 @@ def load_review_context_node(data: dict, store: LocalStore) -> dict:
     return state.to_dict()
 
 
-def run_review_agent(data: dict, adapter: AgentAdapter, store: LocalStore, prompt_name: str, field: str) -> dict:
+def run_review_editors_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
-    prompt = build_review_prompt(state, prompt_name)
+    specs = [
+        ("continuity_review", "continuity_editor"),
+        ("structure_review", "structure_editor"),
+        ("character_arc_review", "character_arc_editor"),
+        ("style_review", "style_editor"),
+        ("simulated_reader_review", "simulated_reader"),
+    ]
+    jobs = [
+        AgentJob(
+            key=field,
+            agent=prompt_name,
+            prompt=build_review_prompt(state, prompt_name),
+            graph="review",
+            node=prompt_name,
+            prompt_profile="review_editor",
+        )
+        for field, prompt_name in specs
+    ]
     try:
-        output = adapter.complete(prompt, store.project_dir(state.project_id))
+        results = run_agent_jobs(
+            adapter=adapter,
+            project_dir=store.project_dir(state.project_id),
+            project_id=state.project_id,
+            jobs=jobs,
+        )
     except AgentAdapterError as exc:
         state.error = str(exc)
         state.review_status = "error"
         store.save_state(state)
         return state.to_dict()
-    state.director_task_args[field] = output.strip()
+
+    for result in results:
+        normalized = normalize_review_editor_report(result.output, result.output)
+        state.director_task_args[f"{result.key}_raw"] = result.output.strip()
+        state.director_task_args[result.key] = normalized
+        state.last_agent_reports = append_agent_report(
+            state.last_agent_reports,
+            result.agent,
+            "ok",
+            {"chars": len(json.dumps(normalized, ensure_ascii=False)), "elapsed_ms": result.elapsed_ms or 0},
+        )
+    state.active_stage = "review_editors"
+    store.save_state(state)
+    return state.to_dict()
+
+
+def run_review_agent(data: dict, adapter: AgentAdapter, store: LocalStore, prompt_name: str, field: str) -> dict:
+    state = NovelState.from_dict(data)
+    prompt = build_review_prompt(state, prompt_name)
+    try:
+        output = complete_with_metrics(
+            adapter=adapter,
+            prompt=prompt,
+            project_dir=store.project_dir(state.project_id),
+            project_id=state.project_id,
+            graph="review",
+            node=prompt_name,
+            agent=prompt_name,
+            prompt_profile="review_editor",
+        )
+    except AgentAdapterError as exc:
+        state.error = str(exc)
+        state.review_status = "error"
+        store.save_state(state)
+        return state.to_dict()
+    normalized = normalize_review_editor_report(output, output)
+    state.director_task_args[f"{field}_raw"] = output.strip()
+    state.director_task_args[field] = normalized
     state.active_stage = prompt_name
-    state.last_agent_reports = append_agent_report(state.last_agent_reports, prompt_name, "ok", {"chars": len(output)})
+    state.last_agent_reports = append_agent_report(state.last_agent_reports, prompt_name, "ok", {"chars": len(json.dumps(normalized, ensure_ascii=False))})
     store.save_state(state)
     return state.to_dict()
 
@@ -139,13 +186,22 @@ def review_synthesizer_node(data: dict, adapter: AgentAdapter, store: LocalStore
     state = NovelState.from_dict(data)
     prompt = build_review_prompt(state, "review_synthesizer")
     try:
-        output = adapter.complete(prompt, store.project_dir(state.project_id))
+        output = complete_with_metrics(
+            adapter=adapter,
+            prompt=prompt,
+            project_dir=store.project_dir(state.project_id),
+            project_id=state.project_id,
+            graph="review",
+            node="review_synthesizer",
+            agent="review_synthesizer",
+            prompt_profile="review_synthesizer",
+        )
     except AgentAdapterError as exc:
         state.error = str(exc)
         state.review_status = "error"
         store.save_state(state)
         return state.to_dict()
-    report = normalize_review_report(parse_review_json(output), output)
+    report = normalize_review_report(output, output)
     state.director_task_args["review_json"] = report
     state.current_review_report = render_review_markdown(report)
     state.editor_notes = legacy_editor_notes(report, state.current_review_report)
@@ -210,19 +266,55 @@ def save_review_report_node(data: dict, store: LocalStore) -> dict:
 
 
 def build_review_prompt(state: NovelState, prompt_name: str) -> str:
+    if prompt_name in REVIEW_EDITOR_PROMPTS:
+        return build_review_editor_prompt(state, prompt_name)
+    if prompt_name == "review_synthesizer":
+        return build_review_synthesizer_prompt(state)
     template = load_prompt(prompt_name)
+    return base_review_prompt(state, template, include_draft=True, reports="")
+
+
+def build_review_editor_prompt(state: NovelState, prompt_name: str) -> str:
+    template = load_prompt(prompt_name)
+    contract = (
+        "OUTPUT_CONTRACT:\n"
+        "- 只输出 JSON，不要 Markdown。\n"
+        "- schema: {role, verdict, top_issues, rewrite_tasks, keep}。\n"
+        "- top_issues 最多 5 条，每条包含 severity/location/issue/fix。\n"
+        "- rewrite_tasks 最多 5 条，keep 最多 3 条。\n"
+        "- issue/fix/task/keep 单条不超过 80 中文字符。\n"
+        "- 不要复述 Review Context 或 Chapter Draft。"
+    )
+    return base_review_prompt(state, f"{template.rstrip()}\n\n{contract}", include_draft=True, reports="")
+
+
+def build_review_synthesizer_prompt(state: NovelState) -> str:
+    template = load_prompt("review_synthesizer")
     reports = format_review_reports(state)
+    contract = (
+        "OUTPUT_CONTRACT:\n"
+        "- 只输出 JSON，不要 Markdown。\n"
+        "- schema: {decision, score, blocking_issues, issues, rewrite_tasks, do_not_change}。\n"
+        "- blocking_issues 最多 5 条，issues/rewrite_tasks 最多 8 条。\n"
+        "- 每条 blocking/issue/task 不超过 100 中文字符，do_not_change 不超过 80 中文字符。\n"
+        "- 只根据五份 compact editor JSON 汇总，不要复述上下文。"
+    )
+    return base_review_prompt(state, f"{template.rstrip()}\n\n{contract}", include_draft=False, reports=reports)
+
+
+def base_review_prompt(state: NovelState, template: str, *, include_draft: bool, reports: str) -> str:
+    draft_section = f"\n\n## Chapter Draft\n{state.chapter_draft or '暂无'}" if include_draft else ""
+    reports_section = f"\n\n## Editor Reports\n{reports or '暂无'}" if reports else ""
     return (
         f"{template.rstrip()}\n\n"
         f"PROJECT_ID: {state.project_id}\n"
         f"TITLE: {state.title}\n"
         f"CHAPTER: {state.active_chapter or state.current_chapter}\n"
         f"REVISION_COUNT: {state.revision_count}\n\n"
-        f"## Review Context\n{state.director_task_args.get('review_context') or '暂无'}\n\n"
-        f"## Chapter Draft\n{state.chapter_draft or '暂无'}\n\n"
-        f"## Editor Reports\n{reports or '暂无'}\n"
+        f"## Review Context\n{state.director_task_args.get('review_context') or '暂无'}"
+        f"{draft_section}"
+        f"{reports_section}\n"
     )
-
 
 def format_review_reports(state: NovelState) -> str:
     fields = [
@@ -234,9 +326,10 @@ def format_review_reports(state: NovelState) -> str:
     ]
     parts = []
     for key, label in fields:
-        value = str(state.director_task_args.get(key, "")).strip()
+        value = state.director_task_args.get(key, "")
         if value:
-            parts.append(f"### {label}\n{value}")
+            rendered = json.dumps(value, ensure_ascii=False, sort_keys=True) if isinstance(value, dict) else str(value).strip()
+            parts.append(f"### {label}\n{rendered}")
     return "\n\n".join(parts)
 
 
@@ -268,27 +361,7 @@ def parse_review_json(output: str) -> dict[str, Any]:
 
 
 def normalize_review_report(raw: Any, fallback_text: str) -> dict[str, Any]:
-    data = dict(raw) if isinstance(raw, dict) else {}
-    decision = str(data.get("decision") or data.get("status") or "revise").strip().lower()
-    if decision not in {"pass", "revise", "stop"}:
-        decision = "revise"
-    try:
-        score = int(data.get("score") or data.get("quality_score") or 0)
-    except (TypeError, ValueError):
-        score = 0
-    issues = normalize_list(data.get("issues"))
-    blocking = normalize_list(data.get("blocking_issues"))
-    tasks = normalize_list(data.get("rewrite_tasks"))
-    if not issues and fallback_text.strip():
-        issues = extract_bullets(fallback_text)[:5]
-    return {
-        "decision": decision,
-        "score": max(0, min(score, 100)),
-        "blocking_issues": blocking,
-        "issues": issues,
-        "rewrite_tasks": tasks,
-    }
-
+    return normalize_review_synthesis(raw, fallback_text)
 
 def normalize_list(value: Any) -> list[str]:
     if isinstance(value, str):

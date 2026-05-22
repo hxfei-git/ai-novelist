@@ -66,3 +66,14 @@ def test_register_artifact_increments_version(tmp_path):
     assert first.version == 1
     assert second.version == 2
     assert [item.version for item in load_artifacts(tmp_path)] == [1, 2]
+
+
+def test_register_artifact_dedupes_same_content_digest(tmp_path):
+    first = save_markdown_artifact(tmp_path, "a.md", "same", "chapter_card", chapter=1)
+    second = save_markdown_artifact(tmp_path, "a.md", "same", "chapter_card", chapter=1)
+    records = load_artifacts(tmp_path)
+
+    assert first.id == second.id
+    assert len([item for item in records if item.type == "chapter_card"]) == 1
+    assert records[0].sha256
+    assert records[0].chars > 0

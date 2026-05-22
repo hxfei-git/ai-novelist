@@ -19,14 +19,14 @@ def main() -> None:
     state.idea = "月球城市失忆工程师追查纸质手稿预言"
     store.save_state(state)
 
-    service.handle_turn(project_id, "写第 1 章", channel="test")
-    first_review = service.handle_turn(project_id, "审稿第 1 章", channel="test")
+    run_confirmed_turn(service, project_id, "写第 1 章")
+    first_review = run_confirmed_turn(service, project_id, "审稿第 1 章")
     assert first_review.state.editor_decision == "revise"
-    service.handle_turn(project_id, "修订第 1 章", channel="test")
-    second_review = service.handle_turn(project_id, "审稿第 1 章", channel="test")
+    run_confirmed_turn(service, project_id, "修订第 1 章")
+    second_review = run_confirmed_turn(service, project_id, "审稿第 1 章")
     assert second_review.state.editor_decision == "pass"
-    service.handle_turn(project_id, "定稿第 1 章", channel="test")
-    service.handle_turn(project_id, "导出小说", channel="test")
+    run_confirmed_turn(service, project_id, "定稿第 1 章")
+    run_confirmed_turn(service, project_id, "导出小说")
 
     assert store.chapter_card_path(project_id, 1).exists()
     assert store.scene_cards_path(project_id, 1).exists()
@@ -38,6 +38,14 @@ def main() -> None:
     assert store.volume_export_path(project_id).exists()
     assert store.bible_export_path(project_id).exists()
     print("full workflow mock smoke passed")
+
+
+
+def run_confirmed_turn(service, project_id: str, text: str):
+    result = service.handle_turn(project_id, text, channel="test")
+    if result.choices:
+        result = service.handle_turn(project_id, "1", channel="test")
+    return result
 
 
 if __name__ == "__main__":

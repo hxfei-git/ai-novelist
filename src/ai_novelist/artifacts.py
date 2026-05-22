@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -22,6 +23,8 @@ class ArtifactRecord:
     created_at: str = ""
     updated_at: str = ""
     summary: str = ""
+    sha256: str = ""
+    chars: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -42,6 +45,8 @@ class ArtifactRecord:
             created_at=str(data.get("created_at", "")),
             updated_at=str(data.get("updated_at", "")),
             summary=str(data.get("summary", "")),
+            sha256=str(data.get("sha256", "")),
+            chars=int(data.get("chars", 0) or 0),
             metadata=dict(data.get("metadata", {})) if isinstance(data.get("metadata", {}), dict) else {},
         )
 
@@ -72,6 +77,23 @@ def register_artifact(project_dir: Path, record: ArtifactRecord) -> ArtifactReco
     records = load_artifacts(project_dir)
     now = utc_now()
     normalized_path = normalize_relative_path(project_dir, record.path)
+    content_sha, content_chars = artifact_content_digest(project_dir, normalized_path)
+    record_sha = record.sha256 or content_sha
+    record_chars = record.chars or content_chars
+    duplicate = next(
+        (
+            item
+            for item in records
+            if item.type == record.type
+            and item.chapter == record.chapter
+            and item.stage == record.stage
+            and item.sha256
+            and item.sha256 == record_sha
+        ),
+        None,
+    )
+    if duplicate is not None:
+        return duplicate
     matching = [
         item
         for item in records
@@ -96,6 +118,8 @@ def register_artifact(project_dir: Path, record: ArtifactRecord) -> ArtifactReco
         created_at=created_at,
         updated_at=now,
         summary=record.summary,
+        sha256=record_sha,
+        chars=record_chars,
         metadata=dict(record.metadata),
     )
     records.append(registered)
@@ -200,3 +224,15 @@ def normalize_relative_path(project_dir: Path, path: str) -> str:
 
 def utc_now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+def sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def artifact_content_digest(project_dir: Path, relative_path: str) -> tuple[str, int]:
+    path = project_dir / relative_path
+    if not path.exists() or not path.is_file():
+        return "", 0
+    text = path.read_text(encoding="utf-8")
+    return sha256_text(text), len(text)

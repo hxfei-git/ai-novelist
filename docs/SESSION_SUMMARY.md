@@ -886,3 +886,54 @@ Smoke 验证：`.venv/bin/python tests/smoke_phase2_chat.py`，结果 `phase2 ch
 .venv/bin/python tests/smoke_outline_collaboration.py
 # outline collaboration smoke ok
 ```
+
+## 42. 本轮更新：多 Agent 性能、上下文与持久化治理
+
+- 新增 `agent_metrics.py`，所有接入的 Agent 调用会写入 `projects/<project>/debug/agent_runs.jsonl`，记录 prompt/output 字符数、估算 token、耗时、模型信息、状态和上下文来源，不写完整 prompt/output。
+- 新增 `scripts/show_agent_metrics.py`，支持按 `prompt_chars`、`output_chars`、`elapsed_ms` 查看最重调用。
+- 新增 `ContextProfile` / `ContextBundle` / `ContextSource`，`build_context(...)` 仍兼容旧调用；review 上下文不再包含完整章节草稿，避免 `Review Context` 和 `Chapter Draft` 重复。
+- 新增 `output_contracts.py`，review editor 和 synthesizer 输出会被归一化为短 JSON；非 JSON 输出会 fallback 成短结构。
+- Review Graph 改为 `load_review_context -> review_editors -> review_synthesizer -> decide -> save`；五个 editor 在 `AI_NOVELIST_PARALLEL_AGENTS=1` 时并行，默认仍按顺序执行。
+- Outline 同一阶段的 role Agent 可并行执行，role_reviews 仍按 `STAGE_ROLES[stage]` 原顺序写回；阶段之间和汇总 Agent 保持串行。
+- Chapter Planning 的 goal/conflict/hook Agent 可并行执行；三者只读取同一份章节上下文，不再读取彼此报告，synthesizer 负责汇总。
+- `project_memory.md` 增加 sha256 digest 去重；ArtifactRecord 增加 `sha256` 和 `chars`，相同内容不重复注册；已保存到文件的大字段在 `state.json` 中只保留摘要。
+- Review editor、chapter planning 子 Agent 和 outline role prompt 已加入输出预算，要求不复述上下文、不输出长篇分析。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_agent_metrics.py tests/test_agent_parallel.py tests/test_context_builder.py tests/test_output_contracts.py tests/test_graph_review.py tests/test_graph_chapter_plan.py tests/test_outline_collaboration.py tests/test_artifacts.py tests/test_local_store.py
+# 62 passed
+```
+
+剩余限制：
+
+- 并行默认关闭；真实模型/API 并行可能受本机资源、账号配额或服务端速率限制影响。
+- 当前只并行互不依赖的局部 Agent；synthesizer、阶段推进、定稿、导出等依赖前置结果的节点仍串行。
+- ContextProfile 首版为规则预算和字符级裁剪，尚未引入语义压缩 Agent。
+
+最终验证补充：
+
+```bash
+.venv/bin/python -m pytest
+# 200 passed
+.venv/bin/python tests/smoke_phase2.py
+# phase2 smoke ok
+.venv/bin/python tests/smoke_outline_collaboration.py
+# outline collaboration smoke ok
+.venv/bin/python tests/smoke_phase2_chat.py
+# phase2 chat smoke ok
+.venv/bin/python tests/smoke_phase2_compose.py
+# phase2 compose smoke ok
+.venv/bin/python tests/smoke_full_workflow_mock.py
+# full workflow mock smoke passed
+.venv/bin/ai-novelist compose --project perf-context-mock --idea "一个失忆工程师在月球城市追查自己的小说手稿" --chapter 1 --mock --auto-approve
+# 通过；当前新项目 compose 会先推进大纲阶段
+.venv/bin/ai-novelist write-chapter --project perf-context-mock --chapter 1 --mock --auto-approve
+# 通过
+AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-novelist review --project perf-context-mock --chapter 1 --mock --auto-approve
+# 通过，review 返回 revise / 72
+.venv/bin/python scripts/show_agent_metrics.py --project perf-context-mock --top prompt_chars
+.venv/bin/python scripts/show_agent_metrics.py --project perf-context-mock --top elapsed_ms
+# 均可显示 trace 表
+```

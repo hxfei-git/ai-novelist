@@ -1,6 +1,6 @@
 from ai_novelist.artifacts import save_markdown_artifact
 from ai_novelist.bible import NovelBible, save_bible
-from ai_novelist.context_builder import build_context
+from ai_novelist.context_builder import build_context, build_context_bundle, build_context_manifest
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
 
@@ -19,14 +19,15 @@ def test_drafting_context_includes_chapter_and_scene_cards(tmp_path):
     assert "写第 1 章" in context
 
 
-def test_review_context_includes_draft(tmp_path):
+def test_review_context_excludes_full_draft(tmp_path):
     store = LocalStore(tmp_path)
     state = store.create_project("Demo", "demo")
+    state.chapter_draft = "# 草稿正文\n重复文本"
     save_markdown_artifact(store.project_dir("demo"), "chapters/chapter_001/draft_v1.md", "# 草稿正文", "chapter_draft", chapter=1)
 
     context = build_context(state, store, "review", chapter=1)
 
-    assert "# 草稿正文" in context
+    assert "# 草稿正文" not in context
 
 
 def test_locked_constraints_survive_truncation(tmp_path):
@@ -64,3 +65,19 @@ def test_context_includes_previous_chapter_summary(tmp_path):
 
     assert "主角发现第一条线索" in context
     assert "当前章摘要不应作为前文" not in context
+
+
+def test_context_bundle_records_sources_and_respects_profile_limit(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.user_request = "审稿第 1 章"
+    state.locked_constraints = ["主角不能主动杀人"]
+    state.current_chapter_card = "章节卡" * 1000
+
+    bundle = build_context_bundle(state, store, "review_context", chapter=1)
+    manifest = build_context_manifest(bundle)
+
+    assert bundle.total_chars <= 9000
+    assert bundle.estimated_tokens > 0
+    assert any(item["section"] == "锁定约束" for item in manifest)
+    assert all("included_chars" in item for item in manifest)

@@ -1167,3 +1167,66 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 .venv/bin/python tests/smoke_outline_collaboration.py
 # outline collaboration smoke ok
 ```
+
+## 34. 多 Agent 性能改造：Metrics、ContextProfile、并行与持久化
+
+本轮按 `plan.md` 的 Phase A-G 完成首版性能与上下文治理改造，目标是不改变用户入口和核心工作流的前提下，降低多 Agent 阶段的上下文膨胀和串行等待成本。
+
+已完成：
+
+- 新增 Agent trace：`complete_with_metrics(...)` 会记录 graph、node、agent、prompt profile、prompt/output 字符数、估算 token、耗时、状态、模型信息和上下文来源，写入 `projects/<project>/debug/agent_runs.jsonl`。
+- 新增 `scripts/show_agent_metrics.py`，可按 `prompt_chars`、`output_chars` 或 `elapsed_ms` 查看最重 Agent 调用。
+- 新增 ContextProfile：`build_context_bundle(...)` 返回 `ContextBundle(text, sources, total_chars, estimated_tokens, truncated)`，`build_context(...)` 保持旧接口兼容。
+- Review 上下文去重：`review_context` 不再包含完整 `chapter_draft`；完整草稿只出现在 editor prompt 的 `## Chapter Draft` 中一次；review synthesizer 不读取完整草稿，只读取五份 compact editor JSON。
+- 新增 output contract：review editor 输出归一化为短 JSON，review synthesizer 输出归一化为结构化 JSON；非 JSON 输出会降级为短结构。
+- 新增可控并行：`AI_NOVELIST_PARALLEL_AGENTS=1` 时，review 五个 editor、outline 同阶段 role agent、chapter planning 的 goal/conflict/hook agent 会在单节点内部并行执行；默认关闭。
+- 并行实现遵守状态写回约束：worker 线程只接收 prompt 快照并调用 adapter；所有结果回到主线程后统一写入 `NovelState` 并保存。
+- 持久化优化：`project_memory.md` 使用 `.sha256` digest 避免内容不变时重复写入；ArtifactRecord 增加 `sha256` 和 `chars`，同类型/章节/阶段同 digest 不重复注册；已落盘的大字段在 `state.json` 中保存短摘要。
+- Prompt 精简：review editor、chapter planning 子 Agent 和 outline role prompt 增加 OUTPUT_BUDGET，要求不复述上下文、不输出分析过程、限制条数和单条长度。
+
+新增配置：
+
+```bash
+AI_NOVELIST_PARALLEL_AGENTS=0|1      # 默认 0
+AI_NOVELIST_MAX_PARALLEL_AGENTS=1..8 # 默认 3
+```
+
+新增查看命令：
+
+```bash
+.venv/bin/python scripts/show_agent_metrics.py --project demo --top prompt_chars
+.venv/bin/python scripts/show_agent_metrics.py --project demo --top elapsed_ms
+```
+
+当前边界：
+
+- 并行默认关闭，避免真实 Codex CLI 或 API 受本机资源、配额和速率限制影响。
+- 不做 LangGraph fan-out；只在单节点内部并行独立 Agent。
+- Stage 之间仍串行；outline synthesizer、review synthesizer 和 chapter card synthesizer 仍等待其前置 Agent 全部完成。
+- trace 不保存完整 prompt 或完整 output，只记录尺寸、耗时和 manifest。
+
+最终验证补充：
+
+```bash
+.venv/bin/python -m pytest
+# 200 passed
+.venv/bin/python tests/smoke_phase2.py
+# phase2 smoke ok
+.venv/bin/python tests/smoke_outline_collaboration.py
+# outline collaboration smoke ok
+.venv/bin/python tests/smoke_phase2_chat.py
+# phase2 chat smoke ok
+.venv/bin/python tests/smoke_phase2_compose.py
+# phase2 compose smoke ok
+.venv/bin/python tests/smoke_full_workflow_mock.py
+# full workflow mock smoke passed
+.venv/bin/ai-novelist compose --project perf-context-mock --idea "一个失忆工程师在月球城市追查自己的小说手稿" --chapter 1 --mock --auto-approve
+# 通过；当前新项目 compose 会先推进大纲阶段
+.venv/bin/ai-novelist write-chapter --project perf-context-mock --chapter 1 --mock --auto-approve
+# 通过
+AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-novelist review --project perf-context-mock --chapter 1 --mock --auto-approve
+# 通过，review 返回 revise / 72
+.venv/bin/python scripts/show_agent_metrics.py --project perf-context-mock --top prompt_chars
+.venv/bin/python scripts/show_agent_metrics.py --project perf-context-mock --top elapsed_ms
+# 均可显示 trace 表
+```

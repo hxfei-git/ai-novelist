@@ -57,3 +57,19 @@ def test_director_service_routes_chapter_planning(tmp_path):
     assert result.state.director_action == "plan_chapter"
     assert result.state.active_graph == "chapter_plan"
     assert store.chapter_card_path("demo", 1).exists()
+
+
+def test_chapter_plan_parallel_path_records_three_reports(tmp_path, monkeypatch):
+    monkeypatch.setenv("AI_NOVELIST_PARALLEL_AGENTS", "1")
+    store = LocalStore(tmp_path)
+    state = make_ready_state(store)
+
+    result = build_chapter_plan_graph(CodexCLIAdapter(mock=True), store).invoke(state.to_dict())
+
+    for key in ["chapter_goal_report", "chapter_conflict_report", "chapter_hook_report"]:
+        assert result["director_task_args"][key]
+    trace_path = store.project_dir("demo") / "debug" / "agent_runs.jsonl"
+    assert trace_path.exists()
+    text = trace_path.read_text(encoding="utf-8")
+    assert "chapter_goal_agent" in text
+    assert "chapter_card_synthesizer" in text

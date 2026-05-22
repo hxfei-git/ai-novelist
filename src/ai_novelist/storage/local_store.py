@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from copy import deepcopy
@@ -196,7 +197,17 @@ class LocalStore:
                 slim_artifacts[str(stage)] = {k: v for k, v in slim.items() if v not in (None, "", [])}
             data["outline_stage_artifacts"] = slim_artifacts
             data["outline_stage_summaries"] = summaries
+        self._compact_saved_large_fields(state, data)
         return data
+
+    def _compact_saved_large_fields(self, state: NovelState, data: dict[str, Any]) -> None:
+        chapter = state.active_chapter or state.current_chapter
+        if data.get("chapter_draft") and self.chapter_draft_path(state.project_id, chapter, 2 if state.revision_count else 1).exists():
+            data["chapter_draft"] = summarize_text(str(data["chapter_draft"]), max_chars=600)
+        if data.get("current_review_report") and self.review_report_path(state.project_id, chapter, 1).exists():
+            data["current_review_report"] = summarize_text(str(data["current_review_report"]), max_chars=600)
+        if data.get("reference_brief") and self.reference_brief_path(state.project_id).exists():
+            data["reference_brief"] = summarize_text(str(data["reference_brief"]), max_chars=800)
 
     def _ensure_outline_artifact_files(self, project_id: str, stage: str, item: dict[str, Any], synthesis: str) -> None:
         content = synthesis
@@ -271,10 +282,15 @@ class LocalStore:
         return path.read_text(encoding="utf-8")
 
     def save_project_memory(self, state: NovelState) -> Path:
-        content = build_project_memory_markdown(state)
+        content = build_project_memory_markdown(state).rstrip() + "\n"
         path = self.project_memory_path(state.project_id)
+        digest_path = path.with_suffix(path.suffix + ".sha256")
+        digest = sha256_text(content)
+        if path.exists() and digest_path.exists() and digest_path.read_text(encoding="utf-8").strip() == digest:
+            return path
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content.rstrip() + "\n", encoding="utf-8")
+        path.write_text(content, encoding="utf-8")
+        digest_path.write_text(digest + "\n", encoding="utf-8")
         return path
 
     def save_project_context(self, project_id: str, content: str) -> Path:
@@ -461,3 +477,7 @@ def build_project_memory_markdown(state: NovelState) -> str:
 def slugify(value: str) -> str:
     slug = re.sub(r"[^a-zA-Z0-9\u4e00-\u9fff_-]+", "-", value.strip()).strip("-")
     return slug[:64]
+
+
+def sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()

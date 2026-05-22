@@ -623,3 +623,19 @@ def test_outline_direct_entry_temporary_revises_locked_direction_then_returns_to
     assert state.outline_stage_artifacts["direction"]["status"] == "locked"
     assert state.outline_stage_artifacts["direction"]["pending_questions"] == []
     assert "已回到第 5 阶段「故事流程」继续修改" in state.director_message
+
+
+def test_outline_stage_parallel_path_preserves_role_order(tmp_path, monkeypatch):
+    monkeypatch.setenv("AI_NOVELIST_PARALLEL_AGENTS", "1")
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.idea = "月球城市失忆工程师"
+    graph = build_outline_collaboration_graph(CodexCLIAdapter(mock=True), store)
+
+    state = run_outline_turn(graph, state, store, "请生成大纲")
+
+    reviews = state.outline_stage_artifacts["direction"]["role_reviews"]
+    assert [item["role"] for item in reviews] == ["类型定位 Agent", "主题卖点 Agent", "风险编辑 Agent"]
+    trace_path = store.project_dir("demo") / "debug" / "agent_runs.jsonl"
+    assert trace_path.exists()
+    assert "outline_stage_role" in trace_path.read_text(encoding="utf-8")

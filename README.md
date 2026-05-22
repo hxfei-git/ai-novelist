@@ -322,6 +322,30 @@ export AI_NOVELIST_FEISHU_APP_SECRET="你的 App Secret"
 
 当前限制：只支持单聊文本；暂不支持群聊 @、飞书交互卡片按钮、Webhook 或后台队列。
 
+## Agent 性能追踪与并行
+
+默认会为已接入的 Agent 调用记录轻量 trace，不保存完整 prompt 或输出：
+
+```text
+projects/<project>/debug/agent_runs.jsonl
+```
+
+查看最大 prompt 或最慢调用：
+
+```bash
+.venv/bin/python scripts/show_agent_metrics.py --project demo --top prompt_chars
+.venv/bin/python scripts/show_agent_metrics.py --project demo --top elapsed_ms
+```
+
+独立 Agent 可开启单节点内部并行，默认关闭：
+
+```bash
+export AI_NOVELIST_PARALLEL_AGENTS=1
+export AI_NOVELIST_MAX_PARALLEL_AGENTS=3
+```
+
+当前并行范围包括 review 五个编辑 Agent、outline 同阶段 role Agent、chapter planning 的 goal/conflict/hook Agent。真实模型/API 可能受本机资源或速率限制影响，建议先在 `--mock` 下验证。
+
 ## 单步命令
 
 这些命令保留用于单独重跑某个 Agent：
