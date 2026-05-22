@@ -1243,3 +1243,23 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 220 passed
 ```
+
+## 59. 本轮更新：Chapter Planner Prompt 整改
+
+- 完整读取并执行 `15_chapter_planner.md`。
+- `chapter_planner.md` 现在区分当前章节模式和全书章节拆分模式。
+- 当前章节模式只输出当前章节写作输入，不建议全书章节数量，不重写全书章节结构。
+- 禁止新增全局世界观 canon、人物关系机制、场景卡正文、正式正文和无关章节扩写。
+- 当前章细纲限制不超过 900 中文字符，场景顺序最多 5 个。
+- 新增回归测试覆盖模式区分和当前章规划边界。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 7 passed
+.venv/bin/python -m pytest tests/test_graph_chapter_plan.py tests/test_graph_scene.py
+# 7 passed
+.venv/bin/python -m pytest
+# 221 passed
+```

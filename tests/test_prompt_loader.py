@@ -83,3 +83,19 @@ def test_outline_reviser_prompt_defaults_to_minimal_revision():
     assert "保留约束" in prompt
     for forbidden in ("无依据大改", "重写锁定约束", "改动未被要求的世界观/人物关系", "扩写正文"):
         assert forbidden in prompt
+
+
+def test_chapter_planner_prompt_separates_current_chapter_and_global_modes():
+    prompt = load_prompt("chapter_planner")
+
+    assert "当前章节模式" in prompt
+    assert "全书章节拆分模式" in prompt
+    assert "只输出当前章节写作输入" in prompt
+    assert "不建议全书章节数量" in prompt
+    assert "不重写全书章节结构" in prompt
+    assert "不得新增全局世界观 canon" in prompt
+    assert "人物关系机制" in prompt
+    assert "不生成场景卡正文" in prompt
+    assert "当前章细纲不超过 900 中文字符" in prompt
+    assert "场景顺序最多 5 个" in prompt
+    assert "全书章节规划 / 拆分全书章节 / 章节总览" in prompt
