@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ai_novelist.agent_metrics import complete_with_metrics
+from ai_novelist.agent_metrics import complete_with_metrics, estimate_tokens
 
 
 @dataclass(frozen=True)
@@ -29,6 +29,14 @@ class AgentJobResult:
     agent: str
     output: str
     elapsed_ms: int | None = None
+    prompt_chars: int = 0
+    output_chars: int = 0
+    estimated_prompt_tokens: int = 0
+    estimated_output_tokens: int = 0
+
+    @property
+    def estimated_total_tokens(self) -> int:
+        return self.estimated_prompt_tokens + self.estimated_output_tokens
 
 
 def parallel_agents_enabled() -> bool:
@@ -76,4 +84,13 @@ def run_one_job(adapter, project_dir: Path, project_id: str, job: AgentJob) -> A
         context_sources=job.context_sources,
     )
     elapsed_ms = int((time.perf_counter() - start) * 1000)
-    return AgentJobResult(key=job.key, agent=job.agent, output=output, elapsed_ms=elapsed_ms)
+    return AgentJobResult(
+        key=job.key,
+        agent=job.agent,
+        output=output,
+        elapsed_ms=elapsed_ms,
+        prompt_chars=len(job.prompt),
+        output_chars=len(output),
+        estimated_prompt_tokens=estimate_tokens(job.prompt),
+        estimated_output_tokens=estimate_tokens(output),
+    )

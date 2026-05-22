@@ -1230,3 +1230,21 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python scripts/show_agent_metrics.py --project perf-context-mock --top elapsed_ms
 # 均可显示 trace 表
 ```
+
+
+## 40. Agent 完成行轻量用量显示
+
+目标：在不打印上下文正文、不增加进度噪声的前提下，让长任务执行时能看到每次 Agent 调用的大致上下文长度和 token 消耗。
+
+已完成：
+
+- Agent 完成进度行在现有 `模型/effort/耗时` 后追加轻量用量：`ctx=<prompt_chars>字/tok≈<estimated_total_tokens>`。
+- `ctx` 表示本次实际发送给 adapter 的完整 prompt 字符数；`tok≈` 表示 prompt + output 的估算 token，继续使用当前 `estimate_tokens()` 规则。
+- 大纲阶段 role Agent 和大纲汇总 Agent 已接入该显示，示例：`deepseek-v4-pro/disabled-medium/9.9s/ctx=12k字/tok≈7.1k`。
+- `agent_runs.jsonl` trace 新增 `estimated_output_tokens`，继续不保存完整 prompt 或 output。
+
+后续待办：
+
+- 扩展 adapter 返回结构，保留 DeepSeek/Codex provider 的真实 usage；没有真实 usage 时继续使用估算值。
+- 在 `scripts/show_agent_metrics.py` 增加按 token 汇总、按 graph/node/agent 聚合和单项目总消耗统计。
+- 将章节卡、场景卡、正文、审稿、修订、定稿等非大纲路径的 Agent 完成行逐步接入同一轻量用量显示；保持开始行不展示 token，因为输出消耗尚未知。

@@ -27,7 +27,13 @@ def format_elapsed(seconds: float) -> str:
     return f"{seconds:.0f}s"
 
 
-def describe_agent_call(adapter: object, agent: str = "", elapsed_seconds: float | None = None) -> str:
+def describe_agent_call(
+    adapter: object,
+    agent: str = "",
+    elapsed_seconds: float | None = None,
+    context_chars: int | None = None,
+    estimated_tokens: int | None = None,
+) -> str:
     """Return compact model/effort metadata for progress messages."""
     if getattr(adapter, "mock", False):
         parts = ["mock", "n/a"]
@@ -52,11 +58,30 @@ def describe_agent_call(adapter: object, agent: str = "", elapsed_seconds: float
             parts = [codex_bin, "cli-default"]
     if elapsed_seconds is not None:
         parts.append(format_elapsed(elapsed_seconds))
+    if context_chars is not None:
+        parts.append(f"ctx={format_compact_number(context_chars)}字")
+    if estimated_tokens is not None:
+        parts.append(f"tok≈{format_compact_number(estimated_tokens)}")
     return "/".join(parts)
 
 
-def with_agent_metadata(message: str, adapter: object, agent: str = "", elapsed_seconds: float | None = None) -> str:
-    return f"{message}（{describe_agent_call(adapter, agent, elapsed_seconds)}）"
+def with_agent_metadata(
+    message: str,
+    adapter: object,
+    agent: str = "",
+    elapsed_seconds: float | None = None,
+    context_chars: int | None = None,
+    estimated_tokens: int | None = None,
+) -> str:
+    return f"{message}（{describe_agent_call(adapter, agent, elapsed_seconds, context_chars, estimated_tokens)}）"
+
+
+def format_compact_number(value: int) -> str:
+    if value < 1000:
+        return str(value)
+    if value < 10_000:
+        return f"{value / 1000:.1f}k"
+    return f"{round(value / 1000)}k"
 
 
 def completion_progress_message(message: str, elapsed_seconds: float) -> str:

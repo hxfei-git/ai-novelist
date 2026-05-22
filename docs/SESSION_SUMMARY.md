@@ -937,3 +937,20 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python scripts/show_agent_metrics.py --project perf-context-mock --top elapsed_ms
 # 均可显示 trace 表
 ```
+
+
+## 43. 本轮更新：Agent 完成行显示上下文长度与估算 token
+
+- 大纲阶段 role Agent 和汇总 Agent 的完成行在现有 `模型/effort/耗时` 后追加 `ctx=<prompt_chars>字/tok≈<estimated_total_tokens>`。
+- 只显示数值，不打印上下文正文、source manifest 或其他调试明细。
+- `AgentJobResult` 现在携带 prompt/output 字符数与估算 token；`agent_runs.jsonl` trace 新增 `estimated_output_tokens`。
+- 真实 provider usage、token 聚合统计脚本和更多 Agent 路径接入已列入 `docs/IMPLEMENTATION_PLAN.md` 后续待办。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_progress.py tests/test_agent_parallel.py tests/test_agent_metrics.py tests/test_outline_collaboration.py
+# 36 passed
+.venv/bin/python -m pytest
+# 201 passed
+```

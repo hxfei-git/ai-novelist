@@ -35,6 +35,7 @@ class AgentRunTrace:
     prompt_chars: int
     estimated_prompt_tokens: int
     output_chars: int
+    estimated_output_tokens: int
     elapsed_ms: int
     status: str
     error: str | None
@@ -101,6 +102,7 @@ def complete_with_metrics(
             prompt_chars=len(prompt),
             estimated_prompt_tokens=estimate_tokens(prompt),
             output_chars=len(output),
+            estimated_output_tokens=estimate_tokens(output),
             elapsed_ms=elapsed_ms,
             status=status,
             error=error,

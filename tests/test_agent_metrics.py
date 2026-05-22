@@ -44,7 +44,9 @@ def test_complete_with_metrics_writes_success_trace_without_prompt_or_output(tmp
     trace = read_traces(project_dir)[0]
     assert trace["status"] == "ok"
     assert trace["prompt_chars"] == len(prompt)
+    assert trace["estimated_prompt_tokens"] > 0
     assert trace["output_chars"] == len(output)
+    assert trace["estimated_output_tokens"] > 0
     assert trace["prompt_profile"] == "profile"
     assert "secret prompt" not in json.dumps(trace, ensure_ascii=False)
     assert "short output" not in json.dumps(trace, ensure_ascii=False)

@@ -25,6 +25,9 @@ def test_run_agent_jobs_preserves_input_order_when_parallel_enabled(tmp_path, mo
 
     assert [item.key for item in results] == ["0", "1", "2", "3"]
     assert [item.output for item in results] == [f"output for agent_{i}" for i in range(4)]
+    assert all(item.prompt_chars == len("prompt") for item in results)
+    assert all(item.output_chars == len(item.output) for item in results)
+    assert all(item.estimated_total_tokens > 0 for item in results)
 
 
 def test_run_agent_jobs_reraises_failures(tmp_path, monkeypatch):

@@ -8,10 +8,10 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
-from ai_novelist.agent_metrics import complete_with_metrics
+from ai_novelist.agent_metrics import complete_with_metrics, estimate_tokens
 from ai_novelist.agent_parallel import AgentJob, run_agent_jobs
 from ai_novelist.artifacts import ArtifactRecord, register_artifact
-from ai_novelist.progress import ProgressFunc, complete_with_timing, emit_progress, noop_progress, with_agent_metadata
+from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, with_agent_metadata
 from ai_novelist.prompts import load_prompt
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
@@ -350,16 +350,28 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
         return state.to_dict()
     role_reviews: list[dict[str, str]] = []
     for result in role_results:
-        emit_progress(progress, result.key, with_agent_metadata(f"已完成「{label}」角色短评", adapter, "outline_stage_role", (result.elapsed_ms or 0) / 1000))
+        emit_progress(
+            progress,
+            result.key,
+            with_agent_metadata(
+                f"已完成「{label}」角色短评",
+                adapter,
+                "outline_stage_role",
+                (result.elapsed_ms or 0) / 1000,
+                result.prompt_chars,
+                result.estimated_total_tokens,
+            ),
+        )
         role_reviews.append({"role": result.key, "content": result.output})
 
 
     emit_progress(progress, "大纲汇总 Agent", with_agent_metadata(f"正在汇总「{label}」阶段产物...", adapter, "outline_stage_synthesizer"))
+    synthesizer_prompt = build_outline_stage_synthesizer_prompt(state, stage, role_reviews)
     try:
         start = datetime.now(UTC)
         synthesis = complete_with_metrics(
             adapter=adapter,
-            prompt=build_outline_stage_synthesizer_prompt(state, stage, role_reviews),
+            prompt=synthesizer_prompt,
             project_dir=store.project_dir(state.project_id),
             project_id=state.project_id,
             graph="outline",
@@ -373,7 +385,18 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
         state.review_status = "error"
         store.save_state(state)
         return state.to_dict()
-    emit_progress(progress, "大纲汇总 Agent", with_agent_metadata(f"已完成「{label}」阶段产物汇总", adapter, "outline_stage_synthesizer", elapsed))
+    emit_progress(
+        progress,
+        "大纲汇总 Agent",
+        with_agent_metadata(
+            f"已完成「{label}」阶段产物汇总",
+            adapter,
+            "outline_stage_synthesizer",
+            elapsed,
+            len(synthesizer_prompt),
+            estimate_tokens(synthesizer_prompt) + estimate_tokens(synthesis),
+        ),
+    )
 
     questions = extract_stage_confirmation_questions(synthesis)
     artifact = {
