@@ -1969,3 +1969,24 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Bible conflict checker 只识别冲突，不合并 canon。
 - blocking=true 的冲突用于阻止错误 stable canon 自动写入。
+
+
+## 80. Bible Update Extractor Prompt 整改
+
+目标：执行 `40_bible_update_extractor.md`，让小说圣经更新提取器只提取稳定事实，候选和未确认内容进入 open_questions。
+
+已完成：
+
+- `bible_update_extractor.md` 明确只提取已经确认的 stable canon。
+- 禁止把临时讨论、候选方向、未确认设定、review 建议或模型自行补全写入正式字段。
+- 候选方案、临时建议、未确认问题和依据不足内容必须进入 `open_questions`。
+- 正式数组项必须包含 `source_hint` 或 `evidence`。
+- project、concept、style_guide 的非空更新也必须来自上下文明确表述。
+- 输出预算限制为每类最多 8 项、open_questions 最多 8 条、字符串<=120 中文字符。
+- mock bible update extractor 同步为代表性正式项增加 `source_hint`。
+- 新增 prompt loader 回归测试覆盖 stable canon、open_questions 和 source_hint 边界。
+
+当前边界：
+
+- Bible update extractor 只提取可追溯的稳定 canon。
+- 未确认和候选内容不能进入正式圣经字段。

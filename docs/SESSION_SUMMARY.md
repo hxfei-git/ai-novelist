@@ -1761,3 +1761,26 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 247 passed
 ```
+
+
+## 84. 本轮更新：Bible Update Extractor Prompt 整改
+
+- 完整读取并执行 `40_bible_update_extractor.md`。
+- `bible_update_extractor.md` 现在只提取已经确认的 stable canon。
+- 禁止把临时讨论、候选方向、未确认设定、review 建议或模型自行补全写入正式字段。
+- 候选方案、临时建议、未确认问题和依据不足内容必须进入 `open_questions`。
+- 正式数组项必须包含 `source_hint` 或 `evidence`。
+- 输出预算限制为每类最多 8 项、open_questions 最多 8 条、字符串<=120 中文字符。
+- mock bible update extractor 同步为代表性正式项增加 `source_hint`。
+- 新增回归测试覆盖 stable canon、open_questions 和 source_hint 边界。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 32 passed
+.venv/bin/python -m pytest tests/test_graph_bible.py tests/test_finalize_chapter.py tests/test_director_service.py tests/test_research_workflow.py tests/test_search_backend.py tests/test_bible.py
+# 72 passed
+.venv/bin/python -m pytest
+# 248 passed
+```

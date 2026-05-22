@@ -447,3 +447,15 @@ def test_bible_conflict_checker_prompt_requires_routeable_json_fields():
     assert "没有冲突时输出" in prompt
     for forbidden in ("Markdown", "自动合并方案", "新设定", "处理长解释"):
         assert forbidden in prompt
+
+
+def test_bible_update_extractor_prompt_only_stable_canon_with_sources():
+    prompt = load_prompt("bible_update_extractor")
+
+    assert "只提取已经确认的 stable canon" in prompt
+    assert "候选方案、临时建议、未确认问题" in prompt
+    assert "必须进入 `open_questions`" in prompt
+    assert "每项必须包含 `source_hint` 或 `evidence`" in prompt
+    assert "每类最多 8 项" in prompt
+    for forbidden in ("临时讨论", "候选方向", "未确认设定", "review 建议", "模型自行补全", "补造内容"):
+        assert forbidden in prompt

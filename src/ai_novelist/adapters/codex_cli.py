@@ -287,19 +287,19 @@ class CodexCLIAdapter(AgentAdapter):
                     "ending_direction": "公开旧罪，恢复灰籍身份。",
                 },
                 "world_rules": [
-                    {"name": "记忆审计", "description": "任何记忆备份都必须留下审计编号。", "limitation": "失效编号会暴露身份异常。", "cost": "公开未审计记忆会让相关人员失去合法身份。", "source_stage": "worldbuilding"},
-                    {"name": "纸质手稿", "description": "纸质文本无法被城市系统即时追踪。", "limitation": "传播慢且容易成为犯罪证据。", "cost": "持有者会被档案局追查。", "source_stage": "concept"},
+                    {"name": "记忆审计", "description": "任何记忆备份都必须留下审计编号。", "limitation": "失效编号会暴露身份异常。", "cost": "公开未审计记忆会让相关人员失去合法身份。", "source_stage": "worldbuilding", "source_hint": "worldbuilding: 记忆审计规则"},
+                    {"name": "纸质手稿", "description": "纸质文本无法被城市系统即时追踪。", "limitation": "传播慢且容易成为犯罪证据。", "cost": "持有者会被档案局追查。", "source_stage": "concept", "source_hint": "concept: 纸质手稿禁忌"},
                 ],
                 "characters": [
-                    {"name": "林澈", "role": "主角", "identity": "失忆工程师", "external_goal": "追查手稿来源并阻止事故。", "internal_need": "承认并承担旧罪。", "secret": "曾参与关键记忆删除。", "arc": "从逃避旧罪到公开自证。"},
-                    {"name": "许岚", "role": "盟友", "identity": "被删除者后代"},
-                    {"name": "沈博士", "role": "对手", "identity": "记忆秩序维护者"},
+                    {"name": "林澈", "role": "主角", "identity": "失忆工程师", "external_goal": "追查手稿来源并阻止事故。", "internal_need": "承认并承担旧罪。", "secret": "曾参与关键记忆删除。", "arc": "从逃避旧罪到公开自证。", "source_hint": "characters: 主角设定"},
+                    {"name": "许岚", "role": "盟友", "identity": "被删除者后代", "source_hint": "characters: 盟友设定"},
+                    {"name": "沈博士", "role": "对手", "identity": "记忆秩序维护者", "source_hint": "characters: 对手设定"},
                 ],
                 "plot_threads": [
-                    {"name": "手稿预言", "description": "纸质手稿持续预告事故并逼近主角旧身份。", "status": "active", "related_chapters": [1, 2, 3]}
+                    {"name": "手稿预言", "description": "纸质手稿持续预告事故并逼近主角旧身份。", "status": "active", "related_chapters": [1, 2, 3], "source_hint": "story_flow: 手稿预言线"}
                 ],
                 "foreshadowing": [
-                    {"id": "F001", "setup_text": "失效审计编号", "payoff_text": "证明主角身份被删除。", "status": "planned"}
+                    {"id": "F001", "setup_text": "失效审计编号", "payoff_text": "证明主角身份被删除。", "status": "planned", "source_hint": "chapter_outline: 审计编号伏笔"}
                 ],
                 "style_guide": {"pov": "第三人称贴近主角", "tone": "黑暗悬疑科幻"},
             },
