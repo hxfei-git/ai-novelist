@@ -250,3 +250,16 @@ def test_atmosphere_enhancer_prompt_limits_changes_to_description_layer():
     assert "修改范围只限描写层" in prompt
     for forbidden in ("规则", "人物", "组织", "怪物", "剧情转折", "新 canon", "结尾钩子"):
         assert forbidden in prompt
+
+
+def test_dialogue_enhancer_prompt_prevents_dialogue_from_adding_canon():
+    prompt = load_prompt("dialogue_enhancer")
+
+    assert "对白只能表达已知事实" in prompt
+    assert "当前场景情绪" in prompt
+    assert "不通过对白新增 canon" in prompt
+    assert "不得提前揭示后续真相" in prompt
+    assert "不得改变人物关系状态" in prompt
+    assert "新增对白不得引入新的事实信息" in prompt
+    for forbidden in ("秘密", "世界规则", "后续伏笔", "未规划信息", "新承诺", "新誓言", "新设定", "新动机"):
+        assert forbidden in prompt

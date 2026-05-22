@@ -1678,3 +1678,21 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Atmosphere enhancer 是语言和氛围增强器，不是剧情扩写器。
 - 事实、结构、结尾钩子和 canon 保持冻结。
+
+## 65. Dialogue Enhancer Prompt 整改
+
+目标：执行 `25_dialogue_enhancer.md`，让对白增强只强化已有对白张力和人物声音，不通过台词新增事实、关系状态或信息释放。
+
+已完成：
+
+- `dialogue_enhancer.md` 明确对白只能表达已知事实、当前场景情绪和已建立的人物动机。
+- 禁止通过对白新增 canon、秘密、世界规则、后续伏笔或未规划信息。
+- 禁止提前揭示后续真相、改变人物关系状态、添加新承诺、新誓言、新设定或新动机。
+- 允许删改冗余对白、强化潜台词和语气差异，但不能改变事实含义。
+- 输出可为完整修订稿，但新增对白不得引入新的事实信息，不输出分析或变更记录。
+- 新增 prompt loader 回归测试覆盖不通过对白新增 canon 和不提前泄露真相边界。
+
+当前边界：
+
+- Dialogue enhancer 是语言与人物声音增强器，不是信息释放改写器。
+- 台词不能承担新增设定或新伏笔。

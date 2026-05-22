@@ -1445,3 +1445,23 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 230 passed
 ```
+
+## 69. 本轮更新：Dialogue Enhancer Prompt 整改
+
+- 完整读取并执行 `25_dialogue_enhancer.md`。
+- `dialogue_enhancer.md` 现在要求对白只能表达已知事实、当前场景情绪和已建立的人物动机。
+- 禁止通过对白新增 canon、秘密、世界规则、后续伏笔或未规划信息。
+- 禁止提前揭示后续真相、改变人物关系状态、添加新承诺、新誓言、新设定或新动机。
+- 新增对白不得引入新的事实信息。
+- 新增回归测试覆盖对白 no-new-canon 和 no-spoiler 边界。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 17 passed
+.venv/bin/python -m pytest tests/test_graph_drafting.py tests/test_graph_writer.py
+# 27 passed
+.venv/bin/python -m pytest
+# 231 passed
+```
