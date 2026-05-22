@@ -11,7 +11,7 @@ from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
 from ai_novelist.artifacts import ArtifactRecord, get_latest_artifact, load_artifact_text, load_artifacts, register_artifact
 from ai_novelist.bible import bible_to_dict, load_bible, merge_bible_updates, save_bible
 from ai_novelist.context_builder import build_context
-from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress
+from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, run_with_progress, with_agent_metadata
 from ai_novelist.prompts import load_prompt
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
@@ -35,11 +35,11 @@ class FinalizeSequentialGraph:
             return current
         emit_progress(self.progress, "Finalize 2/6", "正在保存定稿章节...")
         current = save_final_chapter_node(current, self.store)
-        emit_progress(self.progress, "Finalize 3/6", "正在生成章节摘要...")
+        emit_progress(self.progress, "Finalize 3/6", with_agent_metadata("正在生成章节摘要...", self.adapter, "chapter_summarizer"))
         current = summarize_chapter_node(current, self.adapter, self.store)
         emit_progress(self.progress, "Finalize 4/6", "正在保存章节摘要...")
         current = save_chapter_summary_node(current, self.store)
-        emit_progress(self.progress, "Finalize 5/6", "正在抽取小说圣经更新...")
+        emit_progress(self.progress, "Finalize 5/6", with_agent_metadata("正在抽取小说圣经更新...", self.adapter, "final_bible_update_extractor"))
         current = extract_bible_updates_from_final_node(current, self.adapter, self.store)
         emit_progress(self.progress, "Finalize 6/6", "正在写回小说圣经...")
         current = update_bible_from_final_node(current, self.store)
@@ -56,9 +56,9 @@ def build_finalize_graph(adapter: AgentAdapter, store: LocalStore, progress: Pro
     graph = StateGraph(dict)
     graph.add_node("load_latest_draft", lambda data: progress_node(progress_func, "Finalize 1/6", "正在读取最新章节草稿...", lambda: load_latest_draft_node(data, store)))
     graph.add_node("save_final_chapter", lambda data: progress_node(progress_func, "Finalize 2/6", "正在保存定稿章节...", lambda: save_final_chapter_node(data, store)))
-    graph.add_node("summarize_chapter", lambda data: progress_node(progress_func, "Finalize 3/6", "正在生成章节摘要...", lambda: summarize_chapter_node(data, adapter, store)))
+    graph.add_node("summarize_chapter", lambda data: progress_node(progress_func, "Finalize 3/6", with_agent_metadata("正在生成章节摘要...", adapter, "chapter_summarizer"), lambda: summarize_chapter_node(data, adapter, store)))
     graph.add_node("save_chapter_summary", lambda data: progress_node(progress_func, "Finalize 4/6", "正在保存章节摘要...", lambda: save_chapter_summary_node(data, store)))
-    graph.add_node("extract_bible_updates_from_final", lambda data: progress_node(progress_func, "Finalize 5/6", "正在抽取小说圣经更新...", lambda: extract_bible_updates_from_final_node(data, adapter, store)))
+    graph.add_node("extract_bible_updates_from_final", lambda data: progress_node(progress_func, "Finalize 5/6", with_agent_metadata("正在抽取小说圣经更新...", adapter, "final_bible_update_extractor"), lambda: extract_bible_updates_from_final_node(data, adapter, store)))
     graph.add_node("update_bible", lambda data: progress_node(progress_func, "Finalize 6/6", "正在写回小说圣经...", lambda: update_bible_from_final_node(data, store)))
     graph.set_entry_point("load_latest_draft")
     graph.add_conditional_edges("load_latest_draft", route_after_load, {"continue": "save_final_chapter", "end": END})
@@ -71,8 +71,7 @@ def build_finalize_graph(adapter: AgentAdapter, store: LocalStore, progress: Pro
 
 
 def progress_node(progress: ProgressFunc, stage: str, message: str, fn) -> dict:
-    emit_progress(progress, stage, message)
-    return fn()
+    return run_with_progress(progress, stage, message, fn)
 
 
 def route_after_load(data: dict) -> str:

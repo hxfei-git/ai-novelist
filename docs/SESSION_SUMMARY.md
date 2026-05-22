@@ -788,3 +788,59 @@ Smoke 验证：`.venv/bin/python tests/smoke_phase2_chat.py`，结果 `phase2 ch
 # phase2 chat smoke ok
 ```
 
+## 37. 本轮更新：Agent 进度耗时与简化模型打印
+
+- Agent 进度中的模型信息从 `model=..., effort=...` 简化为 `模型/effort`。
+- Agent 完成消息增加耗时，例如 `deepseek-v4-pro/disabled-medium/12.3s`。
+- 大纲阶段角色 Agent、汇总 Agent，以及章节卡、场景卡、正文、审稿、修订、定稿相关 Agent 的进度输出已接入耗时统计。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_outline_collaboration.py tests/test_graph_drafting.py tests/test_graph_review.py tests/test_graph_revision.py tests/test_graph_chapter_plan.py tests/test_graph_scene.py
+# 41 passed
+.venv/bin/python -m pytest tests/test_finalize_chapter.py tests/test_outline_collaboration.py
+# 31 passed
+.venv/bin/python -m pytest
+# 176 passed
+.venv/bin/python tests/smoke_outline_collaboration.py
+# outline collaboration smoke ok
+.venv/bin/python tests/smoke_phase2_chat.py
+# phase2 chat smoke ok
+```
+
+
+## 38. 本轮更新：DirectorService 统一对话入口
+
+- 所有自然语言对话入口现在先进入 `DirectorService`：`build_chat_graph()`、`build_outline_collaboration_graph()` 和 `select_chat_graph()` 的公开兼容路径不再提前按关键词分流。
+- 大纲共创的直接入口仍保留 `.invoke()` 兼容形状，但内部委托服务层主脑，再由服务层执行阶段节点。
+- 修复 `接下来我该做什么？`、`下一步呢？`、`现在怎么办？` 在 `options_ready` 阶段被当作修改反馈导致重跑 Agent 的问题。
+- 阶段锁定约束、紧凑编号回答、已有最终大纲保存等旧入口语义已迁入服务层处理。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest
+# 179 passed
+.venv/bin/python tests/smoke_outline_collaboration.py
+# outline collaboration smoke ok
+.venv/bin/python tests/smoke_phase2_chat.py
+# phase2 chat smoke ok
+```
+
+## 39. 本轮更新：阶段临时约束不再污染对话
+
+- CLI 不再在每轮对话后打印 `锁定约束`，用户对话只显示主脑回复和相关产物提示。
+- 阶段待确认回答、系统默认裁量和闭环摘要不再写入全局 `locked_constraints`；它们只在当前阶段生成/锁定时生效。
+- 服务层会清理旧项目中已经持久化的阶段临时约束，避免长篇控制信息继续污染后续主脑 prompt。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest
+# 179 passed
+.venv/bin/python tests/smoke_outline_collaboration.py
+# outline collaboration smoke ok
+.venv/bin/python tests/smoke_phase2_chat.py
+# phase2 chat smoke ok
+```

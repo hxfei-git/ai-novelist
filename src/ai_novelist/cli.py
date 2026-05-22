@@ -268,8 +268,6 @@ def print_outline_turn_result(state: NovelState, store: LocalStore) -> None:
     if state.editor_decision != "unknown":
         print(f"大纲编辑结论：{state.editor_decision}，质量分：{state.quality_score}")
     print_outline_artifacts(state)
-    if state.locked_constraints:
-        print("锁定约束：" + "，".join(state.locked_constraints))
     if state.style_preferences:
         print("风格偏好：" + "，".join(state.style_preferences))
     if state.review_status == "approved":
@@ -424,14 +422,6 @@ def select_chat_graph(
     adapter: AgentAdapter | None = None,
     store: LocalStore | None = None,
 ):
-    if adapter is not None and store is not None and director_selects_research(state, adapter, store):
-        return research_graph
-    if should_use_research_graph(state, user_input):
-        return research_graph
-    if is_project_context_request(user_input):
-        return chat_graph
-    if should_use_outline_graph(state, user_input):
-        return outline_graph
     return chat_graph
 
 
@@ -521,7 +511,6 @@ def print_chat_turn_result(state: NovelState, store: LocalStore) -> None:
     elif state.director_action == "propose_directions":
         print_direction_proposal(state)
 
-    print_locked_constraints(state)
 
 
 def print_research_result(state: NovelState, store: LocalStore) -> None:
@@ -797,8 +786,6 @@ def show_project(args: argparse.Namespace, store: LocalStore) -> int:
     print(f"质量分：{state.quality_score}")
     print(f"修订次数：{state.revision_count}/{state.max_revisions}")
     print(f"大纲版本数：{len(state.outline_versions)}")
-    if state.locked_constraints:
-        print("锁定约束：" + "，".join(state.locked_constraints))
     if state.style_preferences:
         print("风格偏好：" + "，".join(state.style_preferences))
     if state.revision_instruction:

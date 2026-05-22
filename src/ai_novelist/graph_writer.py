@@ -399,62 +399,40 @@ OUTLINE_WORKFLOW_ACTIONS = {
 }
 
 
-class ChatSequentialGraph:
-    def __init__(self, adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc | None = None) -> None:
+class DirectorBackedChatGraph:
+    def __init__(self, adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc | None = None, search_backend=None) -> None:
         self.adapter = adapter
         self.store = store
-        self.progress = progress or noop_progress
+        self.progress = progress
+        self.search_backend = search_backend
 
     def invoke(self, state: dict) -> dict:
-        current = director_node(state, self.adapter, self.store, self.progress)
-        route = route_after_director(current)
-        if route == "run_selected_agent":
-            current.update(run_selected_agent(current, self.adapter, self.store, self.progress))
-        elif route == "persist_outputs":
-            current.update(persist_available_outputs(current, self.store))
-        elif route == "show_status":
-            current.update(show_status_node(current, self.store))
-        elif route == "show_outline":
-            current.update(show_outline_node(current, self.store))
-        elif route == "show_reference":
-            current.update(show_reference_node(current, self.store))
-        return current
+        current = NovelState.from_dict(state)
+        self.store.save_state(current)
+        user_text = current.user_request.strip()
+        if not user_text:
+            return current.to_dict()
+
+        from ai_novelist.director_service import DirectorService
+        from ai_novelist.research import MockSearchBackend
+
+        service = DirectorService(
+            self.store,
+            self.adapter,
+            self.search_backend or MockSearchBackend(),
+            progress=self.progress,
+        )
+        turn = service.handle_turn(current.project_id, user_text, channel="graph")
+        return (turn.state or self.store.load_state(current.project_id)).to_dict()
 
 
-def build_chat_graph(adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc | None = None) -> CompiledGraph:
-    """Build a one-turn Director Agent chat workflow."""
-    try:
-        from langgraph.graph import END, StateGraph
-    except ModuleNotFoundError:
-        return ChatSequentialGraph(adapter, store, progress)
+class ChatSequentialGraph(DirectorBackedChatGraph):
+    pass
 
-    progress_func = progress or noop_progress
-    graph = StateGraph(dict)
-    graph.add_node("director", lambda data: director_node(data, adapter, store, progress_func))
-    graph.add_node("run_selected_agent", lambda data: run_selected_agent(data, adapter, store, progress_func))
-    graph.add_node("persist_outputs", lambda data: persist_available_outputs(data, store))
-    graph.add_node("show_status", lambda data: show_status_node(data, store))
-    graph.add_node("show_outline", lambda data: show_outline_node(data, store))
-    graph.add_node("show_reference", lambda data: show_reference_node(data, store))
-    graph.set_entry_point("director")
-    graph.add_conditional_edges(
-        "director",
-        route_after_director,
-        {
-            "run_selected_agent": "run_selected_agent",
-            "persist_outputs": "persist_outputs",
-            "show_status": "show_status",
-            "show_outline": "show_outline",
-            "show_reference": "show_reference",
-            "end": END,
-        },
-    )
-    graph.add_edge("run_selected_agent", END)
-    graph.add_edge("persist_outputs", END)
-    graph.add_edge("show_status", END)
-    graph.add_edge("show_outline", END)
-    graph.add_edge("show_reference", END)
-    return graph.compile()
+
+def build_chat_graph(adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc | None = None, search_backend=None) -> CompiledGraph:
+    """Build a one-turn chat workflow backed by DirectorService routing."""
+    return DirectorBackedChatGraph(adapter, store, progress, search_backend)
 
 
 def director_node(data: dict, adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc = noop_progress) -> dict:
@@ -628,6 +606,9 @@ def persist_available_outputs(data: dict, store: LocalStore) -> dict:
     if state.editor_notes.strip():
         saved.append(str(store.save_editor_notes(state)))
     state.review_status = "approved" if saved else "draft"
+    if saved and state.active_workflow == "outline" and state.outline.strip():
+        state.active_workflow = ""
+        state.current_stage = "chapter_plan"
     state.director_message = "已保存当前产物：\n" + "\n".join(saved) if saved else "当前还没有可保存的产物。"
     append_message(state, "assistant", state.director_message)
     store.save_state(state)

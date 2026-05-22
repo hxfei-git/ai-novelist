@@ -70,7 +70,7 @@ def test_outline_feedback_stays_on_current_stage(tmp_path):
     assert not store.outline_path("demo").exists()
 
 
-def test_outline_collaboration_lock_persists_constraints(tmp_path):
+def test_outline_collaboration_lock_stays_stage_local(tmp_path):
     store = LocalStore(tmp_path)
     state = store.create_project("Demo", "demo")
     state.idea = "月球城市失忆工程师"
@@ -79,8 +79,8 @@ def test_outline_collaboration_lock_persists_constraints(tmp_path):
     state = run_outline_turn(graph, state, store, "这个设定别改：主角是失忆工程师，世界观规则不要改")
 
     assert state.director_intent == "lock"
-    assert state.locked_constraints
-    assert "失忆工程师" in state.locked_constraints[0]
+    assert state.locked_constraints == []
+    assert "失忆工程师" in state.revision_instruction
 
 
 def test_eight_stage_confirmation_persists_final_outline_and_artifacts(tmp_path):
@@ -134,7 +134,7 @@ def test_outline_stage_view_can_show_story_flow(tmp_path):
     state = run_outline_turn(graph, state, store, "确认进入下一阶段")
     state = run_outline_turn(graph, state, store, "查看故事流程")
 
-    assert state.director_action == "show_outline_stage"
+    assert state.director_action == "show_outline"
     assert "故事流程" in state.director_message
 
 
@@ -510,7 +510,7 @@ def test_determine_advance_closes_pending_questions_before_next_stage(tmp_path):
     assert locked["pending_questions"] == []
     assert "自行闭环未决问题" in locked["default_discretion_summary"]
     assert "幕一确认习惯如何具象" in locked["default_discretion_summary"]
-    assert any("自行闭环未决问题" in item for item in state.locked_constraints)
+    assert state.locked_constraints == []
 
 
 def test_outline_progress_prints_agent_model_metadata(tmp_path):
@@ -523,8 +523,10 @@ def test_outline_progress_prints_agent_model_metadata(tmp_path):
     state = run_outline_turn(graph, state, store, "生成大纲")
 
     assert state.outline_stage == "direction"
-    assert any(stage == "类型定位 Agent" and "model=mock" in message and "effort=n/a" in message for stage, message in events)
-    assert any(stage == "大纲汇总 Agent" and "model=mock" in message and "effort=n/a" in message for stage, message in events)
+    assert any(stage == "类型定位 Agent" and "mock/n/a" in message for stage, message in events)
+    assert any(stage == "类型定位 Agent" and "mock/n/a/" in message for stage, message in events)
+    assert any(stage == "大纲汇总 Agent" and "mock/n/a" in message for stage, message in events)
+    assert any(stage == "大纲汇总 Agent" and "mock/n/a/" in message for stage, message in events)
 
 def test_outline_direct_entry_does_not_advance_on_bare_determine_detail(tmp_path):
     store = LocalStore(tmp_path)
@@ -549,3 +551,31 @@ def test_outline_direct_entry_does_not_advance_on_bare_determine_detail(tmp_path
     assert state.outline_stage_artifacts["story_flow"]["status"] == "options_ready"
     assert state.director_action == "run_outline_stage"
 
+
+
+def test_outline_direct_entry_next_step_question_uses_director_status(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.idea = "重生魔门"
+    state.active_workflow = "outline"
+    state.outline_stage = "review_lock"
+    state.outline_stage_status = "options_ready"
+    state.pending_questions = ["是否需要补一个失败代价？", "终局拒绝是否保留一次？"]
+    state.pending_question = "\n".join(f"{i}. {q}" for i, q in enumerate(state.pending_questions, 1))
+    state.outline_stage_artifacts["review_lock"] = {
+        "stage": "review_lock",
+        "label": "审稿锁定",
+        "status": "options_ready",
+        "synthesis": "## Director 汇总\n当前总纲已接近锁定。",
+        "pending_questions": list(state.pending_questions),
+    }
+    graph = build_outline_collaboration_graph(CodexCLIAdapter(mock=True), store)
+
+    state = run_outline_turn(graph, state, store, "接下来我该做什么？")
+
+    assert state.director_action == "ask_user"
+    assert state.director_intent == "status"
+    assert state.outline_stage == "review_lock"
+    assert state.outline_stage_artifacts["review_lock"]["status"] == "options_ready"
+    assert "当前阶段：审稿锁定 options_ready" in state.director_message
+    assert "可选下一步" in state.director_message

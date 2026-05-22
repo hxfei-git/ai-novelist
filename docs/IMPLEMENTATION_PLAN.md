@@ -1067,3 +1067,76 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 # phase2 chat smoke ok
 ```
 
+## 36. Agent 进度耗时与简化模型打印
+
+本轮优化进度输出的可读性和可观测性。
+
+已完成：
+
+- `progress.describe_agent_call()` 从 `model=deepseek-v4-pro, effort=disabled-medium` 简化为 `deepseek-v4-pro/disabled-medium`。
+- Agent 完成后会追加耗时，格式为 `deepseek-v4-pro/disabled-medium/12.3s`；mock 为 `mock/n/a/0.0s`，Codex CLI 为 `codex/cli-default/12.3s`。
+- 新增 `run_with_progress()`，LangGraph 节点进度会在开始和完成时各输出一次，完成消息包含耗时。
+- 新增 `complete_with_timing()`，大纲阶段角色 Agent 和汇总 Agent 在直接阶段节点中也会记录单次调用耗时。
+- 大纲、章节卡、场景卡、正文生成、审稿、修订、定稿等已有 Agent 进度输出已接入简化模型/effort/耗时格式。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_outline_collaboration.py tests/test_graph_drafting.py tests/test_graph_review.py tests/test_graph_revision.py tests/test_graph_chapter_plan.py tests/test_graph_scene.py
+# 41 passed
+.venv/bin/python -m pytest tests/test_finalize_chapter.py tests/test_outline_collaboration.py
+# 31 passed
+.venv/bin/python -m pytest
+# 176 passed
+.venv/bin/python tests/smoke_outline_collaboration.py
+# outline collaboration smoke ok
+.venv/bin/python tests/smoke_phase2_chat.py
+# phase2 chat smoke ok
+```
+
+
+## 37. DirectorService 统一对话入口
+
+本轮将自然语言对话入口统一收敛到 `DirectorService`，避免 chat、outline 直接入口和旧 graph builder 各自做关键词分流。
+
+已完成：
+
+- `build_chat_graph()` 改为 Director-backed wrapper；旧 `.invoke()` 调用仍可用，但会先调用 `DirectorService.handle_turn()`。
+- `build_outline_collaboration_graph()` 同样改为 Director-backed wrapper；底层大纲图保留阶段执行节点，不再作为公开入口的第一层自然语言路由。
+- `select_chat_graph()` 不再按 research/outline 关键词提前分流，统一返回 chat graph，由服务层主脑决定后续节点。
+- `DirectorService` 增加阶段元问题识别：`接下来我该做什么？`、`下一步呢？`、`现在怎么办？` 只返回当前阶段、未决问题和可选操作，不推进、不闭环、不重跑 Agent。
+- 收窄大纲阶段反馈判定，只有明确修改、补充、选择、风格调整、编号回答或锁定约束才重跑当前阶段；紧凑编号回答和锁定约束迁入服务层处理。
+- 兼容旧 graph `.invoke()` 已预先追加 user message 的模式，`DirectorService` 会避免重复追加同一条用户消息。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest
+# 179 passed
+.venv/bin/python tests/smoke_outline_collaboration.py
+# outline collaboration smoke ok
+.venv/bin/python tests/smoke_phase2_chat.py
+# phase2 chat smoke ok
+```
+
+## 38. 阶段临时约束不再污染对话
+
+本轮修复阶段确认/裁量内容在 CLI 中反复显示并进入全局 `locked_constraints` 的问题。
+
+已完成：
+
+- CLI `chat` 和 `outline` 输出不再展示 `锁定约束` 列表，避免对话被内部控制信息淹没。
+- 大纲阶段的待确认回答、默认裁量摘要、闭环摘要和“这个设定别改”类阶段反馈不再持久化到全局 `state.locked_constraints`。
+- 这些信息仍作为当次 `revision_instruction` 或阶段 artifact 的 `default_discretion_summary` 参与当前阶段生成/锁定；阶段产物生成后不再作为跨阶段全局约束继续滚动。
+- `DirectorService` 会在每轮开始清理历史上已污染进 `locked_constraints` 的阶段临时约束，防止旧项目继续把这些长文本带入 prompt。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest
+# 179 passed
+.venv/bin/python tests/smoke_outline_collaboration.py
+# outline collaboration smoke ok
+.venv/bin/python tests/smoke_phase2_chat.py
+# phase2 chat smoke ok
+```

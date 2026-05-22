@@ -10,7 +10,7 @@ from typing import Protocol
 
 from ai_novelist.artifacts import ArtifactRecord, load_artifacts, register_artifact
 from ai_novelist.context_builder import build_context
-from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress
+from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, run_with_progress
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
 
@@ -75,8 +75,7 @@ def build_export_graph(store: LocalStore, progress: ProgressFunc | None = None) 
 
 
 def progress_node(progress: ProgressFunc, stage: str, message: str, fn) -> dict:
-    emit_progress(progress, stage, message)
-    return fn()
+    return run_with_progress(progress, stage, message, fn)
 
 
 def route_after_collect(data: dict) -> str:

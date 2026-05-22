@@ -75,7 +75,7 @@ def test_select_chat_graph_uses_director_prompt_for_research(tmp_path):
         store,
     )
 
-    assert selected is research_graph
+    assert selected is chat_graph
 
 
 def test_chat_routing_prefers_research_before_outline(tmp_path):

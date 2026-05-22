@@ -7,7 +7,7 @@ from typing import Protocol
 from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
 from ai_novelist.artifacts import ArtifactRecord, get_latest_artifact, load_artifact_text, load_artifacts, register_artifact
 from ai_novelist.context_builder import build_context
-from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, with_agent_metadata
+from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, run_with_progress, run_with_progress, with_agent_metadata
 from ai_novelist.prompts import load_prompt
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
@@ -80,8 +80,7 @@ def build_scene_graph(adapter: AgentAdapter, store: LocalStore, progress: Progre
 
 
 def progress_node(progress: ProgressFunc, stage: str, message: str, fn) -> dict:
-    emit_progress(progress, stage, message)
-    return fn()
+    return run_with_progress(progress, stage, message, fn)
 
 
 def route_after_load(data: dict) -> str:

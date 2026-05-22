@@ -9,7 +9,7 @@ from typing import Protocol
 
 from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
 from ai_novelist.artifacts import ArtifactRecord, register_artifact
-from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, with_agent_metadata
+from ai_novelist.progress import ProgressFunc, complete_with_timing, emit_progress, noop_progress, with_agent_metadata
 from ai_novelist.prompts import load_prompt
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
@@ -71,124 +71,47 @@ STAGE_ROLES = {
 }
 
 
-def build_outline_collaboration_graph(adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc | None = None) -> CompiledGraph:
-    progress_func = progress or noop_progress
-    try:
-        from langgraph.graph import END, StateGraph
-    except ModuleNotFoundError:
-        return OutlineSequentialGraph(adapter, store, progress_func)
-
-    graph = StateGraph(dict)
-    graph.add_node("director", lambda data: outline_director_node(data, adapter, store))
-    graph.add_node("ask_user", lambda data: ask_user_node(data, store))
-    graph.add_node("propose_directions", lambda data: propose_directions_node(data, adapter, store))
-    graph.add_node("worldbuild", lambda data: outline_worldbuild_node(data, adapter, store))
-    graph.add_node("generate_outline", lambda data: generate_outline_node(data, adapter, store))
-    graph.add_node("review_outline", lambda data: review_outline_node(data, adapter, store))
-    graph.add_node("revise_outline", lambda data: revise_outline_node(data, adapter, store))
-    graph.add_node("compare_versions", lambda data: compare_outline_versions_node(data, adapter, store))
-    graph.add_node("human_feedback", lambda data: human_feedback_node(data, store))
-    graph.add_node("persist_outline", lambda data: persist_outline_node(data, store))
-    graph.add_node("show_status", lambda data: outline_show_status_node(data, store))
-    graph.add_node("show_outline", lambda data: outline_show_outline_node(data, store))
-    graph.add_node("run_outline_stage", lambda data: run_outline_stage_node(data, adapter, store, progress_func))
-    graph.add_node("advance_outline_stage", lambda data: advance_outline_stage_node(data, adapter, store, progress_func))
-    graph.add_node("show_outline_stage", lambda data: show_outline_stage_node(data, store))
-
-    graph.set_entry_point("director")
-    graph.add_conditional_edges(
-        "director",
-        route_after_outline_director,
-        {
-            "ask_user": "ask_user",
-            "propose_directions": "propose_directions",
-            "worldbuild": "worldbuild",
-            "generate_outline": "generate_outline",
-            "review_outline": "review_outline",
-            "revise_outline": "revise_outline",
-            "compare_versions": "compare_versions",
-            "persist_outline": "persist_outline",
-            "show_status": "show_status",
-            "show_outline": "show_outline",
-            "run_outline_stage": "run_outline_stage",
-            "advance_outline_stage": "advance_outline_stage",
-            "show_outline_stage": "show_outline_stage",
-            "end": END,
-        },
-    )
-    graph.add_edge("ask_user", END)
-    graph.add_edge("propose_directions", "human_feedback")
-    graph.add_edge("worldbuild", "generate_outline")
-    graph.add_edge("generate_outline", "review_outline")
-    graph.add_edge("review_outline", "human_feedback")
-    graph.add_edge("revise_outline", "compare_versions")
-    graph.add_edge("compare_versions", "review_outline")
-    graph.add_conditional_edges(
-        "human_feedback",
-        route_after_human_feedback,
-        {
-            "persist_outline": "persist_outline",
-            "revise_outline": "revise_outline",
-            "propose_directions": "propose_directions",
-            "review_outline": "review_outline",
-            "end": END,
-        },
-    )
-    graph.add_edge("persist_outline", END)
-    graph.add_edge("show_status", END)
-    graph.add_edge("show_outline", END)
-    graph.add_edge("run_outline_stage", END)
-    graph.add_edge("advance_outline_stage", END)
-    graph.add_edge("show_outline_stage", END)
-    return graph.compile()
+def build_outline_collaboration_graph(adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc | None = None, search_backend=None) -> CompiledGraph:
+    """Build an outline workflow whose natural-language routing goes through DirectorService."""
+    return DirectorBackedOutlineGraph(adapter, store, progress or noop_progress, search_backend)
 
 
-class OutlineSequentialGraph:
-    def __init__(self, adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc = noop_progress) -> None:
+class DirectorBackedOutlineGraph:
+    def __init__(self, adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc = noop_progress, search_backend=None) -> None:
         self.adapter = adapter
         self.store = store
         self.progress = progress
+        self.search_backend = search_backend
 
     def invoke(self, state: dict) -> dict:
-        current = outline_director_node(state, self.adapter, self.store)
-        route = route_after_outline_director(current)
-        if route == "ask_user":
-            return ask_user_node(current, self.store)
-        if route == "propose_directions":
-            current = propose_directions_node(current, self.adapter, self.store)
-            return human_feedback_node(current, self.store)
-        if route == "worldbuild":
-            current = outline_worldbuild_node(current, self.adapter, self.store)
-            current = generate_outline_node(current, self.adapter, self.store)
-            current = review_outline_node(current, self.adapter, self.store)
-            return human_feedback_node(current, self.store)
-        if route == "generate_outline":
-            current = generate_outline_node(current, self.adapter, self.store)
-            current = review_outline_node(current, self.adapter, self.store)
-            return human_feedback_node(current, self.store)
-        if route == "review_outline":
-            current = review_outline_node(current, self.adapter, self.store)
-            return human_feedback_node(current, self.store)
-        if route == "revise_outline":
-            current = revise_outline_node(current, self.adapter, self.store)
-            current = compare_outline_versions_node(current, self.adapter, self.store)
-            current = review_outline_node(current, self.adapter, self.store)
-            return human_feedback_node(current, self.store)
-        if route == "compare_versions":
-            return compare_outline_versions_node(current, self.adapter, self.store)
-        if route == "persist_outline":
-            return persist_outline_node(current, self.store)
-        if route == "show_status":
-            return outline_show_status_node(current, self.store)
-        if route == "show_outline":
-            return outline_show_outline_node(current, self.store)
-        if route == "run_outline_stage":
-            return run_outline_stage_node(current, self.adapter, self.store, self.progress)
-        if route == "advance_outline_stage":
-            return advance_outline_stage_node(current, self.adapter, self.store, self.progress)
-        if route == "show_outline_stage":
-            return show_outline_stage_node(current, self.store)
-        return current
+        current = NovelState.from_dict(state)
+        ensure_outline_stage(current)
+        current.active_workflow = "outline" if current.director_action != "stop" else current.active_workflow
+        current.current_stage = current.outline_stage
+        artifact = current.outline_stage_artifacts.get(current.outline_stage, {})
+        artifact_status = str(artifact.get("status", "")).strip()
+        if artifact_status and current.outline_stage_status in {"", "collecting"}:
+            current.outline_stage_status = artifact_status  # type: ignore[assignment]
+        self.store.save_state(current)
+        user_text = current.user_request.strip()
+        if not user_text:
+            return current.to_dict()
+
+        from ai_novelist.director_service import DirectorService
+        from ai_novelist.research import MockSearchBackend
+
+        service = DirectorService(
+            self.store,
+            self.adapter,
+            self.search_backend or MockSearchBackend(),
+            progress=self.progress,
+        )
+        turn = service.handle_turn(current.project_id, user_text, channel="outline")
+        return (turn.state or self.store.load_state(current.project_id)).to_dict()
+
+
+class OutlineSequentialGraph(DirectorBackedOutlineGraph):
+    pass
 
 
 def outline_director_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
@@ -403,22 +326,24 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
     for role in STAGE_ROLES[stage]:
         emit_progress(progress, role, with_agent_metadata(f"正在生成「{label}」角色短评...", adapter, "outline_stage_role"))
         try:
-            output = adapter.complete(build_outline_stage_role_prompt(state, stage, role), store.project_dir(state.project_id))
+            output, elapsed = complete_with_timing(adapter, build_outline_stage_role_prompt(state, stage, role), store.project_dir(state.project_id))
         except AgentAdapterError as exc:
             state.error = str(exc)
             state.review_status = "error"
             store.save_state(state)
             return state.to_dict()
+        emit_progress(progress, role, with_agent_metadata(f"已完成「{label}」角色短评", adapter, "outline_stage_role", elapsed))
         role_reviews.append({"role": role, "content": output})
 
     emit_progress(progress, "大纲汇总 Agent", with_agent_metadata(f"正在汇总「{label}」阶段产物...", adapter, "outline_stage_synthesizer"))
     try:
-        synthesis = adapter.complete(build_outline_stage_synthesizer_prompt(state, stage, role_reviews), store.project_dir(state.project_id))
+        synthesis, elapsed = complete_with_timing(adapter, build_outline_stage_synthesizer_prompt(state, stage, role_reviews), store.project_dir(state.project_id))
     except AgentAdapterError as exc:
         state.error = str(exc)
         state.review_status = "error"
         store.save_state(state)
         return state.to_dict()
+    emit_progress(progress, "大纲汇总 Agent", with_agent_metadata(f"已完成「{label}」阶段产物汇总", adapter, "outline_stage_synthesizer", elapsed))
 
     questions = extract_stage_confirmation_questions(synthesis)
     artifact = {
@@ -481,7 +406,6 @@ def advance_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalSt
             default_summary = build_stage_closure_summary(stage, unresolved, state.user_request)
     if default_summary:
         artifact["default_discretion_summary"] = default_summary
-        add_unique_items(state.locked_constraints, [default_summary])
         memory = artifact.get("stage_memory") if isinstance(artifact.get("stage_memory"), list) else []
         artifact["stage_memory"] = [*memory, default_summary]
     artifact["pending_questions"] = []

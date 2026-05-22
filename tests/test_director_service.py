@@ -522,3 +522,55 @@ def test_director_does_not_advance_on_bare_determine_detail(tmp_path):
     assert result.state.outline_stage_artifacts["story_flow"]["status"] == "options_ready"
     assert result.state.director_action == "run_outline_stage"
 
+
+
+def make_review_lock_options_ready_state(store: LocalStore) -> NovelState:
+    state = store.create_project("Demo", "demo")
+    state.idea = "重生魔门悬疑智斗"
+    state.active_workflow = "outline"
+    state.outline_stage = "review_lock"
+    state.outline_stage_status = "options_ready"
+    state.pending_questions = ["是否需要补一个失败代价？", "终局拒绝是否保留一次？"]
+    state.pending_question = "\n".join(f"{i}. {q}" for i, q in enumerate(state.pending_questions, 1))
+    state.outline_stage_artifacts["review_lock"] = {
+        "stage": "review_lock",
+        "label": "审稿锁定",
+        "status": "options_ready",
+        "synthesis": "## Director 汇总\n当前总纲已接近锁定。",
+        "pending_questions": list(state.pending_questions),
+    }
+    store.save_state(state)
+    return state
+
+
+def test_outline_next_step_question_reports_status_without_rerun(tmp_path):
+    store = LocalStore(tmp_path)
+    make_review_lock_options_ready_state(store)
+    service = DirectorService(store, CodexCLIAdapter(mock=True), MockSearchBackend())
+
+    result = service.handle_turn("demo", "接下来我该做什么？", channel="cli")
+
+    assert result.decision.action == "ask_user"
+    assert result.decision.intent == "status"
+    assert result.state.director_action == "ask_user"
+    assert result.state.outline_stage == "review_lock"
+    assert result.state.outline_stage_status == "options_ready"
+    assert "当前阶段：审稿锁定 options_ready" in result.final_message
+    assert "未决问题：2 项" in result.final_message
+    assert "可选下一步" in result.final_message
+    assert "review_lock" in result.state.outline_stage_artifacts
+    assert result.state.outline_stage_artifacts["review_lock"]["status"] == "options_ready"
+
+
+def test_outline_next_step_variants_do_not_trigger_agent(tmp_path):
+    for text in ("下一步呢？", "现在怎么办？"):
+        store = LocalStore(tmp_path / text.strip("？"))
+        make_review_lock_options_ready_state(store)
+        service = DirectorService(store, CodexCLIAdapter(mock=True), MockSearchBackend())
+
+        result = service.handle_turn("demo", text, channel="cli")
+
+        assert result.decision.action == "ask_user"
+        assert result.state.outline_stage == "review_lock"
+        assert result.state.outline_stage_artifacts["review_lock"]["status"] == "options_ready"
+        assert "可选下一步" in result.final_message

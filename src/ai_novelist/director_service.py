@@ -162,11 +162,12 @@ class DirectorService:
         if not text:
             return DirectorTurnResult(immediate_message="请输入你的需求。", requires_followup=True, state=state)
 
+        prune_outline_transient_constraints(state)
         pending = DirectorDecision.from_dict(state.pending_director_decision) if state.pending_director_decision else None
         if pending and is_rejection(text):
             state.pending_director_decision = {}
             state.director_message = "已取消上一步计划。你可以重新说明想做什么。"
-            append_message(state, "user", text)
+            append_user_message_once(state, text)
             append_message(state, "assistant", state.director_message)
             self.store.save_state(state)
             return DirectorTurnResult(final_message=state.director_message, requires_followup=True, state=state)
@@ -175,12 +176,12 @@ class DirectorService:
             state.user_request = merged_pending_user_request(pending, text, state.user_request)
             if not is_confirmation(text):
                 pending.task_args["confirmation_reply"] = text
-            append_message(state, "user", text)
+            append_user_message_once(state, text)
             self.store.save_state(state)
             return self._execute_decision(state, pending, channel)
 
         state.user_request = text
-        append_message(state, "user", text)
+        append_user_message_once(state, text)
         if not state.idea and looks_like_story_idea(text):
             state.idea = text
         self.store.save_state(state)
@@ -191,7 +192,7 @@ class DirectorService:
         state.director_task_args = decision.task_args
         self._apply_decision_metadata(state, decision)
 
-        if should_prompt_for_confirmation(decision, state):
+        if channel not in {"graph", "outline"} and should_prompt_for_confirmation(decision, state):
             state.pending_director_decision = decision.to_dict()
             state.director_message = confirmation_message(decision)
             append_message(state, "assistant", state.director_message)
@@ -240,7 +241,7 @@ class DirectorService:
         if decision.action == "research":
             result_state = self._run_research(state)
         elif decision.action == "persist_outputs":
-            if state.active_workflow == "outline" and state.outline_stage != "done":
+            if state.active_workflow == "outline" and state.outline_stage != "done" and not state.outline.strip():
                 from ai_novelist.graph_outline import OUTLINE_STAGES, advance_outline_stage_node
 
                 requested_stage = str(decision.task_args.get("stage", "")).strip()
@@ -347,9 +348,10 @@ class DirectorService:
         state.next_action = decision.action
         if decision.instruction:
             state.revision_instruction = decision.instruction
-        for item in decision.locked_constraints:
-            if item not in state.locked_constraints:
-                state.locked_constraints.append(item)
+        if should_persist_decision_constraints(state, decision):
+            for item in decision.locked_constraints:
+                if item not in state.locked_constraints:
+                    state.locked_constraints.append(item)
         for item in decision.style_preferences:
             if item not in state.style_preferences:
                 state.style_preferences.append(item)
@@ -385,6 +387,50 @@ def execution_plan_message(decision: DirectorDecision) -> str:
 
 def noop_progress(_stage: str, _message: str) -> None:
     return
+
+
+def append_user_message_once(state: NovelState, text: str) -> None:
+    content = text.strip()
+    if not content:
+        return
+    if state.messages and state.messages[-1].get("role") == "user" and str(state.messages[-1].get("content", "")).strip() == content:
+        return
+    append_message(state, "user", content)
+
+
+def should_persist_decision_constraints(state: NovelState, decision: DirectorDecision) -> bool:
+    if state.active_workflow == "outline" and state.outline_stage != "done" and decision.action in OUTLINE_STAGE_EDIT_ACTIONS | {"persist_outputs"}:
+        return False
+    return True
+
+
+def prune_outline_transient_constraints(state: NovelState) -> None:
+    if not state.locked_constraints:
+        return
+    state.locked_constraints = [item for item in state.locked_constraints if not is_outline_transient_constraint(item)]
+
+
+def is_outline_transient_constraint(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return True
+    transient_prefixes = (
+        "用户确认：",
+        "用户接受：",
+        "用户将待确认问题",
+        "锁定故事流程前",
+        "锁定当前阶段前",
+        "裁量 ",
+        "裁量如下",
+        "用户明确表示",
+        "补充确认：",
+    )
+    if stripped.startswith(transient_prefixes):
+        return True
+    transient_markers = ("待确认问题", "默认裁量", "自行闭环", "用户原话：", "用户确认语：")
+    if any(marker in stripped for marker in transient_markers):
+        return True
+    return len(stripped) > 300
 
 def load_or_create_project(store: LocalStore, project_id: str) -> NovelState:
     try:
@@ -729,8 +775,39 @@ def deterministic_outline_stage_decision(state: NovelState) -> DirectorDecision 
     if state.active_workflow != "outline" or state.outline_stage == "done":
         return None
 
+    if asks_outline_next_step(text):
+        message = build_outline_next_step_message(state)
+        return DirectorDecision(
+            "ask_user",
+            requires_confirmation=False,
+            user_message=message,
+            confidence=92,
+            target="outline",
+            intent="status",
+            next_steps=[
+                "回答当前阶段待确认问题",
+                "明确要求系统闭环并进入下一阶段",
+                "查看当前阶段产物",
+                "继续提出具体修改",
+            ],
+        )
+
     if state.outline_stage_status == "options_ready" and should_defer_outline_confirmation_to_director(text):
         return None
+
+    if looks_like_outline_lock_feedback(text):
+        constraint = text.split("：", 1)[-1].split(":", 1)[-1].strip() or text
+        return DirectorDecision(
+            "revise_outline",
+            requires_confirmation=False,
+            user_message="已记录锁定约束，我会按该约束重跑当前大纲阶段。",
+            confidence=88,
+            task_args={"instruction": text},
+            target="outline",
+            intent="lock",
+            instruction=text,
+            locked_constraints=[constraint],
+        )
 
     if state.pending_questions and answers_pending_outline_questions(text):
         instruction = build_pending_answer_instruction(state, text)
@@ -768,6 +845,8 @@ def negates_stage_advance(text: str) -> bool:
 
 def should_defer_outline_confirmation_to_director(text: str) -> bool:
     """Let the Director model judge natural-language stage approval or delegation."""
+    if asks_outline_next_step(text):
+        return False
     if parse_numbered_answers(text):
         return False
     if any(marker in text for marker in ("查看", "展示", "看一下", "看下", "显示")):
@@ -824,19 +903,93 @@ def delegates_outline_stage_decision(text: str) -> bool:
 
 
 def answers_pending_outline_questions(text: str) -> bool:
+    if asks_outline_next_step(text):
+        return False
     if is_simple_outline_stage_confirmation(text) or delegates_outline_stage_decision(text):
         return False
+    if parse_numbered_answers(text):
+        return True
     if re.search(r"(^|[\s，,；;])\d+[.、)]", text):
         return True
     return any(marker in text for marker in ("回答", "补充", "选择", "选", "采用", "接受", "接收", "同意", "设为", "改成"))
 
 
+def looks_like_outline_lock_feedback(text: str) -> bool:
+    if negates_stage_advance(text):
+        return False
+    return any(marker in text for marker in ("这个设定别改", "别改", "不要改", "保留"))
+
+
 def looks_like_outline_stage_feedback(text: str) -> bool:
+    if asks_outline_next_step(text):
+        return False
     if is_simple_outline_stage_confirmation(text) or delegates_outline_stage_decision(text):
         return False
     if any(marker in text for marker in ("查看", "展示", "看一下", "看下", "显示")):
         return False
-    return bool(text.strip())
+    return has_explicit_outline_feedback(text)
+
+
+def asks_outline_next_step(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+    if should_explicitly_advance_outline_stage(stripped) or negates_stage_advance(stripped):
+        return False
+    compact = re.sub(r"[\s？?。！!，,；;：:、~～…]+", "", stripped)
+    if not compact:
+        return False
+    if "接下来" in compact and any(marker in compact for marker in ("做什么", "干什么", "怎么办", "怎么做", "该做", "应该做", "下一步")):
+        return True
+    if "下一步" in compact and any(marker in compact for marker in ("呢", "是什么", "做什么", "干什么", "怎么办", "怎么做", "该", "建议", "可以")):
+        return True
+    if "现在" in compact and any(marker in compact for marker in ("怎么办", "怎么做", "做什么", "干什么", "该做", "应该做")):
+        return True
+    return compact in {"下一步", "怎么办", "现在怎么办", "接下来呢", "然后呢"}
+
+
+def should_explicitly_advance_outline_stage(text: str) -> bool:
+    transition_markers = ("进入下一阶段", "推进到下一阶段", "进入后续阶段", "推进后续阶段", "锁定并进入", "锁定当前阶段并继续")
+    return any(marker in text for marker in transition_markers)
+
+
+def has_explicit_outline_feedback(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+    feedback_markers = (
+        "修改", "调整", "重做", "重新", "补充", "强化", "削弱", "增加", "加入",
+        "删掉", "删除", "保留", "不要", "别", "改成", "改为", "设为", "设定",
+        "选择", "选", "采用", "接受", "接收", "同意", "确定", "太", "更",
+    )
+    if any(marker in stripped for marker in feedback_markers):
+        return True
+    if re.search(r"(^|[\s，,；;])\d+[.、)]", stripped):
+        return True
+    return False
+
+
+def build_outline_next_step_message(state: NovelState) -> str:
+    stage = state.outline_stage
+    label = stage_display_name(stage)
+    status = state.outline_stage_status or "unknown"
+    pending_items = [item.strip() for item in state.pending_questions if item.strip()]
+    if not pending_items and state.pending_question.strip():
+        pending_items = [line.strip() for line in state.pending_question.splitlines() if line.strip()]
+    summary = "暂无"
+    if pending_items:
+        summary = "；".join(pending_items[:3])
+        if len(pending_items) > 3:
+            summary += f"；等 {len(pending_items)} 项"
+    return (
+        f"当前阶段：{label} {status}\n"
+        f"未决问题：{len(pending_items)} 项。{summary}\n"
+        "可选下一步：\n"
+        "1. 直接回答上述问题，系统会吸收回答并重跑当前阶段。\n"
+        "2. 明确说“按当前建议处理并进入下一阶段”，系统会闭环未决问题后推进。\n"
+        "3. 说“查看当前阶段产物”，我会展示当前阶段内容。\n"
+        "4. 提出具体修改，例如补充设定、选择答案或调整风格。"
+    )
 
 
 def build_pending_answer_instruction(state: NovelState, text: str) -> str:
