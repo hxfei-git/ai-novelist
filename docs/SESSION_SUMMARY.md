@@ -1303,3 +1303,23 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 223 passed
 ```
+
+## 62. 本轮更新：Chapter Hook Agent Prompt 整改
+
+- 完整读取并执行 `18_chapter_hook_agent.md`。
+- `chapter_hook_agent.md` 现在要求钩子必须来自已有伏笔、当前章节目标或已规划信息差。
+- 禁止新增全局真相、未规划大反转、新世界规则、新角色关系或正文段落。
+- 每个 hook 必须包含 `source_hint` 和 `reveal_level`，其中 `reveal_level` 只能是 `hint|partial|none`。
+- 需要保留的信息写入 `do_not_reveal`，避免提前泄露后续真相。
+- 新增回归测试覆盖 reveal_level、source_hint 和 no-spoiler/no-new-canon 边界。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 10 passed
+.venv/bin/python -m pytest tests/test_graph_chapter_plan.py tests/test_graph_scene.py
+# 7 passed
+.venv/bin/python -m pytest
+# 224 passed
+```

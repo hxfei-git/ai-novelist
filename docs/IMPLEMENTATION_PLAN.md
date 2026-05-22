@@ -1547,3 +1547,21 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Chapter conflict agent 只排序和诊断已有冲突。
 - 冲突不足时提出最小强化建议或问题，不发明新敌人和新规则。
+
+## 58. Chapter Hook Agent Prompt 整改
+
+目标：执行 `18_chapter_hook_agent.md`，让章节钩子只服务当前章节和已规划伏笔，不新增 canon 或提前泄露后续真相。
+
+已完成：
+
+- `chapter_hook_agent.md` 明确钩子必须来自已有伏笔、当前章节目标或已规划信息差。
+- 禁止新增全局真相、未规划大反转、新世界规则、新角色关系或无依据 canon。
+- 不得提前泄露后续真相；需要保留的信息写入 `do_not_reveal`。
+- JSON schema 增加 `hooks`、`do_not_reveal`、`open_questions`，每个 hook 必须包含 `source_hint` 和 `reveal_level`。
+- `reveal_level` 只能是 `hint|partial|none`，`hooks` 最多 5 条，每条字段内容不超过 80 中文字符。
+- 新增 prompt loader 回归测试覆盖 reveal_level、source_hint、禁止泄露和 no-new-canon 边界。
+
+当前边界：
+
+- Chapter hook agent 只设计当前章悬念呈现方式。
+- 钩子不创造新真相，只选择已有伏笔的揭露层级。

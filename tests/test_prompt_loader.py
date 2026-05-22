@@ -134,3 +134,21 @@ def test_chapter_conflict_agent_prompt_requires_source_hints_and_existing_confli
     assert "minimal_fix_suggestions" in prompt
     assert "最多 5 条" in prompt
     assert "不超过 80 中文字符" in prompt
+
+
+def test_chapter_hook_agent_prompt_requires_reveal_level_and_existing_foreshadowing():
+    prompt = load_prompt("chapter_hook_agent")
+
+    assert "只输出 JSON" in prompt
+    assert "hooks" in prompt
+    assert "reveal_level" in prompt
+    assert "hint" in prompt
+    assert "partial" in prompt
+    assert "none" in prompt
+    assert "每个 hook 必须包含 `source_hint` 和 `reveal_level`" in prompt
+    assert "钩子必须来自已有伏笔" in prompt
+    assert "当前章节目标" in prompt
+    assert "不得提前泄露后续真相" in prompt
+    assert "do_not_reveal" in prompt
+    for forbidden in ("新增全局真相", "未规划大反转", "新世界规则", "新角色关系", "正文段落"):
+        assert forbidden in prompt
