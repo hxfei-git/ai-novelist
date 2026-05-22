@@ -113,9 +113,9 @@ class DirectorDecision:
             action=action,
             requires_confirmation=normalize_bool(data.get("requires_confirmation"), action in MUTATING_ACTIONS),
             confidence=normalize_confidence(data.get("confidence")),
-            user_message=str(data.get("user_message") or data.get("message") or "我需要更多信息才能决定下一步。").strip(),
+            user_message=compact_director_text(str(data.get("user_message") or data.get("message") or "我需要更多信息才能决定下一步。").strip(), 120),
             task_args=dict(task_args),
-            next_steps=normalize_str_list(data.get("next_steps", [])),
+            next_steps=[compact_director_text(item, 80) for item in normalize_str_list(data.get("next_steps", []))[:3]],
             target=str(data.get("target", "unknown")).strip().lower() or "unknown",
             intent=str(data.get("intent", "answer")).strip().lower() or "answer",
             instruction=str(data.get("instruction", "")).strip(),
@@ -1433,6 +1433,13 @@ def normalize_confidence(value: Any) -> int:
         return max(0, min(100, int(value)))
     except (TypeError, ValueError):
         return 0
+
+
+def compact_director_text(text: str, max_chars: int) -> str:
+    cleaned = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(cleaned) <= max_chars:
+        return cleaned
+    return cleaned[: max(0, max_chars - 3)].rstrip() + "..."
 
 
 def normalize_str_list(value: Any) -> list[str]:

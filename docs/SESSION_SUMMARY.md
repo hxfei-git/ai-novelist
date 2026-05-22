@@ -1852,3 +1852,26 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 251 passed
 ```
+
+
+## 88. 本轮更新：Director Prompt 整改
+
+- 完整读取并执行 `44_director.md`。
+- `director.md` 现在增加 Director 硬约束，只做路由、澄清、提炼用户约束和安排下一步。
+- 禁止生成阶段产物、长篇大纲、世界观正文、章节正文或替子 Agent 创作。
+- 禁止在一次用户请求中静默推进多个大纲阶段。
+- 禁止把模型推测、候选方案或未确认信息写入 `locked_constraints`。
+- `task_args` 限定为用户原意、明确章节号、明确阶段名和必要执行参数。
+- `DirectorDecision.from_dict` 同步执行 user_message<=120 和 next_steps<=3 预算。
+- 新增回归测试覆盖路由边界和预算执行。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 36 passed
+.venv/bin/python -m pytest tests/test_graph_bible.py tests/test_finalize_chapter.py tests/test_director_service.py tests/test_research_workflow.py tests/test_search_backend.py tests/test_bible.py
+# 73 passed
+.venv/bin/python -m pytest
+# 253 passed
+```

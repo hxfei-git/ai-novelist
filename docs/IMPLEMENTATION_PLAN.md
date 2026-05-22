@@ -2053,3 +2053,25 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Chapter summarizer 只记录本章可验证连续性事实。
 - 摘要不能承担预测、评价或新设定写入功能。
+
+
+## 84. Director Prompt 整改
+
+目标：执行 `44_director.md`，让 Director 只做路由、澄清和提炼用户约束，不生成阶段产物或自动越阶段。
+
+已完成：
+
+- `director.md` 增加 Director 硬约束。
+- 明确 Director 只做路由、澄清、提炼用户约束和安排下一步。
+- 禁止生成阶段产物、长篇大纲、世界观正文、章节正文或替子 Agent 创作。
+- 禁止在一次用户请求中静默推进多个大纲阶段。
+- 禁止把模型推测、候选方案或未确认信息写入 `locked_constraints`。
+- `task_args` 限定为用户原意、明确章节号、明确阶段名和必要执行参数。
+- 输出预算要求 user_message<=120 中文字符、next_steps<=3。
+- `DirectorDecision.from_dict` 同步执行 user_message 和 next_steps 预算。
+- 新增 prompt loader 和 director_service 回归测试覆盖路由边界和预算执行。
+
+当前边界：
+
+- Director 是调度和约束提炼层，不是创作执行层。
+- 多阶段推进必须由用户明确确认，不能静默连续执行。

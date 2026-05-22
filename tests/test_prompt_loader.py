@@ -496,3 +496,15 @@ def test_chapter_summarizer_prompt_facts_only_no_prediction():
     assert "80-180 字" in prompt
     for forbidden in ("推断未明说动机", "读者猜测", "预测后续剧情", "可能", "似乎暗示后续会", "读者评价"):
         assert forbidden in prompt
+
+
+def test_director_prompt_routes_without_generating_stage_outputs():
+    prompt = load_prompt("director")
+
+    assert "只做路由、澄清、提炼用户约束" in prompt
+    assert "不生成阶段产物" in prompt
+    assert "不在一次用户请求中静默推进多个大纲阶段" in prompt
+    assert "不把模型推测、候选方案或未确认信息写入 locked_constraints" in prompt
+    assert "user_message 必须简短，不超过 120 中文字符" in prompt
+    assert "next_steps 最多 3 条" in prompt
+    assert "新小说创意" in prompt and "不要直接生成完整大纲" in prompt

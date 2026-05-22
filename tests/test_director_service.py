@@ -49,6 +49,27 @@ def test_parse_service_director_output_supports_json_research_args():
     assert decision.task_args["author"] == "初圣"
 
 
+def test_parse_service_director_output_enforces_message_and_next_step_budget():
+    state = NovelState(project_id="demo", title="Demo")
+    long_message = "说明" * 100
+    output = json.dumps(
+        {
+            "action": "ask_user",
+            "requires_confirmation": False,
+            "confidence": 80,
+            "user_message": long_message,
+            "next_steps": ["第一步" * 50, "第二步", "第三步", "第四步"],
+        },
+        ensure_ascii=False,
+    )
+
+    decision = parse_service_director_output(output, state)
+
+    assert len(decision.user_message) <= 120
+    assert len(decision.next_steps) == 3
+    assert all(len(item) <= 80 for item in decision.next_steps)
+
+
 
 class ChatDirectorAdapter(CodexCLIAdapter):
     def _mock_director(self, prompt: str) -> str:
