@@ -1587,3 +1587,25 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 237 passed
 ```
+
+
+## 76. 本轮更新：Style Editor Prompt 整改
+
+- 完整读取并执行 `32_style_editor.md`。
+- `style_editor.md` 现在明确只诊断语言和叙述问题。
+- 修复建议只能是删减说明、改写语气、调整节奏、统一视角或压缩解释比例。
+- 禁止新增设定、改剧情、改类型定位、重写正文或输出长篇示范段落。
+- 禁止改变事实、信息释放、人物状态、伏笔或结尾钩子。
+- 风格目标不明确时写入 `needs_confirmation`，不得重设类型方向。
+- 新增回归测试覆盖语言层修复和 no-fact/type-change 边界。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 24 passed
+.venv/bin/python -m pytest tests/test_graph_review.py tests/test_graph_revision.py tests/test_output_contracts.py
+# 9 passed
+.venv/bin/python -m pytest
+# 238 passed
+```

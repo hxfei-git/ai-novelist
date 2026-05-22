@@ -1807,3 +1807,23 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Character arc editor 只处理当前章人物选择和情绪连贯性。
 - 不用新增身世、亲密机制或阵营关系补人物动机。
+
+
+## 72. Style Editor Prompt 整改
+
+目标：执行 `32_style_editor.md`，让风格编辑只诊断语言和叙述问题，不改变类型定位、剧情事实或世界观。
+
+已完成：
+
+- `style_editor.md` 明确只诊断语言和叙述问题。
+- 修复建议限定为删减说明、改写语气、调整节奏、统一视角或压缩解释比例。
+- 禁止新增设定、改剧情、改类型定位、重写正文或输出长篇示范段落。
+- 禁止改变事实、信息释放、人物状态、伏笔或结尾钩子。
+- 风格目标不明确时写入 `needs_confirmation`，不得重设类型方向。
+- 保留 JSON 输出和既有预算：top_issues<=5、rewrite_tasks<=5、keep<=3、每字符串不超过 80 中文字符。
+- 新增 prompt loader 回归测试覆盖语言层诊断和 no-fact/type-change 边界。
+
+当前边界：
+
+- Style editor 是语言与叙述诊断器，不是剧情或类型方向编辑器。
+- 风格问题只能转化为语言层最小修复任务。

@@ -348,3 +348,15 @@ def test_character_arc_editor_prompt_only_repairs_current_chapter_choices():
     assert "最多 5 个 top_issues" in prompt
     for forbidden in ("感情机制", "恋爱机制", "长期承诺", "亲密规则", "新阵营关系", "未规划人物背景", "改变关系状态"):
         assert forbidden in prompt
+
+
+def test_style_editor_prompt_only_diagnoses_language_layer():
+    prompt = load_prompt("style_editor")
+
+    assert "只诊断语言和叙述问题" in prompt
+    assert "删减说明、改写语气、调整节奏" in prompt
+    assert "不要重设类型方向" in prompt
+    assert "rewrite_tasks" in prompt
+    assert "needs_confirmation" in prompt
+    for forbidden in ("新增设定", "改剧情", "改类型定位", "重写正文", "长篇示范段落", "改变事实", "结尾钩子"):
+        assert forbidden in prompt
