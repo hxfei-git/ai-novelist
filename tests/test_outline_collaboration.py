@@ -251,7 +251,7 @@ def test_non_direction_synthesizer_prompt_avoids_fake_choice_menu():
 
     assert "不输出候选菜单式 A/B/C" in prompt
     assert "## 人物关系稿" in prompt
-    assert "## 关系边界" in prompt
+    assert "与主线冲突的功能" in prompt
     assert "## 仍需确认的问题" in prompt
     assert "候选项或决策" not in prompt
 
@@ -390,6 +390,36 @@ def test_characters_prompt_uses_direction_and_worldbuilding_context():
     assert "世界观设定（options_ready）" in prompt
     assert "气运可以被观测、借贷和吞噬" in prompt
     assert "人物关系必须承接方向定位、故事概念和世界观规则" in prompt
+
+
+def test_characters_prompt_requires_mainline_conflict_function():
+    state = NovelState(project_id="demo", title="Demo", idea="重生魔门")
+
+    role_prompt = build_outline_stage_role_prompt(state, "characters", "关系冲突 Agent")
+    synth_prompt = build_outline_stage_synthesizer_prompt(state, "characters", [])
+
+    assert "主角缺陷与欲望" in role_prompt
+    assert "关键人物目标" in role_prompt
+    assert "阵营位置" in role_prompt
+    assert "背叛/信任风险" in role_prompt
+    assert "人物 / 目标 / 与主线冲突的功能 / 关系张力 / 弧光风险" in synth_prompt
+    assert "主要人物 3-5 个" in synth_prompt
+    assert "每字段不超过 60 中文字符" in synth_prompt
+    assert "每个角色都必须有主线功能或冲突功能" in synth_prompt
+    for forbidden in ("亲密行为", "双修审批", "道侣绩效", "道侣流程", "暧昧规则", "福利场景", "恋爱系统表格"):
+        assert forbidden in role_prompt or forbidden in synth_prompt
+
+
+def test_characters_prompt_preserves_user_requested_terms_as_conflict_function():
+    state = NovelState(project_id="demo", title="Demo", idea="重生魔门")
+    state.user_request = "人物关系里保留道侣绩效这个黑色幽默方向，但别写福利场景。"
+
+    prompt = build_outline_stage_synthesizer_prompt(state, "characters", [])
+
+    assert "用户原始输入或锁定产物已明确包含：道侣绩效、福利场景" in prompt
+    assert "可以保留这些词的方向" in prompt
+    assert "必须改写为目标、动机、阵营位置或主线冲突功能" in prompt
+    assert "不得生成亲密行为规则、道侣流程或福利场景" in prompt
 
 
 def test_story_flow_prompt_uses_all_prior_stage_contexts():

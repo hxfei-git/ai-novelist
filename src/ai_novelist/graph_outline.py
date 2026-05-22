@@ -826,7 +826,8 @@ def build_outline_stage_role_prompt(state: NovelState, stage: str, role: str) ->
         f"当前阶段已有内容：\n{current_stage_context(state, stage)}\n\n"
         f"阶段连续性要求：\n{stage_continuity_requirement(stage)}\n\n"
         f"{outline_stage_boundary_prompt(stage)}\n"
-        f"{worldbuilding_overfine_terms_guard(state, stage)}\n\n"
+        f"{worldbuilding_overfine_terms_guard(state, stage)}"
+        f"{characters_relationship_guard(state, stage)}\n\n"
         "OUTPUT_BUDGET:\n"
         "- 只输出短 JSON：{role, opportunities, risks, suggestions}。\n"
         "- opportunities/risks/suggestions 各最多 2 条，每条不超过 80 中文字符。\n"
@@ -849,7 +850,8 @@ def build_outline_stage_synthesizer_prompt(state: NovelState, stage: str, role_r
         f"当前阶段已有内容：\n{current_stage_context(state, stage)}\n\n"
         f"阶段连续性要求：\n{stage_continuity_requirement(stage)}\n\n"
         f"{outline_stage_boundary_prompt(stage)}\n"
-        f"{worldbuilding_overfine_terms_guard(state, stage)}\n\n"
+        f"{worldbuilding_overfine_terms_guard(state, stage)}"
+        f"{characters_relationship_guard(state, stage)}\n\n"
         f"角色短评：\n{reviews}\n\n"
         f"{outline_stage_synthesizer_output_rule(stage)}"
     )
@@ -869,8 +871,8 @@ OUTLINE_STAGE_BOUNDARIES = {
         "forbidden": "过细行政流程、表格化制度、申请表、申请、审批、备案、考评、绩效、KPI、与主线无关的规则清单、未被用户要求的猎奇机制、完整人物小传、章节剧情、分卷安排、无代价万能规则",
     },
     "characters": {
-        "allowed": "主角欲望与缺陷、关键关系张力、反派或势力压力、人物弧光和关系边界",
-        "forbidden": "世界规则清单、章节列表、完整剧情梗概、亲密机制细则、与主线无关的角色堆砌",
+        "allowed": "主角缺陷与欲望、关键人物目标、动机、关系张力、阵营位置、阵营冲突、背叛/信任风险、成长矛盾、人物弧光",
+        "forbidden": "福利场景、擦边机制、亲密行为规则、亲密行为、双修审批、道侣流程、道侣绩效、暧昧规则、恋爱系统表格、世界规则清单、章节列表、完整剧情梗概、无主线功能的人设细节、与主线无关的角色堆砌",
     },
     "story_flow": {
         "allowed": "主线推进链、阶段转折、悬念释放、低谷反击、终局兑现方向",
@@ -928,6 +930,33 @@ def worldbuilding_overfine_terms_guard(state: NovelState, stage: str) -> str:
     )
 
 
+def characters_relationship_guard(state: NovelState, stage: str) -> str:
+    if stage != "characters":
+        return ""
+    controlled_terms = ("亲密行为", "双修审批", "道侣绩效", "道侣流程", "福利场景", "擦边机制", "暧昧规则", "恋爱系统")
+    explicit_sources = [state.user_request, state.idea]
+    for artifact in state.outline_stage_artifacts.values():
+        if not isinstance(artifact, dict) or artifact.get("status") != "locked":
+            continue
+        explicit_sources.append(str(artifact.get("synthesis") or ""))
+        memory = artifact.get("stage_memory")
+        if isinstance(memory, list):
+            explicit_sources.extend(str(item) for item in memory)
+    source_text = "\n".join(item for item in explicit_sources if item)
+    explicit_terms = [term for term in controlled_terms if term in source_text]
+    if explicit_terms:
+        return (
+            "\nCHARACTER_RELATIONSHIP_TERMS:\n"
+            f"- 用户原始输入或锁定产物已明确包含：{'、'.join(explicit_terms)}。\n"
+            "- 可以保留这些词的方向，但必须改写为目标、动机、阵营位置或主线冲突功能；不得生成亲密行为规则、道侣流程或福利场景。"
+        )
+    return (
+        "\nCHARACTER_RELATIONSHIP_TERMS:\n"
+        "- 默认不要生成亲密行为、双修审批、道侣绩效、道侣流程、暧昧规则、福利场景或恋爱系统表格。\n"
+        "- 每个角色必须有明确主线功能或冲突功能；无主线功能的人设细节一律删除。"
+    )
+
+
 def outline_stage_synthesizer_output_rule(stage: str) -> str:
     if stage == "direction":
         return (
@@ -965,9 +994,9 @@ def outline_stage_synthesizer_output_rule(stage: str) -> str:
         ),
         "characters": (
             "## 人物关系稿\n"
-            "列出主角、关键关系、对手/势力和人物弧光，强调互相利用、误解、代价和主线推动。\n"
-            "## 关系边界\n"
-            "说明感情、阵营或师徒关系如何服务主线，不展开亲密机制细则。"
+            "只列主要人物 3-5 个；每人固定使用「人物 / 目标 / 与主线冲突的功能 / 关系张力 / 弧光风险」5 个字段，每字段不超过 60 中文字符。\n"
+            "每个角色都必须有主线功能或冲突功能；只写目标、动机、阵营位置、背叛/信任风险和成长矛盾。\n"
+            "禁止亲密行为、双修审批、道侣绩效、道侣流程、暧昧规则、福利场景、恋爱系统表格和无主线功能的人设细节。"
         ),
         "story_flow": (
             "## 故事流程稿\n"

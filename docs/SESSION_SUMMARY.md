@@ -1044,3 +1044,23 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 209 passed
 ```
+
+## 49. 本轮更新：Characters 阶段专项边界整改
+
+- 完整读取并执行 `03_outline_stage_characters.md`。
+- 人物关系阶段 prompt 现在只允许主角缺陷与欲望、关键人物目标、动机、关系张力、阵营位置、阵营冲突、背叛/信任风险、成长矛盾和人物弧光。
+- 默认禁止亲密行为、双修审批、道侣绩效、道侣流程、暧昧规则、福利场景、擦边机制、恋爱系统表格和无主线功能的人设细节。
+- 用户原始输入或锁定产物明确包含相关词时，prompt 只允许把它们改写为目标、动机、阵营位置或主线冲突功能。
+- Synthesizer 固定输出 3-5 个主要人物，每人使用 `人物 / 目标 / 与主线冲突的功能 / 关系张力 / 弧光风险`，每字段不超过 60 中文字符。
+- 新增回归测试覆盖人物冲突功能要求和亲密/福利机制禁区。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 1 passed
+.venv/bin/python -m pytest tests/test_outline_collaboration.py
+# 41 passed
+.venv/bin/python -m pytest
+# 211 passed
+```
