@@ -1,3 +1,5 @@
+import json
+
 from ai_novelist.adapters.codex_cli import CodexCLIAdapter
 from ai_novelist.graph_drafting import build_drafting_graph
 from ai_novelist.graph_review import build_review_graph
@@ -27,6 +29,10 @@ def test_revision_generates_plan_and_draft_v2(tmp_path):
     assert store.chapter_path("demo", 1).exists()
     assert result.revision_count == 1
     assert "revision_plan_v1" in result.current_revision_plan
+    plan = json.loads(result.current_revision_plan)["revision_plan_v1"]
+    assert 1 <= len(plan["tasks"]) <= 8
+    assert all("source" in item for item in plan["tasks"])
+    assert all("review_v1.json" in item["source"] for item in plan["tasks"])
     assert any(item["type"] == "revision_plan" and item["graph"] == "revision" for item in result.artifact_registry)
     assert any(item["type"] == "chapter_draft" and item["graph"] == "revision" for item in result.artifact_registry)
 

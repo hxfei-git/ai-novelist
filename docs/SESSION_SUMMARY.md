@@ -1652,3 +1652,25 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 241 passed
 ```
+
+
+## 79. 本轮更新：Revision Planner Prompt 整改
+
+- 完整读取并执行 `35_revision_planner.md`。
+- `revision_planner.md` 现在输出严格 JSON，顶层结构为 `revision_plan_v1`。
+- 每个 task 必须来源于 `review_v1.json` 的 blocking_issues、issues 或 rewrite_tasks，并包含 `source`。
+- 禁止新增剧情、世界观、人物关系，或未在 review 中出现的大改。
+- 只输出定向修订目标、涉及场景、保留内容、禁止触碰约束和待确认项。
+- mock revision plan 同步改为 JSON-first，并保持修订流程可识别的 `revision_plan_v1` 标记。
+- 新增回归测试覆盖 JSON 可解析、任务数量和 review 溯源。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 27 passed
+.venv/bin/python -m pytest tests/test_graph_review.py tests/test_graph_revision.py tests/test_output_contracts.py
+# 10 passed
+.venv/bin/python -m pytest
+# 242 passed
+```

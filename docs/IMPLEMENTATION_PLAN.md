@@ -1867,3 +1867,23 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Review synthesizer 只做上游审稿 JSON 的优先级汇总。
 - 汇总不能创造新问题，也不能把短建议扩写成新修订方案。
+
+
+## 75. Revision Planner Prompt 整改
+
+目标：执行 `35_revision_planner.md`，让修订计划只把 `review_v1.json` 转成可执行任务，不新增 review 外剧情方案。
+
+已完成：
+
+- `revision_planner.md` 改为严格 JSON 输出，顶层结构为 `revision_plan_v1`。
+- 每个 task 必须来源于 `review_v1.json` 的 blocking_issues、issues 或 rewrite_tasks，并包含 `source`。
+- 禁止新增剧情、世界观、人物关系，或未在 review 中出现的大改。
+- 只允许输出定向修订目标、涉及场景、保留内容、禁止触碰约束和待确认项。
+- review 信息不足时写入 `open_questions`，不得补造任务。
+- mock revision plan 同步改为 JSON-first，并保留 `revision_plan_v1` 标记以兼容修订流程。
+- 新增 prompt loader 和 graph revision 回归测试覆盖任务数量、JSON 可解析和 review 溯源。
+
+当前边界：
+
+- Revision planner 是 review JSON 到任务清单的转换器。
+- 修订计划中的任务必须可追溯到 review_v1.json。

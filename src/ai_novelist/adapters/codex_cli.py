@@ -756,14 +756,19 @@ class CodexCLIAdapter(AgentAdapter):
         return json.dumps(data, ensure_ascii=False)
 
     def _mock_revision_plan(self) -> str:
-        return (
-            "# revision_plan_v1\n\n"
-            "## 修订目标\n补强维修站异常记录、纸质文本禁忌和东七气闸倒计时。\n\n"
-            "## 定向任务\n"
-            "1. 在醒来场景增加值班系统和审计编号异常。\n"
-            "2. 在手稿场景说明纸质文本不可被系统即时追踪。\n"
-            "3. 在结尾强化压力曲线下坠和违规行动。\n"
-        )
+        data = {
+            "revision_plan_v1": {
+                "tasks": [
+                    {"task": "补强维修站异常记录。", "target_scene": "醒来场景", "source": "review_v1.json.rewrite_tasks: 增加审计编号查询失败。"},
+                    {"task": "补明纸质文本禁忌。", "target_scene": "手稿场景", "source": "review_v1.json.rewrite_tasks: 补明纸质文本禁忌。"},
+                    {"task": "强化东七气闸倒计时。", "target_scene": "结尾场景", "source": "review_v1.json.rewrite_tasks: 强化东七气闸倒计时。"},
+                ],
+                "keep": ["不提前揭露月背冷库真相。"],
+                "do_not_touch": ["不改变既有章节顺序。"],
+                "open_questions": [],
+            }
+        }
+        return json.dumps(data, ensure_ascii=False)
 
     def _mock_chapter_plan(self) -> str:
         return (

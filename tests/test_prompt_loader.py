@@ -385,3 +385,16 @@ def test_review_synthesizer_prompt_limits_and_uses_upstream_only():
     assert "每项不超过 90 中文字符" in prompt
     for forbidden in ("新增上游未提出的问题", "扩写长任务", "重写正文", "改变原意", "补造原因"):
         assert forbidden in prompt
+
+
+def test_revision_planner_prompt_requires_review_traceable_json_tasks():
+    prompt = load_prompt("revision_planner")
+
+    assert "只把 review_v1.json 转成 revision_plan_v1" in prompt
+    assert "任务必须来源于 review_v1.json" in prompt
+    assert "每个 task 必须包含 `source`" in prompt
+    assert "输出严格 JSON" in prompt
+    assert "tasks 最多 8 条" in prompt
+    assert "每条字符串不超过 100 中文字符" in prompt
+    for forbidden in ("新增剧情", "世界观", "人物关系", "未在 review 中出现的大改", "补造任务"):
+        assert forbidden in prompt
