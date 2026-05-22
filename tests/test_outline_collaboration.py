@@ -1,5 +1,5 @@
 from ai_novelist.adapters.codex_cli import CodexCLIAdapter
-from ai_novelist.graph_outline import build_outline_stage_synthesizer_prompt, extract_stage_confirmation_questions, format_stage_markdown, append_message, build_outline_collaboration_graph, build_outline_prompt
+from ai_novelist.graph_outline import build_outline_stage_role_prompt, build_outline_stage_synthesizer_prompt, extract_stage_confirmation_questions, format_stage_markdown, append_message, build_outline_collaboration_graph, build_outline_prompt
 from ai_novelist.graph_writer import build_chat_graph
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
@@ -159,7 +159,7 @@ def test_direction_stage_markdown_hides_role_reviews():
             "stage": "direction",
             "label": "方向定位",
             "user_feedback": "偏悬疑推理线",
-            "synthesis": "## 一句话方向\n\n重生魔门悬疑智斗。",
+            "synthesis": "## 方向定位稿\n\n重生魔门悬疑智斗。",
             "role_reviews": [{"role": "风险编辑 Agent", "content": "机会、风险、建议"}],
         }
     )
@@ -175,11 +175,15 @@ def test_direction_synthesizer_prompt_demands_control_brief():
     prompt = build_outline_stage_synthesizer_prompt(state, "direction", [])
 
     assert "方向定位不是评审报告" in prompt
-    assert "整合成一版新的方向控制稿" in prompt
+    assert "整合成一版新的方向定位稿" in prompt
     assert "不要追加、罗列或保留历史修改记录" in prompt
-    assert "## 一句话方向" in prompt
-    assert "## 方向命令" in prompt
-    assert "不写机会/风险/建议" in prompt
+    assert "## 方向定位稿" in prompt
+    assert "全书开篇切入、中期升级、后期终局" in prompt
+    assert "不能只写开篇局面" in prompt
+    assert "## 一句话方向" not in prompt
+    assert "## 方向命令" not in prompt
+    assert "## 不许跑偏" not in prompt
+    assert "下一阶段输入" not in prompt
 
 
 def test_non_direction_synthesizer_prompt_avoids_fake_choice_menu():
@@ -191,6 +195,78 @@ def test_non_direction_synthesizer_prompt_avoids_fake_choice_menu():
     assert "## 已采用设定" in prompt
     assert "## 仍需确认的问题" in prompt
     assert "候选项或决策" not in prompt
+
+
+def test_worldbuilding_prompt_uses_saved_direction_context():
+    state = NovelState(project_id="demo", title="Demo", idea="重生魔门")
+    state.outline_stage_artifacts["direction"] = {
+        "stage": "direction",
+        "label": "方向定位",
+        "status": "options_ready",
+        "synthesis": "## 方向定位稿\n\n主角以低调求生方式追查师傅吞噬气运。",
+    }
+
+    prompt = build_outline_stage_role_prompt(state, "worldbuilding", "规则架构 Agent")
+
+    assert "前序已保存阶段内容" in prompt
+    assert "方向定位（options_ready）" in prompt
+    assert "主角以低调求生方式追查师傅吞噬气运" in prompt
+    assert "世界观必须承接方向定位" in prompt
+
+
+def test_characters_prompt_uses_direction_and_worldbuilding_context():
+    state = NovelState(project_id="demo", title="Demo", idea="重生魔门")
+    state.outline_stage_artifacts["direction"] = {
+        "stage": "direction",
+        "label": "方向定位",
+        "status": "locked",
+        "synthesis": "黑暗魔门悬疑智斗。",
+    }
+    state.outline_stage_artifacts["worldbuilding"] = {
+        "stage": "worldbuilding",
+        "label": "世界观设定",
+        "status": "options_ready",
+        "synthesis": "气运可以被观测、借贷和吞噬。",
+    }
+
+    prompt = build_outline_stage_synthesizer_prompt(state, "characters", [])
+
+    assert "方向定位（locked）" in prompt
+    assert "黑暗魔门悬疑智斗" in prompt
+    assert "世界观设定（options_ready）" in prompt
+    assert "气运可以被观测、借贷和吞噬" in prompt
+    assert "人物关系必须承接方向定位和世界观规则" in prompt
+
+
+def test_story_flow_prompt_uses_all_prior_stage_contexts():
+    state = NovelState(project_id="demo", title="Demo", idea="重生魔门")
+    state.outline_stage_artifacts["direction"] = {"stage": "direction", "status": "locked", "synthesis": "低调求生追查真相。"}
+    state.outline_stage_artifacts["worldbuilding"] = {"stage": "worldbuilding", "status": "locked", "synthesis": "气运规则造成修行代价。"}
+    state.outline_stage_artifacts["characters"] = {"stage": "characters", "status": "options_ready", "synthesis": "师徒关系隐藏吞噬冲突。"}
+
+    prompt = build_outline_stage_role_prompt(state, "story_flow", "主线结构 Agent")
+
+    assert "低调求生追查真相" in prompt
+    assert "气运规则造成修行代价" in prompt
+    assert "师徒关系隐藏吞噬冲突" in prompt
+    assert "故事流程必须承接方向定位、世界观代价和人物关系冲突" in prompt
+
+
+def test_current_stage_draft_enters_synthesizer_prompt():
+    state = NovelState(project_id="demo", title="Demo", idea="重生魔门")
+    state.outline_stage_artifacts["characters"] = {
+        "stage": "characters",
+        "label": "人物关系",
+        "status": "options_ready",
+        "synthesis": "魔宗圣女与主角互相试探，剑宗天才少女负责外部审判。",
+    }
+
+    prompt = build_outline_stage_synthesizer_prompt(state, "characters", [])
+
+    assert "当前阶段已有内容" in prompt
+    assert "人物关系（options_ready）" in prompt
+    assert "魔宗圣女与主角互相试探" in prompt
+    assert "剑宗天才少女负责外部审判" in prompt
 
 
 def test_extract_stage_confirmation_questions_from_synthesis():

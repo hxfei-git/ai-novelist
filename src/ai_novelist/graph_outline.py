@@ -622,9 +622,12 @@ def build_outline_stage_role_prompt(state: NovelState, stage: str, role: str) ->
         f"用户最新输入：{state.user_request}\n"
         f"创意：{state.idea or '暂无'}\n"
         f"检索上下文：\n{state.retrieval_context or state.reference_brief or '暂无'}\n\n"
-        f"已锁定阶段：\n{locked_stage_summary(state)}\n\n"
-        f"当前阶段旧产物：\n{format_stage_markdown(state.outline_stage_artifacts.get(stage, {})) or '暂无'}\n\n"
+        f"前序已保存阶段内容：\n{previous_stage_context(state, stage)}\n\n"
+        f"当前阶段已有内容：\n{current_stage_context(state, stage)}\n\n"
+        f"阶段连续性要求：\n{stage_continuity_requirement(stage)}\n\n"
         "请只输出该角色的短评：机会、风险、建议各 1-3 条。"
+        "建议必须基于前序已保存阶段内容和当前阶段已有内容继续创作，"
+        "不得把本阶段写成与前序设定割裂的新故事。"
     )
 
 
@@ -632,20 +635,16 @@ def build_outline_stage_synthesizer_prompt(state: NovelState, stage: str, role_r
     reviews = "\n\n".join(f"## {item['role']}\n{item['content']}" for item in role_reviews)
     if stage == "direction":
         output_rule = (
-            "方向定位不是评审报告，而是控制文章走向的简明命令稿。"
-            "必须把用户最新输入与当前阶段旧产物整合成一版新的方向控制稿；"
+            "方向定位不是评审报告，而是后续世界观、人物和剧情都会继承的创作基准。"
+            "必须把用户最新输入与当前阶段已有内容整合成一版新的方向定位稿；"
             "不要追加、罗列或保留历史修改记录，不要把用户意见单独堆成段落。"
             "若新意见与旧方向重复，合并去重；若冲突，以用户最新输入为准并改写旧方向。"
-            "最终文本必须像一份可执行命令，而不是资料汇编。"
-            "请只输出以下 Markdown 结构：\n"
-            "## 一句话方向\n"
-            "用一句话确定故事类型、主角行动方式、核心冲突和情绪基调。\n"
-            "## 方向命令\n"
-            "输出 4-6 条短句，每条必须能约束后续世界观、人物和剧情，不写机会/风险/建议。\n"
-            "## 不许跑偏\n"
-            "输出 3-5 条禁止项，说明后续不能写成什么。\n"
-            "## 下一阶段输入\n"
-            "只列 2-3 条世界观阶段必须回答的问题。"
+            "最终文本必须短、准、可执行，而不是资料汇编。"
+            "请只输出一个 Markdown 小节：\n"
+            "## 方向定位稿\n"
+            "用 6-10 条短句同时确定故事类型、主角行动方式、核心冲突、情绪基调、关键关系、主要代价、全书开篇切入、中期升级、后期终局和禁止跑偏项；"
+            "不能只写开篇局面，必须让后续世界观、人物关系和故事流程能看见中期与结尾方向；"
+            "不要再拆成“一句话方向 / 方向命令 / 不许跑偏”。"
         )
     else:
         output_rule = (
@@ -668,10 +667,55 @@ def build_outline_stage_synthesizer_prompt(state: NovelState, stage: str, role_r
         f"STAGE_LABEL: {STAGE_LABELS[stage]}\n\n"
         f"创意：{state.idea or '暂无'}\n"
         f"用户最新输入：{state.user_request}\n"
-        f"已锁定阶段：\n{locked_stage_summary(state)}\n\n"
+        f"前序已保存阶段内容：\n{previous_stage_context(state, stage)}\n\n"
+        f"当前阶段已有内容：\n{current_stage_context(state, stage)}\n\n"
+        f"阶段连续性要求：\n{stage_continuity_requirement(stage)}\n\n"
         f"角色短评：\n{reviews}\n\n"
         f"{output_rule}"
     )
+
+
+def previous_stage_context(state: NovelState, stage: str, max_chars_per_stage: int = 1800) -> str:
+    if stage not in OUTLINE_STAGES:
+        return "暂无"
+    parts: list[str] = []
+    for previous_stage in OUTLINE_STAGES[: OUTLINE_STAGES.index(stage)]:
+        artifact = state.outline_stage_artifacts.get(previous_stage)
+        if not isinstance(artifact, dict):
+            continue
+        synthesis = str(artifact.get("synthesis", "")).strip()
+        if not synthesis:
+            continue
+        status = str(artifact.get("status") or "draft")
+        if len(synthesis) > max_chars_per_stage:
+            synthesis = synthesis[:max_chars_per_stage].rstrip() + "\n..."
+        parts.append(f"## {STAGE_LABELS[previous_stage]}（{status}）\n{synthesis}")
+    return "\n\n".join(parts) or "暂无"
+
+
+def current_stage_context(state: NovelState, stage: str, max_chars: int = 2400) -> str:
+    artifact = state.outline_stage_artifacts.get(stage)
+    if not isinstance(artifact, dict):
+        return "暂无"
+    synthesis = str(artifact.get("synthesis", "")).strip()
+    if not synthesis:
+        return "暂无"
+    status = str(artifact.get("status") or state.outline_stage_status or "draft")
+    if len(synthesis) > max_chars:
+        synthesis = synthesis[:max_chars].rstrip() + "\n..."
+    return f"## {STAGE_LABELS.get(stage, stage)}（{status}）\n{synthesis}"
+
+
+def stage_continuity_requirement(stage: str) -> str:
+    requirements = {
+        "direction": "方向定位是后续所有阶段的源头：输出必须成为世界观、人物关系和故事流程可执行的控制稿。",
+        "worldbuilding": "世界观必须承接方向定位提出的类型、冲突、情绪和禁止项；每条规则都要服务这个故事方向。",
+        "characters": "人物关系必须承接方向定位和世界观规则；人物欲望、关系张力和阵营冲突要由已保存设定自然生长。",
+        "story_flow": "故事流程必须承接方向定位、世界观代价和人物关系冲突；转折不能脱离已建立的规则和人物动机。",
+        "outline_draft": "总大纲草案必须整合方向、世界观、人物关系和故事流程，形成同一条连续故事骨架。",
+        "review_lock": "审稿锁定必须检查六阶段是否互相承接，并指出任何方向、规则、人物、流程或章节草案的割裂点。",
+    }
+    return requirements.get(stage, "本阶段必须承接前序已保存阶段内容继续创作。")
 
 
 def locked_stage_summary(state: NovelState) -> str:

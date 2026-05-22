@@ -464,3 +464,12 @@ Smoke 验证：`.venv/bin/python tests/smoke_phase2_chat.py`，结果 `phase2 ch
 - 问题：阶段产物写了“仍需确认的问题”，但系统没有真正把这些问题作为待回答事项追问用户。
 - 调整：生成阶段产物后会解析确认问题，并写入 `pending_questions/pending_question`；回复中也会直接列出问题，用户可逐条回答。
 - 验证：`.venv/bin/python -m pytest tests/test_outline_collaboration.py tests/test_director_service.py`，结果 `27 passed`。
+
+## 26. 本轮调整：六阶段大纲连续上下文
+
+- 问题：六阶段大纲虽然按方向定位、世界观、人物关系、故事流程、总大纲草案、审稿锁定推进，但后续阶段主要依赖锁定阶段摘要，容易吃不到前序已生成内容或当前阶段草案，导致设定割裂。
+- 调整：阶段角色 prompt 和阶段汇总 prompt 均注入“前序已保存阶段内容”和“当前阶段已有内容”，后续阶段必须基于已保存阶段继续深化。
+- 调整：为每个阶段加入连续性要求，明确世界观、人物、流程、总纲和审稿锁定分别应如何承接前序阶段。
+- 调整：方向定位阶段改为输出单一 `## 方向定位稿`，不再拆成“一句话方向 / 方向命令 / 不许跑偏”，让第一阶段更轻、更像写作基准。
+- 调整：方向定位稿必须覆盖全书开篇切入、中期升级和后期终局，避免只生成开篇故事方向。
+- 验证：`.venv/bin/python -m pytest tests/test_outline_collaboration.py tests/test_director_service.py`，结果 `31 passed`；全量 `.venv/bin/python -m pytest`，结果 `105 passed`。

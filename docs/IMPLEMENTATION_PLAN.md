@@ -609,3 +609,13 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 - 抽取到的问题会写入 `state.pending_questions` 和 `state.pending_question`，并进入 Director 后续上下文，不再只停留在 Markdown 产物中。
 - 阶段完成回复会明确列出这些问题，引导用户直接逐条回答；如果没有问题，才回到“继续修改或确认进入下一阶段”。
 - 新增测试覆盖确认问题抽取。
+
+## 24. 本轮调整：六阶段大纲连续上下文
+
+- 修复六阶段大纲阶段之间割裂的问题：后续阶段 prompt 不再只读取已锁定阶段，而是读取当前阶段之前所有已生成的阶段产物。
+- `build_outline_stage_role_prompt` 和 `build_outline_stage_synthesizer_prompt` 现在都会注入“前序已保存阶段内容”和“当前阶段已有内容”。
+- 新增阶段连续性要求：世界观承接方向定位，人物关系承接方向和世界观，故事流程承接方向、世界观代价和人物冲突，总大纲草案整合前四阶段，审稿锁定检查贯通性。
+- 当前仍复用 `outline_stage_artifacts` 与 `outline_stages/<stage>.md` 的保存机制，不新增状态字段或迁移。
+- 增加测试覆盖世界观、人物关系、故事流程和当前阶段修订 prompt 的上下文注入。
+- 方向定位阶段输出简化为单一 `## 方向定位稿`，不再拆成“一句话方向 / 方向命令 / 不许跑偏”，降低第一阶段产物噪声。
+- `## 方向定位稿` 必须覆盖全书开篇切入、中期升级和后期终局，避免只定位开篇局面。
