@@ -959,8 +959,8 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 ## 44. 本轮修复：大纲角色 Agent 上下文区分
 
 - 修复大纲同阶段三个 role Agent 只靠 `ROLE` 行区分、进度里上下文/token 容易显示相同的问题。
-- `build_outline_stage_role_prompt()` 现在注入“角色专属关注点”，同一阶段共享阶段记忆，但故事概念、核心冲突、反转机制等角色会收到不同任务上下文。
-- 新增回归测试，确认故事概念阶段三个 role prompt 内容和长度均不同。
+- `build_outline_stage_role_prompt()` 现在注入“角色专属关注点”，同一阶段共享阶段记忆；当前精简后的故事概念阶段仅保留故事概念 Agent，其他多角色阶段仍会收到不同任务上下文。
+- 新增回归测试，确认角色专属关注点会让指定角色 prompt 与通用 fallback prompt 区分开。
 
 验证：
 
@@ -1920,3 +1920,17 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 255 passed
 ```
+
+## 45. 本轮调整：大纲阶段角色配置精简
+
+- `graph_outline.STAGE_ROLES` 按新的大纲共创配置精简：方向定位保留类型定位和主题卖点；故事概念仅保留故事概念；世界观保留规则架构和原作/检索一致性；故事流程保留主线结构、节奏悬念和伏笔三个角色。
+- 同步移除已删除角色的专属关注点，新增伏笔 Agent 关注点，避免运行时继续生成旧角色 prompt。
+- 更新 outline collaboration 回归测试，使进度事件和并行 role_reviews 顺序断言匹配新的角色列表。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_outline_collaboration.py tests/test_prompt_loader.py
+# 83 passed
+```
+

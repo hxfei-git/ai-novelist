@@ -212,7 +212,7 @@ def test_direction_stage_markdown_hides_role_reviews():
             "label": "方向定位",
             "user_feedback": "偏悬疑推理线",
             "synthesis": "## 方向定位稿\n\n重生魔门悬疑智斗。",
-            "role_reviews": [{"role": "风险编辑 Agent", "content": "机会、风险、建议"}],
+            "role_reviews": [{"role": "类型定位 Agent", "content": "机会、风险、建议"}],
         }
     )
 
@@ -220,7 +220,7 @@ def test_direction_stage_markdown_hides_role_reviews():
     assert "## 方向控制稿" not in markdown
     assert "# 方向定位" not in markdown.splitlines()
     assert "## 角色短评" not in markdown
-    assert "风险编辑 Agent" not in markdown
+    assert "类型定位 Agent" not in markdown
 
 
 def test_direction_synthesizer_prompt_demands_control_brief():
@@ -595,7 +595,6 @@ def test_outline_stage_generation_emits_progress_events(tmp_path):
     assert any(stage == "OutlineStage" and "准备" in message for stage, message in events)
     assert any(stage == "类型定位 Agent" for stage, _message in events)
     assert any(stage == "主题卖点 Agent" for stage, _message in events)
-    assert any(stage == "风险编辑 Agent" for stage, _message in events)
     assert any(stage == "大纲汇总 Agent" for stage, _message in events)
     assert any(stage == "OutlineStage" and "保存" in message for stage, message in events)
 
@@ -630,7 +629,7 @@ def test_save_state_slims_outline_artifacts_and_writes_memory(tmp_path):
         "label": "方向定位",
         "status": "options_ready",
         "synthesis": long_synthesis,
-        "role_reviews": [{"role": "风险编辑 Agent", "content": "内部短评"}],
+        "role_reviews": [{"role": "类型定位 Agent", "content": "内部短评"}],
         "stage_memory": ["低调求生追查真相", "师傅吞噬主角气运"],
     }
 
@@ -662,15 +661,12 @@ def test_concept_role_prompts_have_role_specific_context():
     }
 
     concept_prompt = build_outline_stage_role_prompt(state, "concept", "故事概念 Agent")
-    conflict_prompt = build_outline_stage_role_prompt(state, "concept", "核心冲突 Agent")
-    twist_prompt = build_outline_stage_role_prompt(state, "concept", "反转机制 Agent")
+    fallback_prompt = build_outline_stage_role_prompt(state, "concept", "临时顾问 Agent")
 
     assert "角色专属关注点" in concept_prompt
     assert "故事发动机" in concept_prompt
-    assert "中期升级" in conflict_prompt
-    assert "认知差" in twist_prompt
-    assert len({concept_prompt, conflict_prompt, twist_prompt}) == 3
-    assert len({len(concept_prompt), len(conflict_prompt), len(twist_prompt)}) == 3
+    assert "临时顾问 Agent" in fallback_prompt
+    assert concept_prompt != fallback_prompt
 
 
 def test_stage_prompt_prefers_stage_memory_over_full_synthesis():
@@ -882,7 +878,7 @@ def test_outline_stage_parallel_path_preserves_role_order(tmp_path, monkeypatch)
     state = run_outline_turn(graph, state, store, "请生成大纲")
 
     reviews = state.outline_stage_artifacts["direction"]["role_reviews"]
-    assert [item["role"] for item in reviews] == ["类型定位 Agent", "主题卖点 Agent", "风险编辑 Agent"]
+    assert [item["role"] for item in reviews] == ["类型定位 Agent", "主题卖点 Agent"]
     trace_path = store.project_dir("demo") / "debug" / "agent_runs.jsonl"
     assert trace_path.exists()
     assert "outline_stage_role" in trace_path.read_text(encoding="utf-8")

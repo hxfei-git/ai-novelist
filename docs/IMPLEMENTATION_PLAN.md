@@ -624,7 +624,7 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 - 大纲生成改为固定六阶段：方向定位、世界观设定、人物关系、故事流程、总大纲草案、审稿锁定。
 - `NovelState` 新增 `outline_stage`、`outline_stage_status`、`outline_stage_artifacts`、`outline_stage_history`，旧 `state.json` 缺字段时默认从 `direction/collecting` 加载。
 - `LocalStore` 新增 `outline_stages/<stage>.md` 路径和保存/读取方法；阶段产物逐阶段落盘，最终 `outline.md` 只在审稿锁定阶段确认后写入。
-- `graph_outline` 新增阶段执行节点：每轮按当前阶段调用 3 个固定角色 `AGENT: outline_stage_role`，再调用 `AGENT: outline_stage_synthesizer` 汇总。
+- `graph_outline` 阶段执行节点按 `STAGE_ROLES[stage]` 调用当前阶段配置的固定角色 `AGENT: outline_stage_role`，再调用 `AGENT: outline_stage_synthesizer` 汇总；不同阶段角色数量可不同。
 - 用户反馈默认重跑当前阶段；“确认进入下一阶段/锁定”才推进；“回到世界观/重做人设/查看故事流程”等可切换或展示阶段产物。
 - `chat`、`outline`、`plan-outline`、`compose` 入口均遵守阶段化流程；新项目不会再一次性生成完整总大纲。
 - `compose` 在没有已保存大纲时只启动/继续当前大纲阶段并停止；已有 `outline.md` 的旧项目仍可继续章节细纲和正文。
