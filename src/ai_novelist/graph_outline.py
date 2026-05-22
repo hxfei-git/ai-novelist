@@ -813,14 +813,6 @@ def record_stage_history(state: NovelState, event: str, stage: str, user_text: s
 
 
 def build_outline_stage_role_prompt(state: NovelState, stage: str, role: str) -> str:
-    direction_boundary = ""
-    if stage == "direction":
-        direction_boundary = (
-            "\n\nDIRECTION_STAGE_BOUNDARY:\n"
-            "- 方向定位只输出宏观方向原则：类型定位、主角行动原则、核心爽点、核心冲突方向、情绪基调、主题边界、反转原则、禁区。\n"
-            "- 禁止发明具体世界观规则、宗门/组织流程、制度条款、申请表/审批/考评/备案/绩效/KPI、具体人物关系细则、具体剧情桥段、章节安排、专有名词清单。\n"
-            "- 如果想写具体设定，必须改写成抽象原则；例如把“道侣绩效考评”改成“感情线必须服务主线冲突，不脱离类型爽点”。\n"
-        )
     return (
         "AGENT: outline_stage_role\n"
         f"ROLE: {role}\n"
@@ -833,11 +825,11 @@ def build_outline_stage_role_prompt(state: NovelState, stage: str, role: str) ->
         f"前序已保存阶段内容：\n{previous_stage_context(state, stage)}\n\n"
         f"当前阶段已有内容：\n{current_stage_context(state, stage)}\n\n"
         f"阶段连续性要求：\n{stage_continuity_requirement(stage)}\n\n"
-        f"{direction_boundary}"
+        f"{outline_stage_boundary_prompt(stage)}\n\n"
         "OUTPUT_BUDGET:\n"
         "- 只输出短 JSON：{role, opportunities, risks, suggestions}。\n"
-        "- opportunities/risks/suggestions 各最多 3 条，每条不超过 60 中文字符。\n"
-        "- 总输出不超过 600 中文字符。\n"
+        "- opportunities/risks/suggestions 各最多 2 条，每条不超过 80 中文字符。\n"
+        "- 总输出不超过 500 中文字符。\n"
         "- 不要复述上下文，不要输出分析过程。\n"
         "建议必须基于前序已保存阶段内容和当前阶段已有内容继续创作，"
         "不得把本阶段写成与前序设定割裂的新故事。"
@@ -846,39 +838,6 @@ def build_outline_stage_role_prompt(state: NovelState, stage: str, role: str) ->
 
 def build_outline_stage_synthesizer_prompt(state: NovelState, stage: str, role_reviews: list[dict[str, str]]) -> str:
     reviews = "\n\n".join(f"## {item['role']}\n{item['content']}" for item in role_reviews)
-    if stage == "direction":
-        output_rule = (
-            "方向定位不是评审报告，而是后续概念、世界观、人物和剧情都会继承的创作基准。"
-            "必须把用户最新输入与当前阶段已有内容整合成一版新的方向定位稿；"
-            "不要追加、罗列或保留历史修改记录，不要把用户意见单独堆成段落。"
-            "若新意见与旧方向重复，合并去重；若冲突，以用户最新输入为准并改写旧方向。"
-            "最终文本必须短、准、可执行，而不是资料汇编。"
-            "方向定位只允许确定类型定位、主角行动原则、核心爽点、核心冲突方向、情绪基调、主题边界、反转原则、禁区；"
-            "禁止输出具体世界观规则、宗门/组织流程、制度条款、申请表/审批/考评/备案/绩效/KPI、具体人物关系细则、具体剧情桥段、章节安排、专有名词清单；"
-            "如果角色短评给出具体机制，必须改写成抽象方向原则，例如把“宗门流程”改成“主角优先利用既有规则求生，具体规则留到世界观阶段展开”。"
-            "请只输出一个 Markdown 小节：\n"
-            "## 方向定位稿\n"
-            "只写 6-8 条，每条不超过 80 个中文字符，每条必须是方向原则；"
-            "必须覆盖故事类型、主角行动原则、核心爽点、核心冲突、情绪基调、主题边界、反转原则和禁区；"
-            "可以用抽象原则暗示全书开篇切入、中期升级和后期终局，但不得写成具体剧情桥段；"
-            "不能只写开篇局面，必须让后续故事概念、世界观、人物关系和故事流程能看见中期与结尾方向；"
-            "不要再拆成“一句话方向 / 方向命令 / 不许跑偏”。"
-        )
-    else:
-        output_rule = (
-            "请综合为用户可读的阶段产物，但不要输出让用户误以为必须逐项选择的“候选项 A/B/C”。"
-            "如果有多个方案，请直接以“已采用设定”写明本轮建议采用哪一版，以及为什么适合当前故事；"
-            "未采用方案只在必要时用一句话说明，不要展开成选择菜单。"
-            "最后必须输出“仍需确认的问题”，只列真正需要用户补充或拍板的问题；"
-            "如果没有必须确认的问题，写“暂无，当前阶段可继续修改或确认进入下一阶段”。"
-            "请只输出以下 Markdown 结构：\n"
-            "## Director 汇总\n"
-            "整合本阶段的核心关系、规则或流程，不写机会/风险/建议。\n"
-            "## 已采用设定\n"
-            "列出本轮已经纳入阶段产物的明确设定。\n"
-            "## 仍需确认的问题\n"
-            "只列用户下一步真正需要回答的问题，不要伪装成候选菜单。"
-        )
     return (
         "AGENT: outline_stage_synthesizer\n"
         f"STAGE: {stage}\n"
@@ -888,10 +847,130 @@ def build_outline_stage_synthesizer_prompt(state: NovelState, stage: str, role_r
         f"前序已保存阶段内容：\n{previous_stage_context(state, stage)}\n\n"
         f"当前阶段已有内容：\n{current_stage_context(state, stage)}\n\n"
         f"阶段连续性要求：\n{stage_continuity_requirement(stage)}\n\n"
+        f"{outline_stage_boundary_prompt(stage)}\n\n"
         f"角色短评：\n{reviews}\n\n"
-        f"{output_rule}"
+        f"{outline_stage_synthesizer_output_rule(stage)}"
     )
 
+
+OUTLINE_STAGE_BOUNDARIES = {
+    "direction": {
+        "allowed": "类型定位、主角行动原则、核心爽点、核心冲突方向、情绪基调、主题边界、反转原则、禁区",
+        "forbidden": "具体世界观规则、宗门/组织流程、制度条款、申请表、审批、考评、备案、绩效、KPI、具体人物关系细则、具体剧情桥段、章节安排、专有名词清单",
+    },
+    "concept": {
+        "allowed": "一句话概念、主角欲望、核心冲突、叙事承诺、主题问题、反转方向、待后续展开点",
+        "forbidden": "具体世界规则、组织流程、人物关系细则、章节列表、分卷结构、专有名词堆砌、行政或制度化细则",
+    },
+    "worldbuilding": {
+        "allowed": "力量或资源规则、限制、代价、势力压力、与核心冲突相关的环境约束",
+        "forbidden": "完整人物小传、章节剧情、分卷安排、与主线无关的百科设定、无代价万能规则",
+    },
+    "characters": {
+        "allowed": "主角欲望与缺陷、关键关系张力、反派或势力压力、人物弧光和关系边界",
+        "forbidden": "世界规则清单、章节列表、完整剧情梗概、亲密机制细则、与主线无关的角色堆砌",
+    },
+    "story_flow": {
+        "allowed": "主线推进链、阶段转折、悬念释放、低谷反击、终局兑现方向",
+        "forbidden": "逐章正文、场景细写、世界百科、人物关系重设、分卷篇幅表",
+    },
+    "volume_outline": {
+        "allowed": "分卷目标、卷内高潮、卷间递进、每卷主压力和卷末钩子",
+        "forbidden": "逐章场景、正文片段、临时改写世界规则、脱离主线的新人物群",
+    },
+    "chapter_outline": {
+        "allowed": "章节目标、章节顺序、章末钩子、连续性约束、可进入章节卡的最小信息",
+        "forbidden": "正文段落、完整场景卡、对白、临时改写已锁定设定、无关支线扩写",
+    },
+    "review_lock": {
+        "allowed": "八阶段一致性检查、锁定约束、残留风险、进入章节生产的准备度",
+        "forbidden": "新增大设定、重写前序阶段、章节正文、未标记来源的新 canon、候选菜单",
+    },
+}
+
+
+def outline_stage_boundary_prompt(stage: str) -> str:
+    boundary = OUTLINE_STAGE_BOUNDARIES.get(stage, OUTLINE_STAGE_BOUNDARIES["direction"])
+    return (
+        "STAGE_BOUNDARY:\n"
+        f"- 允许输出：{boundary['allowed']}。\n"
+        f"- 禁止输出：{boundary['forbidden']}。\n"
+        "- 只给本阶段短评或产物，不越权生成其他阶段内容，不新增无依据 canon。"
+    )
+
+
+def outline_stage_synthesizer_output_rule(stage: str) -> str:
+    if stage == "direction":
+        return (
+            "方向定位不是评审报告，而是后续概念、世界观、人物和剧情都会继承的创作基准。"
+            "必须把用户最新输入与当前阶段已有内容整合成一版新的方向定位稿；"
+            "不要追加、罗列或保留历史修改记录，不要把用户意见单独堆成段落。"
+            "若新意见与旧方向重复，合并去重；若冲突，以用户最新输入为准并改写旧方向。"
+            "最终文本必须短、准、可执行，而不是资料汇编。"
+            "如果角色短评给出具体机制，必须改写成抽象方向原则。"
+            "请只输出一个 Markdown 小节：\n"
+            "## 方向定位稿\n"
+            "只写 6-8 条，每条不超过 80 个中文字符，每条必须是方向原则；"
+            "必须覆盖故事类型、主角行动原则、核心爽点、核心冲突、情绪基调、主题边界、反转原则和禁区；"
+            "可以用抽象原则暗示全书开篇切入、中期升级和后期终局，但不得写成具体剧情桥段；"
+            "不能只写开篇局面，必须让后续故事概念、世界观、人物关系和故事流程能看见中期与结尾方向；"
+            "不要再拆成“一句话方向 / 方向命令 / 不许跑偏”。"
+        )
+
+    structures = {
+        "concept": (
+            "## 故事概念稿\n"
+            "用 5-7 条短句确定一句话概念、主角欲望、核心冲突、叙事承诺、主题问题和反转原则；每条不超过 90 中文字符。\n"
+            "## 待后续展开\n"
+            "只列需要世界观、人物或流程阶段展开的事项，不在本阶段展开细则。"
+        ),
+        "worldbuilding": (
+            "## 世界观设定稿\n"
+            "列出 4-6 条服务核心冲突的规则、资源、限制和代价；每条必须能制造人物选择。\n"
+            "## 使用边界\n"
+            "说明哪些设定只作为压力来源，避免扩写成百科。"
+        ),
+        "characters": (
+            "## 人物关系稿\n"
+            "列出主角、关键关系、对手/势力和人物弧光，强调互相利用、误解、代价和主线推动。\n"
+            "## 关系边界\n"
+            "说明感情、阵营或师徒关系如何服务主线，不展开亲密机制细则。"
+        ),
+        "story_flow": (
+            "## 故事流程稿\n"
+            "按开端压力、中段升级、低谷反击、终局兑现整理主线因果链。\n"
+            "## 悬念与代价\n"
+            "列出信息释放和选择代价，不写逐章正文。"
+        ),
+        "volume_outline": (
+            "## 分卷大纲稿\n"
+            "按卷列出卷目标、主压力、卷内高潮、卷末钩子和卷间递进。\n"
+            "## 卷间连续性\n"
+            "说明每卷如何推进全书核心谜团或主题。"
+        ),
+        "chapter_outline": (
+            "## 章节大纲稿\n"
+            "按章节列出章节目标、核心事件、章末钩子和连续性约束。\n"
+            "## 章节卡准备\n"
+            "标出可直接进入章节卡的最小信息，不写正文或场景卡。"
+        ),
+        "review_lock": (
+            "## 审稿锁定稿\n"
+            "检查方向、概念、世界观、人物、流程、分卷和章节是否一致。\n"
+            "## 锁定结论\n"
+            "列出可锁定约束、残留风险和进入章节生产的准备度。"
+        ),
+    }
+    structure = structures.get(stage, structures["concept"])
+    return (
+        "请综合为用户可读的阶段最终产物，不输出候选菜单式 A/B/C，不跨阶段扩写。"
+        "阶段产物总长控制在 1200-1800 中文字符内；确认问题最多 3 条。"
+        "不得新增无依据 canon，不输出长篇解释，不重复外层标题。"
+        "请只输出以下 Markdown 结构：\n"
+        f"{structure}\n"
+        "## 仍需确认的问题\n"
+        "只列真正需要用户补充或拍板的问题；如果没有，写“暂无，当前阶段可继续修改或确认进入下一阶段”。"
+    )
 
 def summarize_stage_text(text: str, max_chars: int = 420) -> str:
     cleaned = re.sub(r"\s+", " ", text).strip()
@@ -1048,8 +1127,11 @@ def format_stage_markdown(artifact: dict) -> str:
         lines.append("")
     synthesis = str(artifact.get("synthesis", "")).strip()
     if synthesis:
-        lines.append("## Director 汇总")
-        lines.append(synthesis)
+        if re.match(r"^#{1,6}\s+", synthesis):
+            lines.append(synthesis)
+        else:
+            lines.append("## Director 汇总")
+            lines.append(synthesis)
     return "\n".join(lines).rstrip() + "\n"
 
 

@@ -988,3 +988,21 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 # 203 passed
 ```
 
+## 46. 本轮更新：Outline 共享 Prompt 边界整改
+
+- 按 `00_INDEX.md` 推荐顺序执行 `08_outline_stage_shared_role_prompt.md` 与 `09_outline_stage_shared_synthesizer_prompt.md`。
+- 新增 stage-specific boundary，所有大纲阶段 role prompt 都会注入允许/禁止内容，并明确不越权生成其他阶段产物或无依据 canon。
+- Role prompt 输出预算从每类最多 3 条/总 600 字收紧为每类最多 2 条/总 500 字。
+- Synthesizer prompt 改为按 stage 输出不同结构：故事概念稿、世界观设定稿、人物关系稿、故事流程稿、分卷大纲稿、章节大纲稿、审稿锁定稿等。
+- 非 direction 阶段 formatter 现在避免重复包 `## Director 汇总`，如果 synthesis 已有 Markdown 标题则直接使用。
+- 新增回归测试覆盖所有 stage boundary、不同 synthesizer 结构和非 direction 标题去重。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_outline_collaboration.py
+# 36 passed
+.venv/bin/python -m pytest
+# 206 passed
+```
+

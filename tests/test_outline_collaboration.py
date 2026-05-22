@@ -2,7 +2,7 @@ import json
 
 from ai_novelist.adapters.codex_cli import CodexCLIAdapter
 from ai_novelist.artifacts import load_artifacts
-from ai_novelist.graph_outline import build_outline_stage_role_prompt, build_outline_stage_synthesizer_prompt, extract_stage_confirmation_questions, format_stage_markdown, sanitize_direction_stage_output, append_message, build_outline_collaboration_graph, build_outline_prompt
+from ai_novelist.graph_outline import OUTLINE_STAGES, build_outline_stage_role_prompt, build_outline_stage_synthesizer_prompt, extract_stage_confirmation_questions, format_stage_markdown, sanitize_direction_stage_output, append_message, build_outline_collaboration_graph, build_outline_prompt
 from ai_novelist.graph_writer import build_chat_graph
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
@@ -235,7 +235,8 @@ def test_direction_synthesizer_prompt_demands_control_brief():
     assert "只写 6-8 条" in prompt
     assert "每条不超过 80 个中文字符" in prompt
     assert "类型定位、主角行动原则、核心爽点、核心冲突" in prompt
-    assert "申请表/审批/考评/备案/绩效/KPI" in prompt
+    for forbidden in ("申请表", "审批", "考评", "备案", "绩效", "KPI"):
+        assert forbidden in prompt
     assert "不能只写开篇局面" in prompt
     assert "## 一句话方向" not in prompt
     assert "## 方向命令" not in prompt
@@ -248,10 +249,54 @@ def test_non_direction_synthesizer_prompt_avoids_fake_choice_menu():
 
     prompt = build_outline_stage_synthesizer_prompt(state, "characters", [])
 
-    assert "不要输出让用户误以为必须逐项选择" in prompt
-    assert "## 已采用设定" in prompt
+    assert "不输出候选菜单式 A/B/C" in prompt
+    assert "## 人物关系稿" in prompt
+    assert "## 关系边界" in prompt
     assert "## 仍需确认的问题" in prompt
     assert "候选项或决策" not in prompt
+
+
+def test_outline_role_prompts_include_stage_boundaries_for_all_stages():
+    state = NovelState(project_id="demo", title="Demo", idea="重生魔门")
+
+    for stage in OUTLINE_STAGES:
+        prompt = build_outline_stage_role_prompt(state, stage, "阶段 Agent")
+        assert "STAGE_BOUNDARY" in prompt
+        assert "允许输出" in prompt
+        assert "禁止输出" in prompt
+        assert "不越权生成其他阶段内容" in prompt
+        assert "opportunities/risks/suggestions 各最多 2 条" in prompt
+        assert "总输出不超过 500 中文字符" in prompt
+
+
+def test_outline_synthesizer_prompts_use_stage_specific_structures():
+    state = NovelState(project_id="demo", title="Demo", idea="重生魔门")
+
+    concept_prompt = build_outline_stage_synthesizer_prompt(state, "concept", [])
+    world_prompt = build_outline_stage_synthesizer_prompt(state, "worldbuilding", [])
+    chapter_prompt = build_outline_stage_synthesizer_prompt(state, "chapter_outline", [])
+
+    assert "## 故事概念稿" in concept_prompt
+    assert "## 世界观设定稿" in world_prompt
+    assert "## 章节大纲稿" in chapter_prompt
+    assert "具体世界规则" in concept_prompt
+    assert "完整人物小传" in world_prompt
+    assert "正文或场景卡" in chapter_prompt
+    assert len({concept_prompt, world_prompt, chapter_prompt}) == 3
+
+
+def test_non_direction_formatter_does_not_duplicate_synthesis_heading():
+    markdown = format_stage_markdown(
+        {
+            "stage": "characters",
+            "label": "人物关系",
+            "synthesis": "## 人物关系稿\n主角与圣女互相试探。",
+        }
+    )
+
+    assert markdown.count("## 人物关系稿") == 1
+    assert "## Director 汇总\n## 人物关系稿" not in markdown
+    assert markdown.startswith("# 人物关系")
 
 
 def test_worldbuilding_prompt_uses_saved_direction_context():

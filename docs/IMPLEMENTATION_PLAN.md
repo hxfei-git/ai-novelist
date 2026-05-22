@@ -1268,3 +1268,21 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - Sanitizer 是本地规则后处理，可清理常见制度化词和重复标题，但不能理解所有真实模型可能生成的隐性具体设定；主要约束仍由 prompt 边界承担。
 - 用户原话明确包含的词不会被 sanitizer 强制替换，避免误删用户有意指定的设定方向。
 
+## 42. Outline 共享 Prompt 边界整改
+
+目标：按 `00_INDEX.md` 推荐顺序先执行 `08_outline_stage_shared_role_prompt.md` 和 `09_outline_stage_shared_synthesizer_prompt.md`，给八阶段大纲共创建立共享边界。
+
+已完成：
+
+- `build_outline_stage_role_prompt()` 改为通过 `outline_stage_boundary_prompt(stage)` 注入 stage-specific 允许/禁止内容。
+- 所有 outline stage 的 role prompt 都包含 `STAGE_BOUNDARY`，明确只处理本阶段职责，不越权生成完整大纲、世界观、章节正文或无依据 canon。
+- Role 输出预算收紧为 opportunities/risks/suggestions 各最多 2 条、每条不超过 80 中文字符、总输出不超过 500 中文字符。
+- `build_outline_stage_synthesizer_prompt()` 改为通过 `outline_stage_synthesizer_output_rule(stage)` 选择阶段专属结构，避免非 direction 阶段都套同一份 `Director 汇总` 模板。
+- 非 direction synthesizer 增加通用边界：不输出候选菜单式 A/B/C、不跨阶段扩写、不新增无依据 canon、总长 1200-1800 中文字符、确认问题最多 3 条。
+- `format_stage_markdown()` 对非 direction 阶段会识别 synthesis 自带 Markdown 标题，避免生成 `## Director 汇总` + 阶段标题的重复标题。
+
+当前边界：
+
+- 本轮只完成共享 role/synthesizer prompt 边界；`01-07` 各具体 outline 阶段的专项细化仍可继续按索引逐个执行。
+- 共享边界不改变现有 graph 接口、状态字段或产物路径。
+
