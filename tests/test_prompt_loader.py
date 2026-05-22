@@ -508,3 +508,15 @@ def test_director_prompt_routes_without_generating_stage_outputs():
     assert "user_message 必须简短，不超过 120 中文字符" in prompt
     assert "next_steps 最多 3 条" in prompt
     assert "新小说创意" in prompt and "不要直接生成完整大纲" in prompt
+
+
+def test_research_intent_prompt_distinguishes_original_from_fanfic():
+    prompt = load_prompt("research_intent")
+
+    assert "只有用户明确提到同人、原作、作者、作品名" in prompt
+    assert "原创题材词不触发调研" in prompt
+    assert "想写一本 X 类型小说" in prompt
+    assert "不要把 X 当作品名" in prompt
+    assert "REASON: 简短说明，不超过 60 中文字符" in prompt
+    for forbidden in ("修仙文", "爽文", "网文", "题材", "类型", "额外解释", "创作建议"):
+        assert forbidden in prompt

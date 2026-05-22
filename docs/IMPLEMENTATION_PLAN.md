@@ -2075,3 +2075,23 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Director 是调度和约束提炼层，不是创作执行层。
 - 多阶段推进必须由用户明确确认，不能静默连续执行。
+
+
+## 85. Research Intent Prompt 整改
+
+目标：执行 `45_research_intent.md`，让调研意图提取器严格区分原创题材、同人/原作和网络调研需求。
+
+已完成：
+
+- `research_intent.md` 明确只有用户提到同人、原作、作者、作品名、书名号、查资料、网络调研或 `/research` 时才 NEED_RESEARCH=yes。
+- 增加原创题材反例：修仙文、原创月球城市悬疑、赛博仙侠、克苏鲁风格故事等不触发调研。
+- 禁止把量词、类型词、题材词当成作品名。
+- 明确“想写一本 X 类型小说”表示原创类型偏好，不把 X 当作品名。
+- 固定输出字段保持 NEED_RESEARCH、QUERY、WORK_TITLE、AUTHOR、INTENT、REASON。
+- REASON 限制为不超过 60 中文字符。
+- 新增 prompt loader 和 research_workflow 回归测试覆盖原创题材不误判调研。
+
+当前边界：
+
+- Research intent 只识别调研需求，不给创作建议。
+- 原创题材词不能被当作已有作品名。

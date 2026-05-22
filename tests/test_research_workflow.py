@@ -29,6 +29,8 @@ def test_detect_research_need_for_fanfic_and_slash_command():
     assert detect_research_need_text("苟在初圣", has_reference_brief=False)
     assert detect_research_need_text("/research 苟在初圣", has_reference_brief=True)
     assert not detect_research_need_text("写原创月球城市悬疑", has_reference_brief=False)
+    assert not detect_research_need_text("我想写一本修仙文", has_reference_brief=False)
+    assert not detect_research_need_text("原创赛博仙侠类型小说", has_reference_brief=False)
     assert not detect_research_need_text("写苟在初圣同人", has_reference_brief=True)
 
 

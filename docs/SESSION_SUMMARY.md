@@ -1875,3 +1875,25 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 253 passed
 ```
+
+
+## 89. 本轮更新：Research Intent Prompt 整改
+
+- 完整读取并执行 `45_research_intent.md`。
+- `research_intent.md` 现在明确只有用户提到同人、原作、作者、作品名、书名号、查资料、网络调研或 `/research` 时才 NEED_RESEARCH=yes。
+- 增加原创题材反例：修仙文、原创月球城市悬疑、赛博仙侠、克苏鲁风格故事等不触发调研。
+- 禁止把量词、类型词、题材词当成作品名。
+- 明确“想写一本 X 类型小说”表示原创类型偏好，不把 X 当作品名。
+- REASON 限制为不超过 60 中文字符。
+- 新增回归测试覆盖原创题材不误判调研。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 37 passed
+.venv/bin/python -m pytest tests/test_graph_bible.py tests/test_finalize_chapter.py tests/test_director_service.py tests/test_research_workflow.py tests/test_search_backend.py tests/test_bible.py
+# 73 passed
+.venv/bin/python -m pytest
+# 254 passed
+```
