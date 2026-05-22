@@ -1103,3 +1103,22 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 213 passed
 ```
+
+## 52. 本轮更新：Chapter Outline 阶段专项边界整改
+
+- 完整读取并执行 `06_outline_stage_chapter_outline.md`。
+- 章节大纲阶段 prompt 现在只允许章节编号、章节目标、主要冲突、信息增量、人物状态变化、结尾钩子和连续性提醒。
+- 明确禁止正式正文、对白、中文引号对白、完整场景卡、细场景调度、未确立新规则、新人物关系、额外世界观机制、审批、制度和亲密机制。
+- Synthesizer 固定首批输出 8-12 章或沿用已有计划，每章使用 `章节编号 / 章节目标 / 主要冲突 / 信息增量 / 人物状态变化 / 结尾钩子 / 连续性提醒`，每字段不超过 60 中文字符。
+- 新增回归测试覆盖每章目标、冲突、信息增量、钩子要求，以及正文/对白/场景卡禁区。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 1 passed
+.venv/bin/python -m pytest tests/test_outline_collaboration.py
+# 44 passed
+.venv/bin/python -m pytest
+# 214 passed
+```

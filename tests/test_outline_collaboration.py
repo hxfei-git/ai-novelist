@@ -281,7 +281,8 @@ def test_outline_synthesizer_prompts_use_stage_specific_structures():
     assert "## 章节大纲稿" in chapter_prompt
     assert "具体世界规则" in concept_prompt
     assert "完整人物小传" in world_prompt
-    assert "正文或场景卡" in chapter_prompt
+    assert "正式正文" in chapter_prompt
+    assert "完整场景卡" in chapter_prompt
     assert len({concept_prompt, world_prompt, chapter_prompt}) == 3
 
 
@@ -469,6 +470,23 @@ def test_volume_outline_prompt_limits_output_to_volume_level():
     assert "每卷必须包含目标、高潮、代价和卷间钩子" in synth_prompt
     assert "主角能力或认知变化" in synth_prompt
     for forbidden in ("逐章细纲", "第1章", "第2章", "章节列表", "场景列表", "正文片段", "新世界观规则", "新人物系统", "过细制度机制"):
+        assert forbidden in role_prompt or forbidden in synth_prompt
+
+
+def test_chapter_outline_prompt_limits_output_to_chapter_level_plan():
+    state = NovelState(project_id="demo", title="Demo", idea="重生魔门")
+
+    role_prompt = build_outline_stage_role_prompt(state, "chapter_outline", "章节拆分 Agent")
+    synth_prompt = build_outline_stage_synthesizer_prompt(state, "chapter_outline", [])
+
+    assert "只做章节目标、冲突、信息增量、人物变化、钩子和连续性提醒" in role_prompt
+    assert "只做章节级规划" in synth_prompt
+    assert "首批输出 8-12 章" in synth_prompt
+    assert "章节编号 / 章节目标 / 主要冲突 / 信息增量 / 人物状态变化 / 结尾钩子 / 连续性提醒" in synth_prompt
+    assert "每字段不超过 60 中文字符" in synth_prompt
+    assert "每章必须包含目标、冲突、信息增量和钩子" in synth_prompt
+    assert "信息增量只能来自前序已确立设定" in synth_prompt
+    for forbidden in ("正式正文", "对白", "中文引号对白", "细场景调度", "完整场景卡", "未确立新规则", "新人物关系", "审批", "制度", "亲密机制"):
         assert forbidden in role_prompt or forbidden in synth_prompt
 
 
