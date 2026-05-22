@@ -216,8 +216,11 @@ worldbuild
 ```bash
 .venv/bin/python -m pytest tests/test_search_backend.py tests/test_research_workflow.py
 .venv/bin/python -m pytest
+# 128 passed
 .venv/bin/python tests/smoke_outline_collaboration.py
+# outline collaboration smoke ok
 .venv/bin/python tests/smoke_phase2_chat.py
+# phase2 chat smoke ok
 ```
 
 当前验证结果：`75 passed`。本轮新增验证：`tests/test_director_service.py` 为 `6 passed`，覆盖多项确认转译和“接收/接受”确认词。
@@ -515,6 +518,27 @@ Smoke 验证：`.venv/bin/python tests/smoke_phase2_chat.py`，结果 `phase2 ch
 ```bash
 .venv/bin/python -m pytest
 # 122 passed
+.venv/bin/python tests/smoke_outline_collaboration.py
+# outline collaboration smoke ok
+.venv/bin/python tests/smoke_phase2_chat.py
+# phase2 chat smoke ok
+```
+
+
+## 29. 本轮更新：Phase 5 Bible Graph 与 Director 操作
+
+- 新增 Bible Graph，可从八阶段大纲产物初始化/更新 `novel_bible.json` 和 `novel_bible.md`。
+- `review_lock` 确认后自动初始化小说圣经，并注册 `novel_bible` artifact。
+- DirectorService 支持 `init_bible`、`update_bible`、`show_bible`；用户可输入“查看小说圣经”或“更新小说圣经”。
+- Mock adapter 增加稳定 Bible updates 输出，测试不依赖真实模型。
+- 冲突检测结果暂不阻塞流程，会进入开放问题和 Agent 报告。
+- 修复 Bible dataclass 缺省字段反序列化，避免 `default_factory` 字段缺失时污染 state。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest
+# 128 passed
 .venv/bin/python tests/smoke_outline_collaboration.py
 # outline collaboration smoke ok
 .venv/bin/python tests/smoke_phase2_chat.py

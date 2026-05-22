@@ -9,6 +9,7 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
+from ai_novelist.graph_bible import build_bible_graph
 from ai_novelist.graph_research import build_research_graph, extract_research_query
 from ai_novelist.graph_writer import (
     DIRECTOR_ACTIONS,
@@ -42,7 +43,7 @@ CONFIRMATION_ACTIONS = {
     "revise_chapter",
     "persist_outputs",
 }
-DIRECT_ACTIONS = {"ask_user", "show_status", "show_outline", "show_reference", "stop"}
+DIRECT_ACTIONS = {"ask_user", "show_status", "show_outline", "show_reference", "show_bible", "stop"}
 
 
 @dataclass
@@ -191,6 +192,9 @@ class DirectorService:
         return self._execute_decision(state, decision, channel)
 
     def _decide(self, state: NovelState, channel: Channel) -> DirectorDecision:
+        direct = deterministic_bible_decision(state, self.store)
+        if direct is not None:
+            return direct
         direct = deterministic_outline_stage_decision(state)
         if direct is not None:
             return direct
@@ -220,6 +224,10 @@ class DirectorService:
                 result_state = NovelState.from_dict(advance_outline_stage_node(state.to_dict(), self.adapter, self.store))
             else:
                 result_state = NovelState.from_dict(persist_available_outputs(state.to_dict(), self.store))
+        elif decision.action in {"init_bible", "update_bible"}:
+            result_state = self._run_bible(state)
+        elif decision.action == "show_bible":
+            result_state = show_bible_state(state, self.store)
         elif decision.action == "show_status":
             result_state = NovelState.from_dict(show_status_node(state.to_dict(), self.store))
         elif decision.action == "show_outline":
@@ -251,6 +259,15 @@ class DirectorService:
             state=result_state,
             decision=decision,
         )
+
+    def _run_bible(self, state: NovelState) -> NovelState:
+        if not state.outline.strip() and not state.outline_stage_artifacts:
+            state.director_message = "当前还没有可用于初始化小说圣经的大纲产物。请先完成大纲锁定。"
+            state.director_action = "update_bible"
+            self.store.save_state(state)
+            return state
+        graph = build_bible_graph(self.adapter, self.store)
+        return NovelState.from_dict(graph.invoke(state.to_dict()))
 
     def _run_research(self, state: NovelState) -> NovelState:
         query = first_text(state.director_task_args, "research_query", "work_title", "author")
@@ -319,6 +336,7 @@ def build_service_director_prompt(state: NovelState, store: LocalStore, channel:
         f"章节细纲：{'已有' if state.chapter_plan else '暂无'}\n"
         f"章节正文：{'已有' if state.chapter_draft else '暂无'}\n"
         f"编辑意见：{'已有' if state.editor_notes else '暂无'}\n"
+        f"小说圣经：{'已有' if store.novel_bible_markdown_path(state.project_id).exists() else '暂无'}\n"
         f"待确认决策：{'有' if state.pending_director_decision else '无'}\n"
         f"大纲阶段：{state.outline_stage} / {state.outline_stage_status}\n\n"
         f"## 当前大纲阶段产物（优先于旧对话）\n{outline_stage_context}\n\n"
@@ -486,6 +504,22 @@ def parse_json_object(output: str) -> dict[str, Any]:
 
 
 
+def deterministic_bible_decision(state: NovelState, store: LocalStore) -> DirectorDecision | None:
+    text = state.user_request.strip()
+    lowered = text.lower()
+    if not text:
+        return None
+    bible_markers = ("小说圣经", "novel bible", "bible")
+    if any(marker in lowered for marker in ("show bible", "view bible")) or any(marker in text for marker in ("查看小说圣经", "展示小说圣经", "看一下小说圣经", "显示小说圣经")):
+        return DirectorDecision("show_bible", user_message="我会展示当前小说圣经。", confidence=95, target="novel_bible", intent="status")
+    if any(marker in text for marker in ("更新小说圣经", "初始化小说圣经", "生成小说圣经")) or any(marker in lowered for marker in ("update bible", "init bible", "generate bible")):
+        action = "init_bible" if any(marker in text for marker in ("初始化小说圣经", "生成小说圣经")) or any(marker in lowered for marker in ("init bible", "generate bible")) else "update_bible"
+        return DirectorDecision(action, user_message="我会基于当前稳定产物更新小说圣经。", confidence=95, target="novel_bible", intent="update")
+    if any(marker in text for marker in bible_markers):
+        return DirectorDecision("show_bible", user_message="我会展示当前小说圣经。", confidence=80, target="novel_bible", intent="status")
+    return None
+
+
 def deterministic_outline_stage_decision(state: NovelState) -> DirectorDecision | None:
     text = state.user_request.strip()
     if not text:
@@ -567,6 +601,9 @@ def fallback_decision(state: NovelState) -> DirectorDecision:
     text = state.user_request
     if any(marker in text for marker in ("查看状态", "项目状态", "显示状态")) or text.lower() in {"status", "show status"}:
         return DirectorDecision("show_status", user_message="我会展示当前项目状态。", confidence=60)
+    if any(marker in text for marker in ("查看小说圣经", "展示小说圣经", "更新小说圣经", "小说圣经")) or text.lower() in {"show bible", "update bible"}:
+        action = "update_bible" if "更新" in text or "update" in text.lower() else "show_bible"
+        return DirectorDecision(action, user_message="我会处理小说圣经。", confidence=70, target="novel_bible")
     if any(marker in text for marker in ("查看大纲", "当前大纲", "展示大纲")):
         return DirectorDecision("show_outline", user_message="我会展示当前大纲。", confidence=60)
     if any(marker in text for marker in ("参考简报", "参考信息", "检索信息", "调研信息", "当前获取的信息")):
@@ -614,7 +651,8 @@ def update_project_context(state: NovelState, store: LocalStore, decision: Direc
         f"- 总大纲：{'已有' if state.outline.strip() else '暂无'}\n"
         f"- 章节细纲：{'已有' if state.chapter_plan.strip() else '暂无'}\n"
         f"- 章节正文：{'已有' if state.chapter_draft.strip() else '暂无'}\n"
-        f"- 编辑意见：{'已有' if state.editor_notes.strip() else '暂无'}\n\n"
+        f"- 编辑意见：{'已有' if state.editor_notes.strip() else '暂无'}\n"
+        f"- 小说圣经：{'已有' if store.novel_bible_markdown_path(state.project_id).exists() else '暂无'}\n\n"
         "## 待确认事项\n"
         f"{pending}\n\n"
         "## 建议下一步\n"
@@ -677,10 +715,30 @@ def artifact_paths(state: NovelState, store: LocalStore) -> list[str]:
     for content, path in candidates:
         if content.strip() and path.exists():
             paths.append(str(path))
+
+    bible_path = store.novel_bible_markdown_path(state.project_id)
+    if bible_path.exists():
+        paths.append(str(bible_path))
     context_path = store.project_context_path(state.project_id)
     if context_path.exists():
         paths.append(str(context_path))
     return paths
+
+
+def show_bible_state(state: NovelState, store: LocalStore) -> NovelState:
+    path = store.novel_bible_markdown_path(state.project_id)
+    state.director_action = "show_bible"
+    state.active_artifact = "novel_bible"
+    if not path.exists():
+        state.director_message = "当前还没有小说圣经。请先锁定大纲，或输入“更新小说圣经”进行初始化。"
+    else:
+        content = path.read_text(encoding="utf-8").strip()
+        if len(content) > 3200:
+            content = content[:3200].rstrip() + "\n...\n（已截断，完整内容见 novel_bible.md）"
+        state.director_message = "当前小说圣经：\n" + content
+    append_message(state, "assistant", state.director_message)
+    store.save_state(state)
+    return state
 
 
 def confirmation_message(decision: DirectorDecision) -> str:

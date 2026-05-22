@@ -460,7 +460,20 @@ def advance_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalSt
     if next_stage is None:
         finalize_locked_outline(state, store)
         store.save_state(state)
-        return state.to_dict()
+        outline_message = state.director_message
+        try:
+            from ai_novelist.graph_bible import build_bible_graph
+
+            bible_state = NovelState.from_dict(build_bible_graph(adapter, store).invoke(state.to_dict()))
+            bible_state.director_action = "advance_outline_stage"
+            bible_state.director_message = outline_message + "\n" + bible_state.director_message
+            store.save_state(bible_state)
+            return bible_state.to_dict()
+        except Exception as exc:  # pragma: no cover - defensive fallback keeps outline locking usable.
+            state.last_agent_reports.append({"agent": "graph_bible", "status": "error", "error": str(exc)})
+            state.last_agent_reports = state.last_agent_reports[-20:]
+            store.save_state(state)
+            return state.to_dict()
 
     state.outline_stage = next_stage  # type: ignore[assignment]
     state.outline_stage_status = "collecting"

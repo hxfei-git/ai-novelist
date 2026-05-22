@@ -108,11 +108,14 @@ def test_eight_stage_confirmation_persists_final_outline_and_artifacts(tmp_path)
     assert "分卷大纲" in state.outline
     assert "章节大纲" in state.outline
     assert store.outline_path("demo").exists()
+    assert store.novel_bible_json_path("demo").exists()
+    assert store.novel_bible_markdown_path("demo").exists()
     records = load_artifacts(store.project_dir("demo"))
     for stage in expected_stages:
         assert store.outline_stage_path("demo", stage).exists()
         assert store.outline_artifact_path("demo", stage).exists()
         assert any(item.type == stage and item.stage == stage and item.graph == "outline" for item in records)
+    assert any(item.type == "novel_bible" and item.graph == "bible" for item in records)
 
 
 def test_outline_stage_view_can_show_story_flow(tmp_path):

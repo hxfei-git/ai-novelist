@@ -676,3 +676,35 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 .venv/bin/python tests/smoke_outline_collaboration.py
 .venv/bin/python tests/smoke_phase2_chat.py
 ```
+
+
+## 27. Phase 5：Bible Graph 与 Director 操作接入
+
+本轮只实施 `plan.md` 中的 Phase 5，不接入 Chapter Planning、Scene 或 Drafting 新管线。
+
+已完成：
+
+- 新增 `src/ai_novelist/graph_bible.py`，提供 `build_bible_graph(adapter, store)`，按 `load_bible -> extract_bible_updates -> detect_bible_conflicts -> apply_bible_updates -> save_bible -> summarize_bible_update` 顺序运行。
+- Bible Graph 基于 `NovelState`、Artifact Registry、八阶段 outline artifacts 和 `ContextBuilder(purpose="bible_update")` 初始化/更新 `NovelBible`。
+- 新增 prompts：`bible_update_extractor.md`、`bible_conflict_checker.md`、`bible_update_synthesizer.md`；mock adapter 提供稳定 Bible updates JSON。
+- 大纲 `review_lock` 完成并生成最终 `outline.md` 后，会自动运行 Bible Graph，生成 `novel_bible.json` 与 `novel_bible.md`。
+- DirectorService 新增 `init_bible`、`update_bible`、`show_bible` 动作；“查看小说圣经”展示摘要，“更新小说圣经”基于当前稳定产物运行 Bible Graph。
+- 保存 Bible 后注册 `novel_bible` artifact：`path="novel_bible.md"`、`graph="bible"`、`stage="bible_update"`、`source_agent="bible_update_synthesizer"`。
+- 修复 `bible_from_dict` 对 `default_factory` 字段的默认值处理，避免旧/部分 JSON 缺字段时写入 dataclasses 内部 sentinel。
+
+当前边界：
+
+- 冲突检测第一版只记录到 `open_questions` 和 `last_agent_reports`，不阻塞 mock 主流程。
+- Bible Graph 已可消费 outline artifacts，但后续章节卡、场景卡、正文管线尚未默认消费 Bible；这留给 Phase 6 之后。
+- `state.json` 只保存 Bible 版本、更新时间、轻量 artifact 索引和报告，不保存 Bible 全文。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest
+# 128 passed
+.venv/bin/python tests/smoke_outline_collaboration.py
+# outline collaboration smoke ok
+.venv/bin/python tests/smoke_phase2_chat.py
+# phase2 chat smoke ok
+```

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field, fields, is_dataclass
+from dataclasses import MISSING, asdict, dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import Any, Literal, TypeVar, get_args, get_origin
 
@@ -236,8 +236,17 @@ def dataclass_from_dict(cls: type[T], data: Any) -> T:
     values: dict[str, Any] = {}
     for item in fields(cls):
         value = data.get(item.name)
-        values[item.name] = normalize_field_value(item.type, value, item.default)
+        default = field_default(item)
+        values[item.name] = normalize_field_value(item.type, value, default)
     return cls(**values)
+
+
+def field_default(item: Any) -> Any:
+    if item.default is not MISSING:
+        return item.default
+    if item.default_factory is not MISSING:  # type: ignore[attr-defined]
+        return item.default_factory()  # type: ignore[misc]
+    return None
 
 
 def dataclass_list_from_dict(cls: type[T], data: Any) -> list[T]:

@@ -107,6 +107,12 @@ class CodexCLIAdapter(AgentAdapter):
             return self._mock_outline_stage_role(prompt)
         if "AGENT: outline_stage_synthesizer" in prompt:
             return self._mock_outline_stage_synthesizer(prompt)
+        if "AGENT: bible_update_extractor" in prompt:
+            return self._mock_bible_update_extractor()
+        if "AGENT: bible_conflict_checker" in prompt:
+            return '{"conflicts": []}'
+        if "AGENT: bible_update_synthesizer" in prompt:
+            return "## 更新摘要\n小说圣经已吸收当前稳定设定。"
         if "AGENT: research_intent" in prompt:
             return self._mock_research_intent(prompt)
         if "AGENT: director" in prompt:
@@ -197,6 +203,45 @@ class CodexCLIAdapter(AgentAdapter):
             ),
         }
         return data.get(stage, data["direction"])
+
+
+    def _mock_bible_update_extractor(self) -> str:
+        return json.dumps(
+            {
+                "project": {
+                    "title": "月城手稿",
+                    "genre": "科幻悬疑",
+                    "subgenre": "记忆罪案",
+                    "core_experience": "在月球城市追查纸质手稿预言和被删除的旧罪。",
+                    "tone_keywords": ["黑暗", "悬疑", "科幻", "罪感"],
+                },
+                "concept": {
+                    "logline": "失忆工程师发现纸质手稿正在预言事故，并追查自己被删除的旧罪。",
+                    "premise": "纸质手稿绕过预测系统，持续把主角推向月背冷库和公开自证。",
+                    "core_conflict": "主角求生本能与公开旧罪之间的对抗。",
+                    "theme": "安全秩序吞噬个人记忆后的代价。",
+                    "central_question": "主角能否用公开罪证换回被删除者的身份？",
+                    "ending_direction": "公开旧罪，恢复灰籍身份。",
+                },
+                "world_rules": [
+                    {"name": "记忆审计", "description": "任何记忆备份都必须留下审计编号。", "limitation": "失效编号会暴露身份异常。", "cost": "公开未审计记忆会让相关人员失去合法身份。", "source_stage": "worldbuilding"},
+                    {"name": "纸质手稿", "description": "纸质文本无法被城市系统即时追踪。", "limitation": "传播慢且容易成为犯罪证据。", "cost": "持有者会被档案局追查。", "source_stage": "concept"},
+                ],
+                "characters": [
+                    {"name": "林澈", "role": "主角", "identity": "失忆工程师", "external_goal": "追查手稿来源并阻止事故。", "internal_need": "承认并承担旧罪。", "secret": "曾参与关键记忆删除。", "arc": "从逃避旧罪到公开自证。"},
+                    {"name": "许岚", "role": "盟友", "identity": "被删除者后代"},
+                    {"name": "沈博士", "role": "对手", "identity": "记忆秩序维护者"},
+                ],
+                "plot_threads": [
+                    {"name": "手稿预言", "description": "纸质手稿持续预告事故并逼近主角旧身份。", "status": "active", "related_chapters": [1, 2, 3]}
+                ],
+                "foreshadowing": [
+                    {"id": "F001", "setup_text": "失效审计编号", "payoff_text": "证明主角身份被删除。", "status": "planned"}
+                ],
+                "style_guide": {"pov": "第三人称贴近主角", "tone": "黑暗悬疑科幻"},
+            },
+            ensure_ascii=False,
+        )
 
     def _extract_prompt_field(self, prompt: str, name: str) -> str:
         match = re.search(rf"^{name}:\s*(.*)$", prompt, re.MULTILINE)

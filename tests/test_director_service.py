@@ -320,3 +320,48 @@ def test_confirmation_accepts_receive_words():
     assert is_confirmation("接收")
     assert is_confirmation("接受")
     assert not is_confirmation("开始修订")
+
+def test_director_service_shows_missing_bible_message(tmp_path):
+    store = LocalStore(tmp_path)
+    store.create_project("Demo", "demo")
+    service = DirectorService(store, CodexCLIAdapter(mock=True), MockSearchBackend())
+
+    result = service.handle_turn("demo", "查看小说圣经", channel="cli")
+
+    assert result.state.director_action == "show_bible"
+    assert "当前还没有小说圣经" in result.final_message
+
+
+def test_director_service_shows_existing_bible(tmp_path):
+    from ai_novelist.bible import NovelBible, save_bible
+
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    bible = NovelBible()
+    bible.project.title = "月城手稿"
+    bible.concept.logline = "失忆工程师追查自己的旧罪。"
+    save_bible(store.project_dir("demo"), bible)
+    store.save_state(state)
+    service = DirectorService(store, CodexCLIAdapter(mock=True), MockSearchBackend())
+
+    result = service.handle_turn("demo", "查看小说圣经", channel="cli")
+
+    assert result.state.director_action == "show_bible"
+    assert "当前小说圣经" in result.final_message
+    assert "月城手稿" in result.final_message
+    assert "失忆工程师" in result.final_message
+
+
+def test_director_service_update_bible_runs_graph(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.idea = "月球城市失忆工程师"
+    state.outline = "# 最终锁定总大纲\n\n失忆工程师追查纸质手稿预言。"
+    store.save_state(state)
+    service = DirectorService(store, CodexCLIAdapter(mock=True), MockSearchBackend())
+
+    result = service.handle_turn("demo", "更新小说圣经", channel="cli")
+
+    assert result.state.director_action == "update_bible"
+    assert store.novel_bible_markdown_path("demo").exists()
+    assert "小说圣经已更新" in result.final_message
