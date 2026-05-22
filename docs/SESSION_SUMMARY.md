@@ -1784,3 +1784,26 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 248 passed
 ```
+
+
+## 85. 本轮更新：Bible Update Synthesizer Prompt 整改
+
+- 完整读取并执行 `41_bible_update_synthesizer.md`。
+- `bible_update_synthesizer.md` 现在使用“已写入 / 未写入 / 待确认”三分结构。
+- “已写入”只能包含已确认并实际写入小说圣经的稳定设定。
+- conflict、blocking conflict、open_questions、候选方案和未确认内容必须进入“待确认”。
+- 被过滤、因冲突阻塞或依据不足的内容进入“未写入”。
+- 禁止补写新设定、把冲突当成已确认或输出长篇解释。
+- 输出预算限制为每节最多 5 条、每条不超过 90 中文字符。
+- 新增回归测试覆盖三分结构和 no-conflict-as-canon 边界。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 33 passed
+.venv/bin/python -m pytest tests/test_graph_bible.py tests/test_finalize_chapter.py tests/test_director_service.py tests/test_research_workflow.py tests/test_search_backend.py tests/test_bible.py
+# 72 passed
+.venv/bin/python -m pytest
+# 249 passed
+```

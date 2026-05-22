@@ -1990,3 +1990,24 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Bible update extractor 只提取可追溯的稳定 canon。
 - 未确认和候选内容不能进入正式圣经字段。
+
+
+## 81. Bible Update Synthesizer Prompt 整改
+
+目标：执行 `41_bible_update_synthesizer.md`，让小说圣经更新摘要明确区分已写入、未写入和待确认内容。
+
+已完成：
+
+- `bible_update_synthesizer.md` 改为“已写入 / 未写入 / 待确认”三分结构。
+- “已写入”只能包含已确认并实际写入小说圣经的稳定设定。
+- conflict、blocking conflict、open_questions、候选方案和未确认内容必须进入“待确认”。
+- 被过滤、因冲突阻塞或依据不足的内容进入“未写入”，并说明短原因。
+- 禁止补写新设定、把冲突当成已确认或输出长篇解释。
+- 输出预算限制为每节最多 5 条、每条不超过 90 中文字符。
+- mock bible update synthesizer 同步输出三分结构。
+- 新增 prompt loader 回归测试覆盖三分结构和 no-conflict-as-canon 边界。
+
+当前边界：
+
+- Bible update synthesizer 只汇总写入状态，不创造 canon。
+- 冲突和待确认项不能被表述成已写入稳定设定。

@@ -113,7 +113,7 @@ class CodexCLIAdapter(AgentAdapter):
         if "AGENT: bible_conflict_checker" in prompt:
             return '{"conflicts": []}'
         if "AGENT: bible_update_synthesizer" in prompt:
-            return "## 更新摘要\n小说圣经已吸收当前稳定设定。"
+            return "## 已写入\n- 小说圣经已吸收当前稳定设定。\n\n## 未写入\n- 暂无。\n\n## 待确认\n- open_questions 和冲突项仍需人工确认。"
         if "AGENT: research_intent" in prompt:
             return self._mock_research_intent(prompt)
         if "AGENT: director" in prompt:

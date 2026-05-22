@@ -459,3 +459,16 @@ def test_bible_update_extractor_prompt_only_stable_canon_with_sources():
     assert "每类最多 8 项" in prompt
     for forbidden in ("临时讨论", "候选方向", "未确认设定", "review 建议", "模型自行补全", "补造内容"):
         assert forbidden in prompt
+
+
+def test_bible_update_synthesizer_prompt_three_way_summary():
+    prompt = load_prompt("bible_update_synthesizer")
+
+    assert "## 已写入" in prompt
+    assert "## 未写入" in prompt
+    assert "## 待确认" in prompt
+    assert "不得改写为稳定设定" in prompt
+    assert "每节最多 5 条" in prompt
+    assert "每条不超过 90 中文字符" in prompt
+    for forbidden in ("补写新设定", "把冲突当成已确认", "长篇解释"):
+        assert forbidden in prompt
