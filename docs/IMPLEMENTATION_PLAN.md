@@ -1715,3 +1715,22 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Hook enhancer 只调整悬念呈现强度。
 - 新钩子不能脱离已有伏笔来源，也不能改写结尾事实。
+
+## 67. Style Normalizer Prompt 整改
+
+目标：执行 `27_style_normalizer.md`，让风格统一只做语言层调整，不改变事实、伏笔、人物状态和场景顺序。
+
+已完成：
+
+- `style_normalizer.md` 增加“事实冻结规则”。
+- 允许范围限定为视角一致性、节奏、语气、格式和冗余说明压缩。
+- 要求内容事实差异为零。
+- 禁止改写剧情事实、信息释放、人物状态、关系状态、伏笔、场景顺序或结尾钩子。
+- 禁止增删情节、增删世界观、添加新 canon 或删除关键信息。
+- 冗余句如果承载线索，只能压缩表达，不能删除线索。
+- 新增 prompt loader 回归测试覆盖事实冻结、钩子和人物状态不变边界。
+
+当前边界：
+
+- Style normalizer 是语言格式处理器，不是剧情修订器。
+- 正文事实、伏笔、人物状态、场景顺序和结尾钩子保持冻结。

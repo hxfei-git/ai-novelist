@@ -275,3 +275,19 @@ def test_hook_enhancer_prompt_requires_existing_foreshadowing_sources():
     assert "不得泄露后续真相" in prompt
     for forbidden in ("新增全局真相", "大反转", "新敌人", "新组织", "新世界规则", "无依据异常", "结尾事实"):
         assert forbidden in prompt
+
+
+def test_style_normalizer_prompt_freezes_facts_and_hooks():
+    prompt = load_prompt("style_normalizer")
+
+    assert "事实冻结规则" in prompt
+    assert "只能做语言层调整" in prompt
+    assert "内容事实差异应为零" in prompt
+    assert "不得改写剧情事实" in prompt
+    assert "人物状态" in prompt
+    assert "伏笔" in prompt
+    assert "场景顺序" in prompt
+    assert "结尾钩子" in prompt
+    assert "不能删除线索" in prompt
+    for forbidden in ("增删情节", "增删世界观", "添加新 canon", "删除关键信息"):
+        assert forbidden in prompt

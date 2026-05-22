@@ -1485,3 +1485,24 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 232 passed
 ```
+
+## 71. 本轮更新：Style Normalizer Prompt 整改
+
+- 完整读取并执行 `27_style_normalizer.md`。
+- `style_normalizer.md` 现在增加“事实冻结规则”。
+- 只允许语言层调整：视角一致性、节奏、语气、格式和冗余说明压缩。
+- 要求内容事实差异为零。
+- 禁止改写剧情事实、信息释放、人物状态、关系状态、伏笔、场景顺序或结尾钩子。
+- 禁止增删情节、增删世界观、添加新 canon 或删除关键信息。
+- 新增回归测试覆盖事实冻结和钩子/人物状态不变边界。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 19 passed
+.venv/bin/python -m pytest tests/test_graph_drafting.py tests/test_graph_writer.py
+# 27 passed
+.venv/bin/python -m pytest
+# 233 passed
+```
