@@ -1263,3 +1263,23 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest
 # 221 passed
 ```
+
+## 60. 本轮更新：Chapter Goal Agent Prompt 整改
+
+- 完整读取并执行 `16_chapter_goal_agent.md`。
+- `chapter_goal_agent.md` 现在要求所有目标和信息增量来自章节大纲、章节卡、小说圣经、锁定约束或已有 canon。
+- 禁止为了补齐目标新增世界观规则、人物关系、反派、组织或其他 canon。
+- JSON schema 增加 `evidence` 和 `source_hint`，每条 goal 必须有来源依据。
+- 依据不足时写入 `open_questions`，不自行补造。
+- 新增回归测试覆盖 JSON schema、依据字段和 no-new-canon 边界。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_prompt_loader.py
+# 8 passed
+.venv/bin/python -m pytest tests/test_graph_chapter_plan.py tests/test_graph_scene.py
+# 7 passed
+.venv/bin/python -m pytest
+# 222 passed
+```

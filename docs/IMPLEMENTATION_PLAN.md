@@ -1511,3 +1511,21 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - 当前章节任务不会改写全书章节数。
 - 场景顺序只作为当前章功能提示，不生成场景卡或正文。
+
+## 56. Chapter Goal Agent Prompt 整改
+
+目标：执行 `16_chapter_goal_agent.md`，保留章节目标 Agent 的局部判断能力，同时要求所有目标和信息增量有来源依据，不新增 canon。
+
+已完成：
+
+- `chapter_goal_agent.md` 明确所有目标和信息增量必须来自章节大纲、已有章节卡、小说圣经、锁定约束或已有 canon。
+- 禁止为了补齐目标新增世界观规则、人物关系、反派、组织或其他 canon。
+- 依据不足时写入 `open_questions`，不自行补造。
+- JSON schema 增加 `evidence` 与 `source_hint` 字段，每条 goal 必须包含依据。
+- 输出仍为 JSON，`goals` 最多 5 条，每条字段内容不超过 80 中文字符。
+- 新增 prompt loader 回归测试覆盖 JSON schema、依据字段和 no-new-canon 边界。
+
+当前边界：
+
+- Chapter goal agent 只提炼当前章目标和信息增量。
+- 没有证据的目标进入 open_questions，不变成新设定。

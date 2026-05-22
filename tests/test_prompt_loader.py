@@ -99,3 +99,20 @@ def test_chapter_planner_prompt_separates_current_chapter_and_global_modes():
     assert "当前章细纲不超过 900 中文字符" in prompt
     assert "场景顺序最多 5 个" in prompt
     assert "全书章节规划 / 拆分全书章节 / 章节总览" in prompt
+
+
+def test_chapter_goal_agent_prompt_requires_evidence_and_no_new_canon():
+    prompt = load_prompt("chapter_goal_agent")
+
+    assert "只输出 JSON" in prompt
+    assert "goals" in prompt
+    assert "open_questions" in prompt
+    assert "evidence" in prompt
+    assert "source_hint" in prompt
+    assert "每条 goal 必须包含" in prompt
+    assert "不能为了补齐目标新增世界观规则" in prompt
+    assert "人物关系" in prompt
+    assert "依据不足时写入 `open_questions`" in prompt
+    assert "不生成完整章节卡" in prompt
+    assert "最多 5 条" in prompt
+    assert "不超过 80 中文字符" in prompt
