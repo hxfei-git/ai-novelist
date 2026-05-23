@@ -1,2888 +1,2017 @@
-# AI Novelist 全量小说智能体工作流开发计划
+# AI Novelist LangGraph 节奏控制改造计划
 
-版本：v1.0  
-日期：2026-05-22  
-目标仓库：`hxfei-git/ai-novelist`  
-目标执行者：Codex CLI  
-目标模式：渐进式改造，不推倒重来，不破坏现有 `chat`、`outline`、`compose`、`--mock` 工作流。
-
----
-
-## 0. 给 Codex CLI 的执行说明
-
-请按本计划逐阶段开发。每个阶段都应尽量形成一次独立提交，阶段之间不要跳跃实现。除非某阶段明确要求，否则不要一次性重写整个项目。
-
-开发时必须遵守以下约束：
-
-1. 保留现有项目结构：运行时代码在 `src/ai_novelist/`，prompt 在 `src/ai_novelist/prompts/`，测试在 `tests/`，项目产物在 `projects/<project>/`。
-2. 保留 `DirectorService` 作为统一入口；不要让用户直接和底层 Agent 对话。
-3. 保留 `chat` 作为推荐入口；`outline`、`compose`、`plan-chapters`、`write-chapter`、`review` 等命令继续兼容。
-4. 所有新功能必须支持 `--mock`，测试默认使用 mock，不依赖真实 Codex、DeepSeek 或外部搜索服务。
-5. 每个阶段完成后必须更新：
-   - `docs/IMPLEMENTATION_PLAN.md`
-   - `docs/SESSION_SUMMARY.md`
-6. 每个阶段至少运行：
-   ```bash
-   .venv/bin/python -m pytest
-   ```
-   若阶段涉及端到端工作流，还要运行对应 smoke 脚本。
-7. 所有新增状态字段都必须兼容旧 `state.json`，不能因为旧项目缺少新字段而崩溃。
-8. 大文本不要无限塞入 `state.json`。`state.json` 保存索引、摘要、状态、路径；Markdown/JSON 产物保存到文件。
-9. 不要引入数据库、向量库、后台队列、Web UI，除非本计划后续阶段明确要求。第一轮目标是稳定的本地文件系统工作流。
-10. 不要把所有 Agent 的历史消息全文传给下一个 Agent。Agent 间通过 `NovelState + Artifact Registry + NovelBible + ContextBuilder` 共享知识。
+> 版本：v1.0  
+> 日期：2026-05-23  
+> 目标项目：`hxfei-git/ai-novelist`  
+> 核心目标：让小说从“每章都被冲突、钩子、转折强化”改造成“服从卷级节奏曲线，允许铺垫、低谷、余波、蓄势、高潮交替出现”。
 
 ---
 
-## 1. 总目标
+## 0. 一句话结论
 
-将当前 AI Novelist 从：
+当前流程的问题不是“多 Agent 没用”，而是**多个 Agent 在不同层级重复强化同一类指标：冲突、钩子、转折、发展**。  
 
-```text
-DirectorService
-  -> Research Graph
-  -> Outline Collaboration Graph
-  -> Writer/Compose Graph
-  -> LocalStore / NovelState
-```
+改造重点不应是简单删除 Agent，而是引入一个上位约束：
 
-升级为：
+> **Pacing Target / 章节节奏目标**：每章先确定自己在整卷中的功能、强度、张力来源、结尾方式和禁止升级项，然后所有大纲、章节卡、场景卡、写作、审稿、修订流程都必须服从它。
+
+换句话说，系统判断标准要从：
 
 ```text
-DirectorService
-  -> Intent Router
-  -> Research Graph
-  -> Story Bible Graph
-  -> Outline Collaboration Graph
-  -> Chapter Planning Graph
-  -> Scene Design Graph
-  -> Drafting Graph
-  -> Review Graph
-  -> Revision Graph
-  -> Finalize / Continuity Update Graph
-  -> Export Graph
-  -> LocalStore / Artifact Registry / NovelBible / NovelState
+这一章冲突够不够？
+这一章钩子够不够？
+这一章转折够不够？
 ```
 
-核心升级点：
-
-1. 新增 `Artifact Registry`：统一记录所有阶段产物、路径、版本、来源 Agent。
-2. 新增 `NovelBible`：维护小说长期知识，包括项目定位、故事核心、世界规则、人物卡、时间线、伏笔表、章节摘要、风格指南。
-3. 新增 `ContextBuilder`：让每个 Agent 按任务读取必要上下文，避免把全部历史对话塞进 prompt。
-4. 扩展 `Outline Graph`：从六阶段升级为完整大纲协作阶段。
-5. 拆分 `Writer Graph`：将章节创作拆为章节卡、场景卡、正文草稿、多编辑审稿、修订、定稿、小说圣经更新。
-6. 强化 `DirectorService`：支持前置条件自动补齐，例如用户直接说“写第 1 章”时自动生成缺失的 chapter card 和 scene cards。
-7. 建立可测试的端到端 mock 流程：从一句创意到大纲锁定、写第 1 章、审稿、修订、定稿、导出。
-
----
-
-## 2. 非目标
-
-本轮开发不要做以下事情：
-
-1. 不要把所有 workflow 合成一个巨型 LangGraph。
-2. 不要让 Agent 自由 handoff 给另一个 Agent；由 `DirectorService` 和 graph 条件边显式调度。
-3. 不要接入复杂数据库；继续用本地 JSON + Markdown。
-4. 不要引入向量数据库；如果需要长期语义检索，作为后续版本。
-5. 不要做前端 UI。
-6. 不要重写模型 adapter；继续复用现有 Codex CLI / DeepSeek / mock adapter。
-7. 不要让测试依赖真实模型、真实搜索 API、真实飞书环境。
-
----
-
-## 3. 当前架构理解
-
-当前项目已有基础能力：
+改成：
 
 ```text
-src/ai_novelist/
-  cli.py
-  config.py
-  director_service.py
-  state.py
-  graph_research.py
-  graph_outline.py
-  graph_writer.py
-  graph_minimal.py
-  adapters/
-  feishu/
-  prompts/
-  research/
-  storage/
-
-tests/
-  test_*.py
-  smoke_*.py
-```
-
-当前主入口：
-
-```bash
-.venv/bin/ai-novelist chat --project demo-chat --mock
-```
-
-当前推荐交互路径：
-
-```text
-用户
-  -> DirectorService.handle_turn()
-  -> 读取 NovelState
-  -> 判断用户意图
-  -> 调用 research / outline / writer / compose 相关节点或图
-  -> 保存 state.json
-```
-
-当前状态流转原则可以保留：
-
-```text
-用户只和 Director 对话
-Director 选择图
-图调用专业 Agent
-专业 Agent 产物写回 NovelState / LocalStore
-NovelState 成为下一轮上下文
-```
-
-本计划不是推翻现有设计，而是补齐“长期知识管理、章节创作闭环、结构化产物版本管理”。
-
----
-
-## 4. 最终目标架构
-
-### 4.1 逻辑架构
-
-```text
-CLI / Feishu / Future API
-  -> DirectorService
-      -> intent detection
-      -> prerequisite resolver
-      -> graph dispatcher
-      -> state persistence
-      -> user-facing response builder
-
-Graphs:
-  graph_research.py
-  graph_outline.py
-  graph_bible.py
-  graph_chapter_plan.py
-  graph_scene.py
-  graph_drafting.py
-  graph_review.py
-  graph_revision.py
-  graph_export.py
-  graph_writer.py        # compatibility wrapper; gradually becomes thin
-
-Knowledge / Storage:
-  NovelState             # short state, current workflow status, summaries, paths
-  Artifact Registry      # artifact metadata, paths, versions
-  NovelBible             # long-term novel knowledge
-  LocalStore             # local filesystem persistence
-  ContextBuilder         # task-specific context assembly
-```
-
-### 4.2 知识流
-
-```text
-Agent 输出结构化 artifact
-  -> Artifact Registry 记录路径、版本、来源
-  -> NovelBible 吸收稳定设定和长期知识
-  -> ContextBuilder 按任务读取必要知识
-  -> 下一个 Agent 基于筛选后的上下文工作
-```
-
-不要使用：
-
-```text
-Agent A 的全部对话历史 -> Agent B
-```
-
-应使用：
-
-```text
-Agent A 的阶段产物 -> Artifact Registry / NovelBible -> ContextBuilder -> Agent B
-```
-
-### 4.3 推荐主线流程
-
-```text
-用户创意
-  -> optional Research Graph
-  -> Outline Collaboration Graph
-      direction
-      -> concept
-      -> worldbuilding
-      -> characters
-      -> story_flow
-      -> volume_outline
-      -> chapter_outline
-      -> review_lock
-  -> Bible Graph 初始化小说圣经
-  -> Chapter Planning Graph 生成章节卡
-  -> Scene Graph 生成场景卡
-  -> Drafting Graph 写正文草稿
-  -> Review Graph 多编辑审稿
-  -> Revision Graph 修订
-  -> Finalize / Bible Update Graph 定稿并更新圣经
-  -> Export Graph 导出整卷/整本
+这一章是否完成了它在整卷节奏曲线中的功能？
 ```
 
 ---
 
-## 5. 全局设计原则
+## 1. 当前流程关系梳理
 
-### 5.1 Director 只调度，不亲自创作
+根据当前项目结构，主入口是 `chat`，由 Director Agent 根据用户意图调度各子图。整体关系可以整理为：
 
-`DirectorService` 负责：
+```mermaid
+flowchart TD
+    U[用户 / chat] --> D[Director Agent]
 
-```text
-理解用户意图
-选择子图
-检查前置条件
-调用 graph
-保存 state
-返回用户可读摘要
+    D --> O[Outline Collaboration Graph]
+    O --> O1[direction]
+    O1 --> O2[concept]
+    O2 --> O3[worldbuilding]
+    O3 --> O4[characters]
+    O4 --> O5[story_flow]
+    O5 --> O6[volume_outline]
+    O6 --> O7[chapter_outline]
+    O7 --> O8[review_lock]
+    O8 --> B[Novel Bible / Locked Outline]
+
+    D --> CP[Chapter Planning Graph]
+    CP --> CP1[select_chapter]
+    CP1 --> CP2[load_chapter_context]
+    CP2 --> CP3[chapter_goal_agent]
+    CP2 --> CP4[chapter_conflict_agent]
+    CP2 --> CP5[chapter_hook_agent]
+    CP3 --> CP6[chapter_card_synthesizer]
+    CP4 --> CP6
+    CP5 --> CP6
+    CP6 --> CP7[validate_chapter_card]
+    CP7 --> CP8[save_chapter_card]
+
+    D --> SP[Scene Planning Graph]
+    SP --> SP1[load_chapter_card]
+    SP1 --> SP2[scene_breakdown_agent]
+    SP2 --> SP3[conflict_check_agent]
+    SP3 --> SP4[scene_synthesizer]
+    SP4 --> SP5[validate_scene_cards]
+    SP5 --> SP6[save_scene_cards]
+
+    D --> DR[Drafting Graph]
+    DR --> DR1[load_drafting_context]
+    DR1 --> DR2[draft_scene_batch]
+    DR2 --> DR3[merge_scenes]
+    DR3 --> DR4[dialogue_enhance]
+    DR4 --> DR5[atmosphere_enhance]
+    DR5 --> DR6[hook_enhance]
+    DR6 --> DR7[style_normalize]
+    DR7 --> DR8[save_draft]
+
+    D --> RV[Review Graph]
+    RV --> RV1[continuity_editor]
+    RV --> RV2[structure_editor]
+    RV --> RV3[character_arc_editor]
+    RV --> RV4[style_editor]
+    RV --> RV5[simulated_reader]
+    RV1 --> RV6[review_synthesizer]
+    RV2 --> RV6
+    RV3 --> RV6
+    RV4 --> RV6
+    RV5 --> RV6
+    RV6 --> RV7[pass / revise decision]
+
+    D --> RE[Revision Graph]
+    RE --> RE1[revision_planner]
+    RE1 --> RE2[targeted_reviser]
+    RE2 --> RE3[merge_revision]
+    RE3 --> RE4[revision_self_check]
+    RE4 --> RE5[save_revised_draft]
+    RE5 --> RE6[maybe_review_again]
+
+    D --> F[Finalize Graph]
+    F --> F1[load_latest_draft]
+    F1 --> F2[save_final_chapter]
+    F2 --> F3[summarize_chapter]
+    F3 --> F4[extract_bible_updates_from_final]
+    F4 --> F5[update_bible]
 ```
 
-`DirectorService` 不应直接生成大量小说内容。
+这个架构总体是合理的：
 
-### 5.2 Graph 是业务能力，不是所有流程的大一统容器
+- Outline Graph 负责全局设定、故事流、卷纲、章纲。
+- Chapter Planning Graph 负责单章目标和章节卡。
+- Scene Planning Graph 负责把章节拆成可写场景。
+- Drafting Graph 负责生成正文并做语言增强。
+- Review Graph 负责多角度审稿。
+- Revision Graph 负责按审稿任务定向修订。
+- Finalize Graph 负责定稿、摘要和 Bible 回写。
 
-不要创建一个 `graph_full_novel.py` 包含所有节点。推荐多个可独立测试的子图：
-
-```text
-graph_bible.py
-图负责小说圣经初始化和更新
-
-graph_chapter_plan.py
-图负责章节卡
-
-graph_scene.py
-图负责场景卡
-
-graph_drafting.py
-图负责正文草稿
-```
-
-`DirectorService` 负责编排它们。
-
-### 5.3 Agent 输出要结构化
-
-Agent 可以输出 Markdown，但内部最好同时支持结构化 JSON 或带固定小节的 Markdown。
-
-建议所有 review 类输出包含：
-
-```text
-decision: pass / revise / stop
-score: 0-100
-issues: list
-rewrite_tasks: list
-blocking_issues: list
-```
-
-### 5.4 `state.json` 不保存全部大文本
-
-`state.json` 可以保存：
-
-```text
-当前阶段
-当前章节
-最新产物摘要
-最新产物路径
-计数器
-少量必要字段
-```
-
-大文本保存到：
-
-```text
-projects/<project>/outline/*.md
-projects/<project>/chapters/chapter_001/*.md
-projects/<project>/novel_bible.md
-projects/<project>/novel_bible.json
-```
-
-### 5.5 prompt 统一通过 ContextBuilder 获取上下文
-
-不要在每个 graph 节点里手动拼接大量上下文。新增 `context_builder.py` 后，逐步让 graph 使用：
-
-```python
-context = build_context(
-    state=state,
-    store=store,
-    purpose="drafting",
-    chapter=state.active_chapter,
-    max_chars=12000,
-)
-```
-
-### 5.6 永远保留 mock 模式
-
-新增 graph、prompt、state 字段都必须支持 mock。mock 输出需要稳定，以保证 `pytest` 和 smoke 测试可重复。
+真正的问题在于：**这些层级都在独立强化“冲突、钩子、转折”，但没有共同服从一个卷级节奏曲线。**
 
 ---
 
-## 6. 目标目录结构
+## 2. 当前冗余与副作用诊断
 
-最终建议结构：
+### 2.1 冲突、钩子、转折被多层重复强化
+
+当前至少有五层会推高章节强度：
+
+| 层级 | 当前强化点 | 可能副作用 |
+|---|---|---|
+| 大纲阶段 | 关系冲突、节奏悬念、卷内高潮、章节钩子 | 从全局设定阶段就倾向高密度事件 |
+| 章节规划 | `chapter_conflict_agent`、`chapter_hook_agent`、`关键冲突`、`结尾钩子` | 每章都被迫拥有冲突和钩子 |
+| 场景规划 | `conflict_check_agent`、`冲突对象`、`场景转折` | 每个场景都像小型冲突单元 |
+| 写作增强 | `hook_enhance` 固定执行 | 低谷章、余波章也被改成悬念结尾 |
+| 审稿修订 | structure/editor/reader 可能要求“更抓人” | 安静章节被误判为“不够推进” |
+
+最终小说节奏容易变成：
 
 ```text
-src/ai_novelist/
-  __init__.py
-  cli.py
-  config.py
-  director_service.py
-  state.py
-
-  artifacts.py
-  bible.py
-  context_builder.py
-
-  graph_research.py
-  graph_outline.py
-  graph_bible.py
-  graph_chapter_plan.py
-  graph_scene.py
-  graph_drafting.py
-  graph_review.py
-  graph_revision.py
-  graph_export.py
-  graph_writer.py              # compatibility wrapper
-  graph_minimal.py
-
-  adapters/
-  feishu/
-  prompts/
-    director.md
-
-    outline_stage_synthesizer.md
-    outline_direction_type_agent.md
-    outline_direction_theme_agent.md
-    outline_direction_risk_agent.md
-    outline_concept_agent.md
-    outline_concept_conflict_agent.md
-    outline_concept_theme_agent.md
-    outline_concept_twist_agent.md
-    outline_worldbuilding_rule_agent.md
-    outline_worldbuilding_faction_agent.md
-    outline_worldbuilding_consistency_agent.md
-    outline_characters_protagonist_agent.md
-    outline_characters_relationship_agent.md
-    outline_characters_antagonist_agent.md
-    outline_story_flow_structure_agent.md
-    outline_story_flow_pacing_agent.md
-    outline_story_flow_foreshadowing_agent.md
-    outline_volume_agent.md
-    outline_chapter_agent.md
-    outline_review_lock_agent.md
-
-    chapter_goal_agent.md
-    chapter_conflict_agent.md
-    chapter_hook_agent.md
-    chapter_card_synthesizer.md
-
-    scene_breakdown_agent.md
-    scene_conflict_check_agent.md
-    scene_synthesizer.md
-
-    chapter_writer.md
-    dialogue_enhancer.md
-    atmosphere_enhancer.md
-    hook_enhancer.md
-    style_normalizer.md
-
-    continuity_editor.md
-    structure_editor.md
-    character_arc_editor.md
-    style_editor.md
-    simulated_reader.md
-    review_synthesizer.md
-
-    revision_planner.md
-    targeted_reviser.md
-    revision_self_check.md
-
-    bible_update_extractor.md
-    bible_conflict_checker.md
-    bible_update_synthesizer.md
-
-  research/
-  storage/
-
-tests/
-  test_artifacts.py
-  test_bible.py
-  test_context_builder.py
-  test_graph_bible.py
-  test_graph_chapter_plan.py
-  test_graph_scene.py
-  test_graph_drafting.py
-  test_graph_review.py
-  test_graph_revision.py
-  test_finalize_chapter.py
-  test_graph_export.py
-  test_director_prerequisites.py
-  smoke_full_workflow_mock.py
-  smoke_chapter_pipeline_mock.py
-  smoke_bible_update_mock.py
+强冲突 → 强冲突 → 强冲突 → 强冲突 → 强冲突
 ```
+
+而不是：
+
+```text
+铺垫 → 升压 → 小爆发 → 余波 → 低谷 → 蓄势 → 反转 → 高潮 → 缓冲 → 终局爆发
+```
+
+### 2.2 Schema 把“高潮型章节”的字段套给所有章节
+
+当前章节卡固定要求类似字段：
+
+```text
+章节目标
+场景列表
+关键冲突
+人物变化
+结尾钩子
+连续性约束
+本章写作输入
+自检
+```
+
+当前场景卡固定要求类似字段：
+
+```text
+地点
+出场人物
+场景目的
+人物目标
+冲突对象
+关键信息
+情绪变化
+场景转折
+退出状态
+```
+
+这些字段对商业高推进章节有效，但不适合所有章节。比如：
+
+- 战后余波章不一定要有新冲突。
+- 关系铺垫章不一定要有强转折。
+- 低谷章不应该马上制造新爆点。
+- 过渡章的作用可能只是移动位置、整理信息、重置目标。
+- 蓄势章的价值是压住不爆，而不是提前高潮。
+
+### 2.3 Synthesizer 容易变成“会议纪要员”
+
+当前常见结构是：
+
+```text
+多个 Agent 给建议
+  ↓
+Synthesizer 汇总
+  ↓
+产物进入下游
+```
+
+如果 Synthesizer 没有“只采纳少量核心建议、拒绝不合节奏的建议、把过早信息延后”的约束，它会天然倾向于把所有 Agent 的信息都保留一点。
+
+对小说来说，这很危险。因为主编的职责不是“合并所有建议”，而是：
+
+```text
+决定本章只完成什么。
+决定哪些冲突压住。
+决定哪些信息延后。
+决定哪些建议不采纳。
+决定本章不能发生什么。
+```
+
+### 2.4 审稿和修订缺少“节奏守门”
+
+如果 Review Graph 不知道本章是低谷章、余波章还是铺垫章，它可能会把“安静但有效”误判为：
+
+```text
+冲突不足
+不够抓人
+缺少爆点
+结尾不够有悬念
+人物变化不明显
+```
+
+随后 Revision Graph 会把这些建议执行掉，导致原本应当降压的章节被修成升压章节。
 
 ---
 
-## 7. 项目产物目录结构
+## 3. 改造目标
 
-目标产物结构：
+### 3.1 总目标
 
-```text
-projects/<project>/
-  state.json
-  project_context.md
-  artifacts.json
-  novel_bible.json
-  novel_bible.md
+建立一个贯穿全流程的节奏控制系统，让每章具有明确的章节功能和强度边界。
 
-  briefs/
-    project_brief.md
-    reference_brief.md
-    story_concept.md
+### 3.2 具体目标
 
-  outline/
-    direction.md
-    concept.md
-    worldbuilding.md
-    characters.md
-    story_flow.md
-    volume_outline.md
-    chapter_outline.md
-    review_lock.md
+1. 在大纲或章纲阶段生成卷级节奏曲线。
+2. 每章拥有独立的 `PacingTarget`。
+3. Chapter Plan、Scene Plan、Drafting、Review、Revision 都读取并服从 `PacingTarget`。
+4. 冲突、钩子、转折类 Agent 改为条件运行。
+5. Synthesizer 必须区分：采纳、拒绝、延后。
+6. Review 只把真正阻塞逻辑的问题送入 Revision。
+7. Revision 不执行会破坏本章节奏目标的建议。
+8. Finalize 时记录实际强度，作为后续章节节奏回调依据。
 
-  chapters/
-    chapter_001/
-      chapter_card.md
-      scene_cards.md
-      draft_v1.md
-      review_v1.md
-      review_v1.json
-      revision_plan_v1.md
-      draft_v2.md
-      final.md
-      summary.md
+### 3.3 不做的事情
 
-    chapter_002/
-      chapter_card.md
-      scene_cards.md
-      draft_v1.md
-      review_v1.md
-      review_v1.json
-      final.md
-      summary.md
+本轮改造不建议一开始就做以下事情：
 
-  exports/
-    manuscript.md
-    volume_001.md
-    novel_bible.md
-```
-
-兼容旧产物：
-
-```text
-projects/<project>/worldbuilding.md
-projects/<project>/outline.md
-projects/<project>/chapter_plan.md
-projects/<project>/chapters/chapter_001.md
-projects/<project>/chapters/chapter_001_review.md
-```
-
-旧路径不要立即删除。新路径和旧路径可并存，必要时旧命令写入旧路径，新 pipeline 写入新路径，同时在保存时同步一份兼容产物。
+- 不直接删除所有多 Agent 结构。
+- 不把所有图重写成一个大图。
+- 不把所有 Prompt 全部推倒重来。
+- 不引入复杂机器学习模型评估节奏。
+- 不把“冲突”完全移除，而是让冲突服从章节功能。
 
 ---
 
-## 8. 数据结构设计
+## 4. 新核心概念：Pacing Target
 
-### 8.1 ArtifactRecord
+### 4.1 定义
 
-新增文件：
+`PacingTarget` 是每章的节奏合同。它决定本章：
 
-```text
-src/ai_novelist/artifacts.py
-```
+- 在整卷中的功能。
+- 允许的强度上限。
+- 张力来源。
+- 是否允许强冲突。
+- 是否允许硬钩子。
+- 最多揭示多少关键信息。
+- 不允许发生什么。
+- 哪些建议应该延后。
 
-建议定义：
-
-```python
-from dataclasses import dataclass, field, asdict
-from typing import Any, Literal
-
-ArtifactType = Literal[
-    "project_brief",
-    "reference_brief",
-    "story_concept",
-    "direction",
-    "worldbuilding",
-    "characters",
-    "story_flow",
-    "volume_outline",
-    "chapter_outline",
-    "review_lock",
-    "chapter_card",
-    "scene_cards",
-    "chapter_draft",
-    "review_report",
-    "revision_plan",
-    "final_chapter",
-    "chapter_summary",
-    "novel_bible",
-    "export",
-]
-
-@dataclass
-class ArtifactRecord:
-    id: str
-    type: str
-    path: str
-    version: int = 1
-    source_agent: str = ""
-    graph: str = ""
-    stage: str = ""
-    chapter: int | None = None
-    created_at: str = ""
-    updated_at: str = ""
-    summary: str = ""
-    metadata: dict[str, Any] = field(default_factory=dict)
-```
-
-必要函数：
-
-```python
-def load_artifacts(project_dir: Path) -> list[ArtifactRecord]: ...
-def save_artifacts(project_dir: Path, records: list[ArtifactRecord]) -> None: ...
-def register_artifact(project_dir: Path, record: ArtifactRecord) -> ArtifactRecord: ...
-def get_latest_artifact(project_dir: Path, artifact_type: str, chapter: int | None = None, stage: str | None = None) -> ArtifactRecord | None: ...
-def save_markdown_artifact(project_dir: Path, relative_path: str, content: str, artifact_type: str, **kwargs) -> ArtifactRecord: ...
-def save_json_artifact(project_dir: Path, relative_path: str, data: dict[str, Any], artifact_type: str, **kwargs) -> ArtifactRecord: ...
-def load_artifact_text(project_dir: Path, record_or_path: ArtifactRecord | str) -> str: ...
-```
-
-### 8.2 NovelBible
-
-新增文件：
-
-```text
-src/ai_novelist/bible.py
-```
-
-建议定义：
-
-```python
-from dataclasses import dataclass, field, asdict
-from typing import Any, Literal
-
-@dataclass
-class ProjectBrief:
-    title: str = ""
-    genre: str = ""
-    subgenre: str = ""
-    target_reader: str = ""
-    core_experience: str = ""
-    tone_keywords: list[str] = field(default_factory=list)
-    locked_constraints: list[str] = field(default_factory=list)
-
-@dataclass
-class StoryConcept:
-    logline: str = ""
-    premise: str = ""
-    core_conflict: str = ""
-    theme: str = ""
-    central_question: str = ""
-    ending_direction: str = ""
-
-@dataclass
-class WorldRule:
-    name: str
-    description: str
-    limitation: str = ""
-    cost: str = ""
-    source_stage: str = ""
-
-@dataclass
-class CharacterCard:
-    name: str
-    role: str
-    identity: str = ""
-    external_goal: str = ""
-    internal_need: str = ""
-    flaw: str = ""
-    fear: str = ""
-    secret: str = ""
-    arc: str = ""
-    voice: str = ""
-    relationships: list[str] = field(default_factory=list)
-    status: str = "active"
-
-@dataclass
-class PlotThread:
-    name: str
-    description: str
-    status: Literal["open", "active", "resolved"] = "open"
-    related_chapters: list[int] = field(default_factory=list)
-
-@dataclass
-class ForeshadowingItem:
-    id: str
-    setup_chapter: int | None = None
-    setup_text: str = ""
-    payoff_chapter: int | None = None
-    payoff_text: str = ""
-    status: Literal["planned", "setup", "paid_off", "dropped"] = "planned"
-
-@dataclass
-class TimelineEvent:
-    id: str
-    order: int
-    chapter: int | None = None
-    event: str = ""
-    characters: list[str] = field(default_factory=list)
-    location: str = ""
-
-@dataclass
-class NovelBible:
-    project: ProjectBrief = field(default_factory=ProjectBrief)
-    concept: StoryConcept = field(default_factory=StoryConcept)
-    world_rules: list[WorldRule] = field(default_factory=list)
-    factions: list[dict[str, Any]] = field(default_factory=list)
-    characters: list[CharacterCard] = field(default_factory=list)
-    plot_threads: list[PlotThread] = field(default_factory=list)
-    timeline: list[TimelineEvent] = field(default_factory=list)
-    foreshadowing: list[ForeshadowingItem] = field(default_factory=list)
-    style_guide: dict[str, Any] = field(default_factory=dict)
-    chapter_summaries: dict[str, str] = field(default_factory=dict)
-    open_questions: list[str] = field(default_factory=list)
-    version: int = 1
-```
-
-必要函数：
-
-```python
-def bible_to_dict(bible: NovelBible) -> dict[str, Any]: ...
-def bible_from_dict(data: dict[str, Any]) -> NovelBible: ...
-def load_bible(project_dir: Path) -> NovelBible: ...
-def save_bible(project_dir: Path, bible: NovelBible) -> None: ...
-def render_bible_markdown(bible: NovelBible) -> str: ...
-def merge_bible_updates(bible: NovelBible, updates: dict[str, Any]) -> NovelBible: ...
-def detect_bible_conflicts(bible: NovelBible, updates: dict[str, Any]) -> list[dict[str, Any]]: ...
-```
-
-### 8.3 NovelState 扩展
-
-修改文件：
-
-```text
-src/ai_novelist/state.py
-```
-
-新增字段建议：
-
-```python
-bible_version: int = 0
-bible_updated_at: str = ""
-active_graph: str = ""
-active_stage: str = ""
-active_chapter: int = 1
-active_scene: str = ""
-
-project_brief: str = ""
-story_concept: str = ""
-characters: str = ""
-story_flow: str = ""
-volume_outline: str = ""
-chapter_outline: str = ""
-
-current_chapter_card: str = ""
-current_scene_cards: str = ""
-current_review_report: str = ""
-current_revision_plan: str = ""
-current_final_chapter: str = ""
-
-chapter_summaries: dict[str, str] = field(default_factory=dict)
-artifact_registry: list[dict[str, Any]] = field(default_factory=list)
-
-open_threads: list[str] = field(default_factory=list)
-resolved_threads: list[str] = field(default_factory=list)
-foreshadowing_registry: list[dict[str, Any]] = field(default_factory=list)
-timeline_events: list[dict[str, Any]] = field(default_factory=list)
-character_states: dict[str, Any] = field(default_factory=dict)
-
-last_context_digest: str = ""
-last_agent_reports: list[dict[str, Any]] = field(default_factory=list)
-```
-
-兼容要求：
-
-1. 旧 `state.json` 没有这些字段时正常加载。
-2. `from_dict` / `model_validate` / dataclass 初始化逻辑应提供默认值。
-3. `state.json` 不应保存完整 `novel_bible.md` 正文，只保存版本、摘要、路径。
-
----
-
-## 9. ContextBuilder 设计
-
-新增文件：
-
-```text
-src/ai_novelist/context_builder.py
-```
-
-### 9.1 核心函数
-
-```python
-def build_context(
-    state: NovelState,
-    store: LocalStore,
-    purpose: str,
-    chapter: int | None = None,
-    stage: str | None = None,
-    max_chars: int = 12000,
-) -> str:
-    ...
-```
-
-### 9.2 支持的 purpose
-
-```text
-director
-research
-outline_stage
-worldbuilding
-characters
-story_flow
-chapter_planning
-scene_design
-drafting
-dialogue_enhancement
-review
-review_continuity
-review_structure
-review_character
-review_style
-simulated_reader
-revision
-bible_update
-export
-```
-
-### 9.3 上下文优先级
-
-```text
-用户当前请求
-> locked_constraints
-> novel_bible
-> 当前任务 artifact
-> project_context
-> reference_brief / canon_facts
-> 当前章节前文摘要
-> 历史 messages 摘要
-```
-
-### 9.4 输出格式
-
-`build_context` 返回 Markdown 字符串：
-
-```text
-# Task Context
-
-## 用户当前请求
-...
-
-## 当前任务
-...
-
-## 锁定约束
-...
-
-## 项目简报
-...
-
-## 故事核心
-...
-
-## 世界观规则
-...
-
-## 人物卡
-...
-
-## 当前大纲相关片段
-...
-
-## 当前章节相关信息
-...
-
-## 已写前文摘要
-...
-
-## 参考资料
-...
-
-## 不确定点
-...
-
-## 输出要求
-...
-```
-
-### 9.5 上下文策略表
-
-建议内部实现：
-
-```python
-CONTEXT_POLICY = {
-    "drafting": [
-        "current_user_request",
-        "locked_constraints",
-        "project_brief",
-        "story_concept",
-        "style_guide",
-        "world_rules",
-        "characters",
-        "current_chapter_card",
-        "current_scene_cards",
-        "previous_chapter_summary",
-        "relevant_foreshadowing",
-    ],
-    "review": [
-        "locked_constraints",
-        "novel_bible_full_or_summary",
-        "chapter_card",
-        "scene_cards",
-        "current_draft",
-        "timeline",
-        "foreshadowing",
-    ],
-    "revision": [
-        "locked_constraints",
-        "current_draft",
-        "review_report",
-        "revision_plan",
-        "chapter_card",
-        "scene_cards",
-    ],
-}
-```
-
-### 9.6 截断策略
-
-实现 `truncate_sections`：
-
-```python
-def truncate_sections(sections: list[tuple[str, str]], max_chars: int) -> str:
-    ...
-```
-
-规则：
-
-1. `locked_constraints` 永不截断，除非超过极端长度。
-2. 当前章节卡、场景卡优先保留。
-3. `reference_brief` 可截断。
-4. 历史 messages 只保留摘要或最近少量内容。
-5. 截断时标记：`[已截断，完整内容见 artifact path]`。
-
----
-
-## 10. Graph 设计规格
-
-### 10.1 graph_research.py
-
-保留现有实现。未来只做小改：
-
-输入：
-
-```text
-用户研究需求
-已有 reference_brief
-本地语料 / search backend
-```
-
-输出：
-
-```text
-reference_brief.md
-research_sources.json
-state.reference_brief
-state.canon_facts
-state.research_uncertainties
-state.research_sources
-```
-
-改造点：
-
-1. research 结果注册到 Artifact Registry。
-2. `reference_brief.md` 兼容旧路径，同时可放入 `briefs/reference_brief.md`。
-3. ContextBuilder 可读取 research 结果。
-
-### 10.2 graph_outline.py
-
-升级阶段：
-
-```text
-direction
--> concept
--> worldbuilding
--> characters
--> story_flow
--> volume_outline
--> chapter_outline
--> review_lock
--> done
-```
-
-每个阶段内部：
-
-```text
-current stage context
-  -> 3-4 个阶段角色 Agent
-  -> outline_stage_synthesizer
-  -> save stage artifact
-  -> register artifact
-  -> optionally update bible
-  -> ask user confirm / advance
-```
-
-阶段产物：
-
-```text
-outline/direction.md
-outline/concept.md
-outline/worldbuilding.md
-outline/characters.md
-outline/story_flow.md
-outline/volume_outline.md
-outline/chapter_outline.md
-outline/review_lock.md
-```
-
-兼容要求：
-
-1. 旧 `outline_draft` 阶段读取时不要崩溃。
-2. 可以迁移到 `volume_outline`，或在旧状态完成后继续 `chapter_outline`。
-3. `outline.md` 仍然保存一个总合并版。
-
-### 10.3 graph_bible.py
-
-新增。
-
-节点：
-
-```text
-load_bible
-  -> extract_bible_updates
-  -> detect_bible_conflicts
-  -> apply_bible_updates
-  -> save_bible
-  -> summarize_bible_update
-  -> END
-```
-
-输入：
-
-```text
-state
-artifact registry
-outline stage artifacts
-chapter final / chapter summary
-review reports
-```
-
-输出：
-
-```text
-novel_bible.json
-novel_bible.md
-state.bible_version
-state.bible_updated_at
-state.chapter_summaries
-state.timeline_events
-state.foreshadowing_registry
-state.character_states
-```
-
-触发时机：
-
-1. `review_lock` 完成后初始化圣经。
-2. 每个 outline stage 完成后可轻量更新。
-3. 章节 `finalize_chapter` 后更新章节摘要、时间线、伏笔、人物状态。
-4. 用户显式输入“更新小说圣经”时运行。
-
-### 10.4 graph_chapter_plan.py
-
-新增。
-
-节点：
-
-```text
-select_chapter
-  -> load_chapter_context
-  -> chapter_goal_agent
-  -> chapter_conflict_agent
-  -> chapter_hook_agent
-  -> chapter_card_synthesizer
-  -> validate_chapter_card
-  -> save_chapter_card
-  -> END
-```
-
-输出：
-
-```text
-chapters/chapter_XXX/chapter_card.md
-state.current_chapter_card
-ArtifactType: chapter_card
-```
-
-章节卡格式：
-
-```text
-# 第 N 章：标题
-
-## 本章目标
-## 本章视角人物
-## 入场状态
-## 主要冲突
-## 关键事件
-## 新增信息
-## 伏笔设置
-## 伏笔回收
-## 人物变化
-## 情绪曲线
-## 结尾钩子
-## 禁止事项
-## 预计字数
-```
-
-### 10.5 graph_scene.py
-
-新增。
-
-节点：
-
-```text
-load_chapter_card
-  -> scene_breakdown_agent
-  -> conflict_check_agent
-  -> scene_synthesizer
-  -> validate_scene_cards
-  -> save_scene_cards
-  -> END
-```
-
-输出：
-
-```text
-chapters/chapter_XXX/scene_cards.md
-state.current_scene_cards
-ArtifactType: scene_cards
-```
-
-场景卡格式：
-
-```text
-# Scene 1：场景名
-
-## 地点
-## 出场人物
-## 场景目的
-## 人物目标
-## 冲突对象
-## 入场信息
-## 关键信息揭示
-## 情绪变化
-## 场景转折
-## 退出状态
-## 与下一场景的连接
-```
-
-### 10.6 graph_drafting.py
-
-新增。
-
-节点：
-
-```text
-load_drafting_context
-  -> draft_scene_batch
-  -> merge_scenes
-  -> dialogue_enhance
-  -> atmosphere_enhance
-  -> hook_enhance
-  -> style_normalize
-  -> save_draft
-  -> END
-```
-
-输入：
-
-```text
-NovelBible
-chapter_card
-scene_cards
-style_guide
-locked_constraints
-previous_chapter_summary
-```
-
-输出：
-
-```text
-chapters/chapter_XXX/draft_v1.md
-state.chapter_draft
-ArtifactType: chapter_draft
-```
-
-兼容：
-
-1. 旧 `write_chapter` action 调用新 `graph_drafting.py`。
-2. 可同步写旧路径 `chapters/chapter_001.md`，避免旧测试失败。
-
-### 10.7 graph_review.py
-
-新增。
-
-节点：
-
-```text
-load_review_context
-  -> continuity_review_agent
-  -> structure_review_agent
-  -> character_arc_review_agent
-  -> style_review_agent
-  -> simulated_reader_agent
-  -> review_synthesizer
-  -> decide_pass_or_revise
-  -> save_review_report
-  -> END
-```
-
-输出 Markdown：
-
-```text
-chapters/chapter_XXX/review_v1.md
-```
-
-输出 JSON：
-
-```text
-chapters/chapter_XXX/review_v1.json
-```
-
-JSON 格式：
+### 4.2 推荐字段
 
 ```json
 {
-  "decision": "revise",
-  "score": 78,
-  "blocking_issues": [],
-  "issues": [
-    {
-      "type": "continuity",
-      "severity": "medium",
-      "location": "scene_2",
-      "problem": "主角在上一章不知道 X，但本章直接说出 X。",
-      "suggestion": "改为让配角提供线索，或在上一章补一个发现过程。"
-    }
+  "chapter": 12,
+  "function": "aftermath",
+  "intensity": 2,
+  "conflict_mode": "latent",
+  "hook_strength": "soft",
+  "reveal_quota": 1,
+  "setback_level": 1,
+  "emotional_curve": "down_then_stable",
+  "primary_progress": "character_state",
+  "tension_source": "上一章失败后的沉默、未说出口的愧疚、队伍信任裂缝",
+  "ending_mode": "soft_resonance",
+  "must_have": [
+    "呈现上一章代价",
+    "让主角从麻木过渡到重新行动",
+    "保留一个轻微不安的细节"
   ],
-  "rewrite_tasks": [
+  "must_not": [
+    "不要新增外部袭击",
+    "不要制造重大背叛",
+    "不要硬结尾钩子",
+    "不要提前揭示核心秘密"
+  ],
+  "defer_to_later": [
+    "敌方真正计划",
+    "主角身世真相",
+    "队友正面决裂"
+  ]
+}
+```
+
+### 4.3 字段说明
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `chapter` | int | 章节序号 |
+| `function` | enum | 本章功能，如 setup/build/breather/aftermath/twist/climax/resolution |
+| `intensity` | int 1-5 | 本章目标强度 |
+| `conflict_mode` | enum | none/latent/internal/external/mixed |
+| `hook_strength` | enum | none/soft/medium/hard |
+| `reveal_quota` | int | 本章最多揭示几个关键新信息 |
+| `setback_level` | int 0-5 | 主角受挫程度 |
+| `emotional_curve` | string | 情绪曲线，如 rise/fall/down_then_stable |
+| `primary_progress` | enum | 情节、人物、关系、信息、氛围、位置转移等 |
+| `tension_source` | string | 本章张力来源，不等同于显性冲突 |
+| `ending_mode` | enum | soft_resonance/question/hard_hook/cliffhanger/closure |
+| `must_have` | list[str] | 本章必须完成的功能 |
+| `must_not` | list[str] | 本章禁止出现的升级行为 |
+| `defer_to_later` | list[str] | 有价值但应延后的信息或冲突 |
+
+### 4.4 强度定义
+
+| 强度 | 功能定位 | 允许内容 | 禁止内容 |
+|---|---|---|---|
+| 1 | 静态余波 / 情绪沉淀 | 情绪变化、关系微变、信息整理 | 新危机、强反转、硬钩子 |
+| 2 | 铺垫 / 低压过渡 | 暗示、软悬念、目标转移 | 正面对抗升级、重大揭示 |
+| 3 | 常规推进 | 局部冲突、中等转折、明确目标变化 | 卷级高潮、连续强爆点 |
+| 4 | 小高潮 / 强转折 | 明显冲突、代价、反转 | 把终局秘密全部揭完 |
+| 5 | 高潮 / 摊牌 / 终局爆发 | 强对抗、重大代价、硬钩子 | 过多解释、无代价胜利 |
+
+---
+
+## 5. 目标架构
+
+### 5.1 改造后整体流程
+
+```mermaid
+flowchart TD
+    D[Director Agent] --> O[Outline Graph]
+    O --> PC[生成卷级 Pacing Curve]
+    PC --> CP[Chapter Planning]
+
+    CP --> PT[读取 / 生成 Pacing Target]
+    PT --> CG[chapter_goal_agent]
+    PT --> CA{是否需要冲突 Agent?}
+    CA -- intensity >= 3 --> CC[chapter_conflict_agent]
+    CA -- intensity < 3 --> CR[restraint_agent]
+
+    PT --> HA{是否需要钩子 Agent?}
+    HA -- medium/hard --> CH[chapter_hook_agent]
+    HA -- none/soft --> CE[ending_resonance_agent]
+
+    CG --> CS[chapter_card_synthesizer]
+    CC --> CS
+    CR --> CS
+    CH --> CS
+    CE --> CS
+    CS --> VCC[节奏感知章节卡校验]
+
+    VCC --> SP[Scene Planning]
+    SP --> PSG[节奏感知场景拆分]
+    PSG --> PG[pacing_guard_check]
+    PG --> SS[scene_synthesizer]
+
+    SS --> DR[Drafting]
+    DR --> DE[基础正文生成]
+    DE --> POL{按 Pacing Target 选择增强器}
+    POL -- hard hook allowed --> HE[hook_enhance]
+    POL -- quiet chapter --> RP[restraint / emotional_resonance polish]
+    POL --> SN[style_normalize]
+
+    SN --> RV[Review]
+    RV --> RVE{按强度选择审稿配置}
+    RVE --> RS[review_synthesizer]
+    RS --> RISK{是否违反节奏目标?}
+    RISK -- 是 --> BG[放入 backlog / rejected]
+    RISK -- 否且 P0/P1 --> RE[Revision]
+    RISK -- 否且 P2/P3 --> BG
+
+    RE --> RP2[revision_plan 分类]
+    RP2 --> TR[targeted_reviser 只执行安全任务]
+    TR --> F[Finalize]
+    F --> ACT[记录实际强度 / 更新 Bible / 回调后续节奏]
+```
+
+### 5.2 新增关键机制
+
+| 机制 | 作用 |
+|---|---|
+| Pacing Curve | 卷级章节强度曲线 |
+| Pacing Target | 单章节奏合同 |
+| Conditional Agent Routing | 冲突/钩子/审稿 Agent 条件运行 |
+| Pacing-aware Validation | 校验字段按章节功能变化 |
+| Rejected Suggestions | 正式记录不采纳建议 |
+| Backlog Suggestions | 有价值但延后的建议 |
+| Pacing Guard Review | 检查是否过度升压 |
+| Actual Intensity Tracking | 定稿后记录实际强度，反馈给后续章节 |
+
+---
+
+## 6. 各流程改造方案
+
+## 6.1 Outline Graph 改造
+
+### 当前问题
+
+Outline 阶段已经包含故事流、卷纲、章纲，但缺少一个明确的“章节节奏曲线”产物。后续章节规划只能看到“这一章要发生什么”，却不知道“这一章应该有多强”。
+
+### 改造目标
+
+在 `story_flow` 或 `chapter_outline` 阶段生成 `Pacing Curve`。
+
+### 推荐新增产物
+
+文件建议：
+
+```text
+projects/<project>/outline/pacing_curve.json
+projects/<project>/outline/pacing_curve.md
+```
+
+或写入已有 outline artifact：
+
+```text
+outline_stage_artifacts["pacing_curve"]
+```
+
+### Pacing Curve 示例
+
+```json
+{
+  "volume": 1,
+  "chapters": [
     {
-      "target": "scene_2",
-      "instruction": "重写主角获得线索的过程，避免无来源信息。"
+      "chapter": 1,
+      "function": "setup",
+      "intensity": 2,
+      "primary_progress": "world_and_character",
+      "hook_strength": "soft",
+      "notes": "建立主角处境和核心缺口，不制造大爆点"
+    },
+    {
+      "chapter": 2,
+      "function": "build",
+      "intensity": 3,
+      "primary_progress": "plot",
+      "hook_strength": "medium",
+      "notes": "引入外部压力，但不进入正面摊牌"
+    },
+    {
+      "chapter": 3,
+      "function": "breather",
+      "intensity": 2,
+      "primary_progress": "relationship",
+      "hook_strength": "soft",
+      "notes": "降低事件压力，推进人物关系和暗线"
+    },
+    {
+      "chapter": 4,
+      "function": "twist",
+      "intensity": 4,
+      "primary_progress": "reveal",
+      "hook_strength": "hard",
+      "notes": "第一次认知反转"
+    },
+    {
+      "chapter": 5,
+      "function": "aftermath",
+      "intensity": 1,
+      "primary_progress": "emotion",
+      "hook_strength": "none",
+      "notes": "呈现上一章代价，不新增危机"
     }
   ]
 }
 ```
 
-状态更新：
+### Prompt 修改规则
+
+在 `story_flow` 或 `chapter_outline` 的 synthesizer prompt 中加入：
 
 ```text
-state.editor_notes
-state.editor_decision
-state.quality_score
-state.current_review_report
+必须输出卷级节奏曲线。
+每章必须标注：function、intensity、primary_progress、hook_strength、conflict_mode。
+不允许连续三章 intensity >= 4，除非用户明确要求高压快节奏。
+每个高潮或反转后，至少规划一个 aftermath/breather/resolution 类型章节或场景段落。
+低强度章节的成功标准不是冲突强，而是情绪、关系、信息或氛围推进有效。
 ```
 
-### 10.8 graph_revision.py
+### 验收标准
 
-新增。
+- `chapter_outline` 之后能查到每章 `function` 和 `intensity`。
+- 后续 `plan_chapter` 可以读取对应章节的 Pacing Target。
+- 章纲里不再只有“事件列表”，而有“节奏功能”。
 
-节点：
+---
+
+## 6.2 Chapter Planning Graph 改造
+
+### 当前问题
+
+当前章节规划固定运行：
 
 ```text
-load_revision_context
-  -> build_revision_plan
-  -> revise_targeted_sections
-  -> merge_revision
-  -> revision_self_check
-  -> save_revised_draft
-  -> maybe_review_again
-  -> END
+chapter_goal_agent
+chapter_conflict_agent
+chapter_hook_agent
+chapter_card_synthesizer
 ```
 
-输出：
+这会让所有章节都被强制考虑冲突和钩子。
 
-```text
-chapters/chapter_XXX/revision_plan_v1.md
-chapters/chapter_XXX/draft_v2.md
-state.current_revision_plan
-state.chapter_draft
+### 改造目标
+
+章节规划先读取或生成 `PacingTarget`，再决定运行哪些 Agent。
+
+### 新流程
+
+```mermaid
+flowchart TD
+    A[select_chapter] --> B[load_chapter_context]
+    B --> C[load_pacing_target]
+    C --> D[chapter_goal_agent]
+    C --> E{intensity >= 3 或 conflict_mode 为 external/mixed?}
+    E -- 是 --> F[chapter_conflict_agent]
+    E -- 否 --> G[restraint_agent]
+    C --> H{hook_strength 为 medium/hard?}
+    H -- 是 --> I[chapter_hook_agent]
+    H -- 否 --> J[ending_resonance_agent]
+    D --> K[chapter_card_synthesizer]
+    F --> K
+    G --> K
+    I --> K
+    J --> K
+    K --> L[validate_chapter_card]
+    L --> M[save_chapter_card]
 ```
 
-注意：
+### 推荐新增 Agent
 
-1. 默认局部修订，不要整章重写。
-2. 如果 `review_report` 指示 blocking issue，可允许整章重写。
-3. `revision_count >= max_revisions` 时停止，并让 Director 提示用户确认。
+#### `chapter_pacing_agent`
 
-### 10.9 finalize / continuity update
+职责：如果大纲里没有明确节奏目标，则根据章纲和前后章节推断本章 Pacing Target。
 
-可放在 `graph_bible.py` 或新增 `graph_continuity.py`。第一版建议放在 `graph_bible.py`，减少模块数量。
+输出：只输出 JSON。
 
-流程：
-
-```text
-load_latest_passed_draft
-  -> save_final_chapter
-  -> summarize_chapter
-  -> extract_bible_updates_from_final
-  -> update_timeline
-  -> update_foreshadowing
-  -> update_character_states
-  -> save_bible
-  -> END
+```json
+{
+  "chapter": 3,
+  "function": "breather",
+  "intensity": 2,
+  "conflict_mode": "latent",
+  "hook_strength": "soft",
+  "primary_progress": "relationship",
+  "must_not": ["不要新增外部危机", "不要硬钩子"]
+}
 ```
 
-输出：
+#### `restraint_agent`
 
-```text
-chapters/chapter_XXX/final.md
-chapters/chapter_XXX/summary.md
-novel_bible.json
-novel_bible.md
-state.current_final_chapter
-state.chapter_summaries
+职责：当本章是低强度、余波、铺垫或蓄势时，检查哪些建议不应该执行。
+
+输出示例：
+
+```json
+{
+  "advice": [
+    "本章应避免正面冲突升级",
+    "可用人物沉默、误解、旧物件来制造低压张力",
+    "结尾宜软收束，不要 cliffhanger"
+  ],
+  "must_not": [
+    "不要让反派直接登场袭击",
+    "不要让主角立刻发现核心真相"
+  ]
+}
 ```
 
-### 10.10 graph_export.py
+#### `ending_resonance_agent`
 
-新增。
+职责：为不需要硬钩子的章节设计“余味式结尾”。
 
-节点：
+结尾类型可以是：
 
 ```text
-collect_final_chapters
-  -> normalize_format
-  -> build_manuscript
-  -> build_volume
-  -> copy_bible_export
-  -> save_export
-  -> END
+soft_resonance：情绪余味
+quiet_question：轻微疑问
+image_echo：意象回环
+relationship_shift：关系微变
+decision_seed：微小决定
 ```
 
-输出：
+### Chapter Card 新 Schema
+
+建议替换原固定字段：
 
 ```text
-exports/manuscript.md
-exports/volume_001.md
-exports/novel_bible.md
+章节目标
+场景列表
+关键冲突
+人物变化
+结尾钩子
+连续性约束
+本章写作输入
+自检
+```
+
+改为：
+
+```text
+本章功能
+目标强度
+节奏位置
+主要推进
+张力来源
+信息增量
+人物状态变化
+情绪曲线
+结尾方式
+连续性约束
+禁止升级项
+延后信息
+本章写作输入
+自检
+```
+
+### 字段说明
+
+| 字段 | 是否必填 | 说明 |
+|---|---|---|
+| 本章功能 | 必填 | setup/build/breather/aftermath/twist/climax 等 |
+| 目标强度 | 必填 | 1-5 |
+| 节奏位置 | 必填 | 上升、下降、蓄势、爆发、余波等 |
+| 主要推进 | 必填 | 情节、人物、关系、信息、氛围、位置转移等 |
+| 张力来源 | 必填 | 可以是冲突、秘密、误解、压力、倒计时、沉默等 |
+| 信息增量 | 必填 | 本章新增或重释的信息 |
+| 人物状态变化 | 必填 | 不要求爆发式成长，可以是微变 |
+| 情绪曲线 | 必填 | 本章读者情绪走向 |
+| 结尾方式 | 必填 | 不等于钩子，可为软收束 |
+| 连续性约束 | 必填 | 与前后文、Bible、设定的约束 |
+| 禁止升级项 | 必填 | 不允许本章发生的内容 |
+| 延后信息 | 必填 | 有价值但不在本章揭示的信息 |
+| 本章写作输入 | 必填 | 给正文写作的指令 |
+| 自检 | 必填 | 本章是否遵守 pacing target |
+
+### 条件字段
+
+仅当 `intensity >= 3` 时要求：
+
+```text
+关键冲突
+显性对抗
+```
+
+仅当 `hook_strength in ["medium", "hard"]` 时要求：
+
+```text
+结尾钩子
+悬念设计
+```
+
+仅当 `function in ["aftermath", "breather", "setup"]` 时要求：
+
+```text
+降压策略
+余味设计
+禁止升级项
+```
+
+### `validate_chapter_card` 修改思路
+
+当前校验逻辑是固定检查 `CHAPTER_CARD_SECTIONS`。建议改为动态：
+
+```python
+def required_chapter_sections(pacing: PacingTarget) -> list[str]:
+    base = [
+        "本章功能",
+        "目标强度",
+        "节奏位置",
+        "主要推进",
+        "张力来源",
+        "信息增量",
+        "人物状态变化",
+        "情绪曲线",
+        "结尾方式",
+        "连续性约束",
+        "禁止升级项",
+        "延后信息",
+        "本章写作输入",
+        "自检",
+    ]
+
+    if pacing.intensity >= 3:
+        base.append("关键冲突")
+
+    if pacing.hook_strength in {"medium", "hard"}:
+        base.append("结尾钩子")
+
+    if pacing.function in {"breather", "aftermath", "setup"}:
+        base.append("降压策略")
+
+    return base
+```
+
+### Chapter Card Synthesizer Prompt 核心规则
+
+```text
+你不是会议纪要员，而是主编。
+不要汇总所有 Agent 建议。
+只采纳最符合 Pacing Target 的 1-3 个核心建议。
+
+必须输出：
+1. adopted_suggestions：采纳的建议。
+2. rejected_suggestions：不采纳的建议，并说明违反了哪条 pacing 约束。
+3. deferred_suggestions：有价值但延后到后续章节的建议。
+4. must_not：本章禁止出现的升级项。
+
+如果 Agent 建议会让章节强度超过目标强度，必须拒绝或延后。
+低强度章节不应因为缺少硬冲突而被补硬冲突。
 ```
 
 ---
 
-## 11. DirectorService 改造
+## 6.3 Scene Planning Graph 改造
 
-### 11.1 新增 action
+### 当前问题
 
-当前 actions 保留，同时新增：
-
-```python
-DIRECTOR_ACTIONS = {
-    "ask_user",
-    "research",
-
-    "init_bible",
-    "update_bible",
-    "show_bible",
-
-    "continue_outline",
-    "generate_direction",
-    "generate_concept",
-    "generate_worldbuilding",
-    "generate_characters",
-    "generate_story_flow",
-    "generate_volume_outline",
-    "generate_chapter_outline",
-    "review_lock_outline",
-
-    "plan_chapter",
-    "plan_scenes",
-    "write_chapter",
-
-    "review_chapter",
-    "revise_chapter",
-    "finalize_chapter",
-
-    "show_status",
-    "show_outline",
-    "show_reference",
-    "show_chapter",
-    "show_review",
-
-    "export_project",
-    "persist_outputs",
-    "stop",
-}
-```
-
-### 11.2 action aliases
-
-```python
-ACTION_ALIASES = {
-    "worldbuild": "generate_worldbuilding",
-    "generate_outline": "continue_outline",
-    "review_outline": "continue_outline",
-    "revise_outline": "continue_outline",
-    "plan_chapters": "plan_chapter",
-    "review": "review_chapter",
-}
-```
-
-### 11.3 前置条件解析
-
-新增函数：
-
-```python
-def resolve_prerequisites(state: NovelState, action: str) -> list[str]:
-    ...
-```
-
-规则：
-
-```python
-PREREQUISITES = {
-    "write_chapter": [
-        "ensure_bible",
-        "ensure_chapter_card",
-        "ensure_scene_cards",
-    ],
-    "review_chapter": [
-        "ensure_chapter_draft",
-    ],
-    "revise_chapter": [
-        "ensure_review_report",
-    ],
-    "finalize_chapter": [
-        "ensure_review_passed_or_user_confirmed",
-    ],
-    "export_project": [
-        "ensure_at_least_one_final_chapter",
-    ],
-}
-```
-
-示例：用户输入“写第 1 章”时：
+场景字段固定包含：
 
 ```text
-Director detects action = write_chapter, chapter = 1
-  -> if no novel_bible: run graph_bible init if possible, else ask to finish outline
-  -> if no chapter_card: run graph_chapter_plan
-  -> if no scene_cards: run graph_scene
-  -> run graph_drafting
+冲突对象
+场景转折
 ```
 
-### 11.4 用户可见返回
+这会让每个场景都被设计成冲突单元，不利于低谷、过渡、余波和氛围场景。
 
-Director 返回用户时不要展示全部内部产物。推荐格式：
+### 改造目标
+
+把“冲突对象 / 场景转折”降级为条件字段，把“张力来源 / 微变化”提升为基础字段。
+
+### 新 Scene Card Schema
 
 ```text
-已完成：第 1 章草稿
+场景编号
+地点
+出场人物
+场景目的
+人物目标
+张力来源
+关键信息
+情绪变化
+微变化 / 转折
+退出状态
+节奏约束
+禁止升级项
+```
 
-生成产物：
-- 章节卡：chapters/chapter_001/chapter_card.md
-- 场景卡：chapters/chapter_001/scene_cards.md
-- 草稿：chapters/chapter_001/draft_v1.md
+### 条件字段
 
-摘要：
-...
+```python
+def required_scene_fields(pacing: PacingTarget) -> list[str]:
+    fields = [
+        "场景编号",
+        "地点",
+        "出场人物",
+        "场景目的",
+        "人物目标",
+        "张力来源",
+        "关键信息",
+        "情绪变化",
+        "微变化 / 转折",
+        "退出状态",
+        "节奏约束",
+        "禁止升级项",
+    ]
 
-下一步建议：让编辑审稿 / 修改某段 / 定稿
+    if pacing.intensity >= 3:
+        fields.extend(["冲突对象", "显性阻力"])
+
+    if pacing.function in {"twist", "climax"}:
+        fields.append("强转折")
+
+    return fields
+```
+
+### `conflict_check_agent` 改造
+
+把 `conflict_check_agent` 改成 `tension_check_agent` 或 `pacing_guard_agent`。
+
+职责从：
+
+```text
+检查场景冲突是否足够。
+```
+
+改为：
+
+```text
+检查场景张力是否符合本章 Pacing Target。
+高强度章节：检查冲突是否足够。
+低强度章节：检查是否过度冲突、过早爆发、硬造转折。
+```
+
+### 低强度场景示例
+
+```markdown
+## 场景 2
+
+- 地点：废弃观测站走廊
+- 出场人物：主角、队友 A
+- 场景目的：呈现上一章失败后的沉默代价
+- 人物目标：主角想避免谈论牺牲者，队友 A 想确认他是否还能继续行动
+- 张力来源：双方都知道问题存在，但都不说破
+- 关键信息：牺牲者留下的记录器仍在闪烁
+- 情绪变化：压抑 → 短暂接近 → 再次退开
+- 微变化：主角第一次没有把记录器扔掉，而是收进衣袋
+- 退出状态：队友 A 不再追问，但信任尚未恢复
+- 节奏约束：保持低压，不新增敌袭
+- 禁止升级项：不揭示记录器内容，不爆发争吵
+```
+
+### Scene Synthesizer Prompt 核心规则
+
+```text
+不要把每个场景都写成正面对抗。
+低强度章节的场景必须有“微变化”，但不要求强转折。
+张力可以来自沉默、误解、时间压力、信息不对称、旧伤、未完成承诺。
+如果本章 intensity <= 2，禁止新增袭击、背叛、爆炸、摊牌、重大秘密揭示。
 ```
 
 ---
 
-## 12. Prompt 输出规范
+## 6.4 Drafting Graph 改造
 
-所有新增 prompt 建议统一包含：
+### 当前问题
+
+当前写作增强链路类似：
 
 ```text
-你是 <agent role>。
-你只能基于 Task Context 工作，不要擅自改动锁定约束。
-如果发现冲突，请输出“冲突报告”，不要自行覆盖设定。
-输出必须使用指定 Markdown 小节。
-不要解释你是 AI。
-不要输出与任务无关的内容。
+merge_scenes
+  ↓
+dialogue_enhance
+  ↓
+atmosphere_enhance
+  ↓
+hook_enhance
+  ↓
+style_normalize
 ```
 
-### 12.1 review_synthesizer prompt 必须要求 JSON block
+`hook_enhance` 固定执行，会把不需要硬钩子的章节也推向悬念结尾。
+
+### 改造目标
+
+按 `PacingTarget` 动态选择增强器。
+
+### 新流程
+
+```mermaid
+flowchart TD
+    A[load_drafting_context] --> B[draft_scene_batch]
+    B --> C[merge_scenes]
+    C --> D[dialogue_enhance]
+    D --> E[atmosphere_enhance]
+    E --> F{hook_strength?}
+    F -- medium/hard --> G[hook_enhance]
+    F -- none/soft --> H[emotional_resonance_polish]
+    G --> I[style_normalize]
+    H --> I
+    I --> J[save_draft]
+```
+
+### 推荐新增增强器
+
+#### `restraint_polisher`
+
+用于低谷、余波、铺垫章。
+
+职责：
+
+```text
+压住过度解释、过度冲突、过度爆点。
+保留情绪余味和人物微变化。
+不新增重大事件。
+```
+
+#### `emotional_resonance_polisher`
+
+用于低强度但需要读者有余味的章节。
+
+职责：
+
+```text
+强化意象回环、情绪尾音、人物潜台词。
+不制造硬悬念。
+```
+
+#### `quiet_tension_polisher`
+
+用于蓄势章节。
+
+职责：
+
+```text
+让压力存在但不爆发。
+增强信息不对称、倒计时、环境暗示。
+不提前揭示核心秘密。
+```
+
+### Enhancer 通用硬约束
+
+所有 Enhancer Prompt 都应加入：
+
+```text
+必须服从 Pacing Target。
+不得新增 Pacing Target 未允许的重大冲突、反转、揭示、袭击、背叛、死亡、爆炸或硬钩子。
+不得让章节强度超过目标强度。
+如果发现原文已经过度升压，应优先降压，而不是继续增强。
+```
+
+### 建议改进：从整章覆盖改为 Patch 输出
+
+当前增强器如果每轮都覆盖整章，容易造成漂移。建议中期改成 Patch 模式。
+
+Patch 输出示例：
+
+```json
+{
+  "patches": [
+    {
+      "target": "结尾后三段",
+      "operation": "replace",
+      "reason": "原结尾制造了硬悬念，违反 hook_strength=soft",
+      "new_text": "……"
+    }
+  ],
+  "pacing_check": {
+    "target_intensity": 2,
+    "estimated_intensity_after_patch": 2,
+    "violations": []
+  }
+}
+```
+
+第一阶段可以先保留整章覆盖，但必须加强 Prompt 约束；第二阶段再做 Patch 化。
+
+---
+
+## 6.5 Review Graph 改造
+
+### 当前问题
+
+当前多编辑审稿固定运行：
+
+```text
+continuity_editor
+structure_editor
+character_arc_editor
+style_editor
+simulated_reader
+```
+
+这对高强度章节有效，但对低谷和余波章节容易误判。
+
+### 改造目标
+
+按章节强度选择审稿配置，并加入 `pacing_guard_editor`。
+
+### 审稿配置建议
+
+| 章节类型 | intensity | 推荐审稿 Agent |
+|---|---:|---|
+| setup / breather / aftermath | 1-2 | continuity_editor、style_editor、pacing_guard_editor、emotional_resonance_editor |
+| build / investigation / transition | 3 | continuity_editor、structure_editor、character_arc_editor、style_editor、pacing_guard_editor |
+| twist / climax / finale | 4-5 | continuity_editor、structure_editor、character_arc_editor、style_editor、simulated_reader、pacing_guard_editor |
+
+### 新增 `pacing_guard_editor`
+
+职责：
+
+```text
+检查章节是否违反 Pacing Target。
+如果章节过度升压，指出哪些段落制造了不该有的冲突、转折或钩子。
+如果章节强度不足，也只在目标强度允许范围内提出建议。
+```
+
+输出示例：
+
+```json
+{
+  "estimated_actual_intensity": 4,
+  "target_intensity": 2,
+  "violations": [
+    {
+      "type": "over_escalation",
+      "evidence": "结尾新增反派袭击，违反 must_not: 不新增外部危机",
+      "severity": "P1",
+      "fix": "删除袭击，改为记录器闪烁的软悬念"
+    }
+  ],
+  "safe_suggestions": [
+    "保留主角收起记录器的动作作为微变化"
+  ]
+}
+```
+
+### Review Synthesizer 修改规则
+
+审稿汇总必须分级：
+
+| 级别 | 定义 | 是否进入 Revision |
+|---|---|---|
+| P0 | 逻辑断裂、设定冲突、人物行为严重不成立 | 是 |
+| P1 | 明显影响读者理解或破坏 Pacing Target | 是 |
+| P2 | 可改善但非阻塞 | 默认否，进入可选 |
+| P3 | 主观偏好或风格建议 | 否，进入 backlog |
+
+必须新增三类输出：
+
+```json
+{
+  "blocking_fixes": [],
+  "pacing_safe_fixes": [],
+  "backlog_suggestions": [],
+  "rejected_suggestions": []
+}
+```
+
+### 关键规则
+
+```text
+低强度章节不能因为“没有强冲突”被判失败。
+只有当低强度章节缺少情绪变化、信息增量、人物状态变化或节奏功能时，才算结构问题。
+任何会让章节超过 target_intensity 的建议，必须进入 backlog 或 rejected_suggestions。
+review_synthesizer 不得新增五个 editor 未提出的问题。
+```
+
+---
+
+## 6.6 Revision Graph 改造
+
+### 当前问题
+
+Revision Graph 会根据 review report 生成修订计划并执行。如果 review report 把“增强冲突、加强钩子”作为任务传入，修订流程就会执行，导致节奏漂移。
+
+### 改造目标
+
+修订计划必须分为：
+
+```text
+blocking_fixes
+pacing_safe_fixes
+backlog_suggestions
+rejected_suggestions
+```
+
+只有前两类允许进入正文修订。
+
+### 新 Revision Plan Schema
+
+```json
+{
+  "chapter": 5,
+  "pacing_target": {
+    "function": "aftermath",
+    "intensity": 1,
+    "hook_strength": "none"
+  },
+  "blocking_fixes": [
+    {
+      "id": "fix-001",
+      "severity": "P0",
+      "target": "第三场",
+      "problem": "角色知道了自己不该知道的信息",
+      "instruction": "删除这句台词，改为模糊猜测"
+    }
+  ],
+  "pacing_safe_fixes": [
+    {
+      "id": "fix-002",
+      "severity": "P1",
+      "target": "结尾",
+      "problem": "结尾硬造敌袭，超过目标强度",
+      "instruction": "改为安静的不安细节，不出现敌人"
+    }
+  ],
+  "backlog_suggestions": [
+    {
+      "id": "backlog-001",
+      "reason": "增强反派正面威胁适合第 7 章小高潮，不适合本章余波"
+    }
+  ],
+  "rejected_suggestions": [
+    {
+      "id": "reject-001",
+      "reason": "让队友当场背叛违反 must_not"
+    }
+  ]
+}
+```
+
+### Targeted Reviser 约束
+
+```text
+只执行 blocking_fixes 和 pacing_safe_fixes。
+不得执行 backlog_suggestions。
+不得执行 rejected_suggestions。
+不得自行新增冲突、钩子、反转、死亡、背叛、秘密揭示。
+修订后必须输出 pacing_self_check。
+```
+
+### Revision Self Check 增强
+
+新增检查：
+
+```json
+{
+  "pacing_self_check": {
+    "target_intensity": 2,
+    "estimated_actual_intensity": 2,
+    "hook_strength_target": "soft",
+    "hook_strength_actual": "soft",
+    "violations": [],
+    "notes": "修订未新增外部危机"
+  }
+}
+```
+
+---
+
+## 6.7 Finalize Graph 改造
+
+### 当前问题
+
+Finalize 目前主要负责保存定稿、摘要和更新 Bible。建议额外记录“实际节奏结果”。
+
+### 改造目标
+
+定稿后提取：
+
+```text
+actual_intensity
+actual_function
+actual_hook_strength
+actual_reveals
+unresolved_threads
+pacing_deviation
+```
+
+### 新增产物
+
+```text
+projects/<project>/chapters/chapter_005/pacing_report.json
+```
 
 示例：
 
-```text
-请先输出人类可读审稿报告，再输出一个 ```json 代码块。
-JSON 必须包含：decision, score, blocking_issues, issues, rewrite_tasks。
-decision 只能是 pass/revise/stop。
-score 必须是 0-100 的整数。
-```
-
-代码应能从模型输出中提取 JSON；如果提取失败，mock/真实模式都要降级生成一个保守 review JSON。
-
-### 12.2 bible_update_extractor prompt
-
-要求输出：
-
 ```json
 {
-  "project": {},
-  "concept": {},
-  "world_rules": [],
-  "factions": [],
-  "characters": [],
-  "plot_threads": [],
-  "timeline": [],
-  "foreshadowing": [],
-  "style_guide": {},
-  "chapter_summaries": {},
-  "open_questions": []
+  "chapter": 5,
+  "target": {
+    "function": "aftermath",
+    "intensity": 1,
+    "hook_strength": "none"
+  },
+  "actual": {
+    "function": "aftermath",
+    "intensity": 2,
+    "hook_strength": "soft"
+  },
+  "deviation": {
+    "intensity_delta": 1,
+    "acceptable": true,
+    "reason": "结尾保留轻微不安细节，但未制造硬钩子"
+  },
+  "carry_forward": [
+    "记录器内容未揭示",
+    "队友 A 对主角信任降低"
+  ]
 }
 ```
 
-不要让 prompt 直接覆盖整个 Bible，只提取 updates，由代码层 merge。
+### 后续节奏回调
 
----
-
-## 13. 开发阶段总览
-
-建议按以下顺序执行：
+如果连续章节实际强度高于目标，应提醒 Director：
 
 ```text
-Phase 0  Baseline inventory and docs
-Phase 1  Artifact Registry
-Phase 2  Novel Bible
-Phase 3  ContextBuilder
-Phase 4  Expand Outline Graph
-Phase 5  Bible Graph
-Phase 6  Chapter Planning Graph
-Phase 7  Scene Design Graph
-Phase 8  Drafting Graph
-Phase 9  Review Graph
-Phase 10 Revision Graph
-Phase 11 Finalize Chapter + Bible Update
-Phase 12 Export Graph
-Phase 13 Director UX + full smoke workflow
+最近 3 章实际强度均高于目标，建议下一章改为 breather/aftermath，或降低 hook_strength。
 ```
 
-每个阶段都应：
+如果连续章节强度过低，也可以提醒：
 
-1. 修改代码。
-2. 增加/更新测试。
-3. 更新 docs。
-4. 运行测试。
-5. 在 `docs/SESSION_SUMMARY.md` 记录测试结果和未完成限制。
+```text
+最近 3 章实际强度偏低，建议下一章进入 build/twist，增加显性目标或局部冲突。
+```
 
 ---
 
-## 14. Phase 0：Baseline inventory and docs
+## 7. 代码改动清单
+
+## 7.1 新增文件：`src/ai_novelist/pacing.py`
+
+建议职责：
+
+```text
+定义 PacingTarget。
+定义 PacingCurve。
+从 chapter_card 中解析 pacing 信息。
+从 outline artifacts 中读取 pacing curve。
+提供 fallback 推断。
+提供章节强度和 hook 规则判断。
+```
+
+示例骨架：
+
+```python
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Literal
+
+ChapterFunction = Literal[
+    "setup",
+    "build",
+    "breather",
+    "aftermath",
+    "transition",
+    "twist",
+    "climax",
+    "resolution",
+]
+
+ConflictMode = Literal["none", "latent", "internal", "external", "mixed"]
+HookStrength = Literal["none", "soft", "medium", "hard"]
+
+@dataclass
+class PacingTarget:
+    chapter: int
+    function: ChapterFunction = "build"
+    intensity: int = 3
+    conflict_mode: ConflictMode = "mixed"
+    hook_strength: HookStrength = "soft"
+    reveal_quota: int = 1
+    setback_level: int = 1
+    emotional_curve: str = "neutral_to_forward"
+    primary_progress: str = "plot"
+    tension_source: str = ""
+    ending_mode: str = "soft_resonance"
+    must_have: list[str] = field(default_factory=list)
+    must_not: list[str] = field(default_factory=list)
+    defer_to_later: list[str] = field(default_factory=list)
+
+    @property
+    def allows_hard_conflict(self) -> bool:
+        return self.intensity >= 3 and self.conflict_mode in {"external", "mixed"}
+
+    @property
+    def allows_hook_enhance(self) -> bool:
+        return self.hook_strength in {"medium", "hard"}
+
+    @property
+    def is_quiet_chapter(self) -> bool:
+        return self.intensity <= 2 or self.function in {"breather", "aftermath", "setup"}
+
+
+def clamp_intensity(value: int) -> int:
+    return max(1, min(5, value))
+```
+
+## 7.2 修改 `NovelState`
+
+建议增加字段：
+
+```python
+current_pacing_target: dict = field(default_factory=dict)
+pacing_curve: dict = field(default_factory=dict)
+pacing_backlog: list[dict] = field(default_factory=list)
+actual_intensity_history: list[dict] = field(default_factory=list)
+```
+
+如果不想立即改 State，也可以先放在：
+
+```python
+state.director_task_args["pacing_target"]
+state.director_task_args["pacing_curve"]
+```
+
+但长期建议进入 `NovelState`。
+
+## 7.3 修改 `graph_outline.py`
+
+任务：
+
+- 在 `story_flow` 或 `chapter_outline` 阶段要求输出 pacing curve。
+- 保存 `pacing_curve.json`。
+- 将 pacing curve 注册到 artifact registry。
+
+建议新增函数：
+
+```python
+def extract_pacing_curve_from_outline(synthesis: str) -> dict:
+    ...
+
+
+def save_pacing_curve_node(data: dict, store: LocalStore) -> dict:
+    ...
+```
+
+## 7.4 修改 `graph_chapter_plan.py`
+
+任务：
+
+- 新增 `load_pacing_target_node`。
+- `run_chapter_planning_agents_node` 按 pacing target 动态选择 Agent。
+- 替换固定 `CHAPTER_CARD_SECTIONS` 为动态函数。
+- `format_reports` 增加 restraint/ending resonance 报告。
+- synthesizer prompt 注入 pacing target。
+
+建议伪代码：
+
+```python
+def select_chapter_agent_specs(pacing: PacingTarget) -> list[tuple[str, str]]:
+    specs = [("chapter_goal_report", "chapter_goal_agent")]
+
+    if pacing.allows_hard_conflict:
+        specs.append(("chapter_conflict_report", "chapter_conflict_agent"))
+    else:
+        specs.append(("chapter_restraint_report", "restraint_agent"))
+
+    if pacing.allows_hook_enhance:
+        specs.append(("chapter_hook_report", "chapter_hook_agent"))
+    else:
+        specs.append(("chapter_ending_report", "ending_resonance_agent"))
+
+    return specs
+```
+
+## 7.5 修改 `graph_scene.py`
+
+任务：
+
+- 将固定 `SCENE_FIELDS` 改为动态字段。
+- 将 `conflict_check_agent` 改成 `tension_check_agent` 或 `pacing_guard_agent`。
+- 场景合成 Prompt 注入 pacing target。
+- 低强度章节校验“是否过度冲突”，而不是“冲突是否不足”。
+
+## 7.6 修改 `graph_drafting.py`
+
+任务：
+
+- `hook_enhance` 改为条件执行。
+- 新增 `restraint_polisher`、`emotional_resonance_polisher`、`quiet_tension_polisher`。
+- Enhancer Prompt 注入 pacing target 和 must_not。
+- 中期改成 Patch 输出，减少整章重写漂移。
+
+伪代码：
+
+```python
+def route_after_atmosphere(state: dict) -> str:
+    pacing = get_pacing_target(state)
+    if pacing.allows_hook_enhance:
+        return "hook_enhance"
+    if pacing.function == "aftermath":
+        return "emotional_resonance_polish"
+    if pacing.function in {"setup", "breather"}:
+        return "restraint_polish"
+    return "style_normalize"
+```
+
+## 7.7 修改 `graph_review.py`
+
+任务：
+
+- 审稿 Agent 按 pacing target 动态选择。
+- 新增 `pacing_guard_editor`。
+- review_synthesizer 输出 severity、blocking_fixes、pacing_safe_fixes、backlog_suggestions、rejected_suggestions。
+- 低强度章节不因缺少硬冲突失败。
+
+伪代码：
+
+```python
+def select_review_agents(pacing: PacingTarget) -> list[str]:
+    if pacing.intensity <= 2:
+        return [
+            "continuity_editor",
+            "style_editor",
+            "pacing_guard_editor",
+            "emotional_resonance_editor",
+        ]
+
+    if pacing.intensity == 3:
+        return [
+            "continuity_editor",
+            "structure_editor",
+            "character_arc_editor",
+            "style_editor",
+            "pacing_guard_editor",
+        ]
+
+    return [
+        "continuity_editor",
+        "structure_editor",
+        "character_arc_editor",
+        "style_editor",
+        "simulated_reader",
+        "pacing_guard_editor",
+    ]
+```
+
+## 7.8 修改 `graph_revision.py`
+
+任务：
+
+- Revision Plan 分类。
+- Targeted Reviser 只执行 blocking_fixes 和 pacing_safe_fixes。
+- Revision Self Check 增加 pacing_self_check。
+- backlog_suggestions 写入 state 或 artifact，但不进入正文。
+
+## 7.9 修改 Prompt 文件
+
+需要新增或修改的 Prompt：
+
+```text
+prompts/chapter_pacing_agent.md
+prompts/restraint_agent.md
+prompts/ending_resonance_agent.md
+prompts/pacing_guard_editor.md
+prompts/emotional_resonance_editor.md
+prompts/restraint_polisher.md
+prompts/emotional_resonance_polisher.md
+prompts/quiet_tension_polisher.md
+
+prompts/chapter_card_synthesizer.md
+prompts/scene_synthesizer.md
+prompts/review_synthesizer.md
+prompts/revision_planner.md
+prompts/targeted_reviser.md
+prompts/hook_enhancer.md
+```
+
+---
+
+## 8. 全局 Prompt 片段
+
+## 8.1 Pacing Discipline
+
+建议所有综合、写作、审稿、修订类 Agent 都加入：
+
+```text
+## Pacing Discipline
+
+你必须服从 Pacing Target。
+Pacing Target 的优先级高于局部 Agent 建议。
+
+如果本章 intensity <= 2：
+- 禁止新增重大外部危机。
+- 禁止新增硬反转。
+- 禁止制造 cliffhanger 式硬钩子。
+- 禁止让人物关系立即爆炸，除非 Pacing Target 明确允许。
+- 可以通过沉默、误解、旧伤、信息不对称、意象回环、关系微变制造张力。
+
+如果本章 intensity == 3：
+- 允许局部冲突和中等转折。
+- 不允许升级为卷级高潮。
+
+如果本章 intensity >= 4：
+- 允许强冲突、明显代价、强转折。
+- 仍不得提前揭示 defer_to_later 中的信息。
+```
+
+## 8.2 Synthesizer Rule
+
+```text
+## Synthesizer Rule
+
+你不是会议纪要员，而是主编。
+不要合并所有 Agent 建议。
+你必须做取舍。
+
+输出必须包含：
+1. adopted_suggestions：采纳的 1-3 个核心建议。
+2. rejected_suggestions：拒绝的建议，并说明原因。
+3. deferred_suggestions：有价值但延后的建议。
+4. pacing_rationale：为什么这样安排符合 Pacing Target。
+
+任何违反 Pacing Target 的建议，不得进入正文任务。
+```
+
+## 8.3 Review Gate Rule
+
+```text
+## Review Gate Rule
+
+审稿时必须先判断章节是否完成 Pacing Target。
+不要用高强度章节的标准评价低强度章节。
+
+低强度章节的成功标准：
+- 是否有情绪变化。
+- 是否有信息增量或旧信息重释。
+- 是否有人物状态微变。
+- 是否产生余味或蓄势。
+- 是否没有提前爆发。
+
+只有 P0/P1 问题可以进入修订任务。
+P2/P3 建议进入 backlog。
+```
+
+## 8.4 Revision Safety Rule
+
+```text
+## Revision Safety Rule
+
+只执行 blocking_fixes 和 pacing_safe_fixes。
+不得执行 backlog_suggestions。
+不得执行 rejected_suggestions。
+不得自行新增冲突、钩子、反转、背叛、死亡、秘密揭示。
+修订后必须给出 pacing_self_check。
+```
+
+---
+
+## 9. 分阶段实施计划
+
+## Phase 0：基线记录与回归样本
 
 ### 目标
 
-在正式改造前，确认当前测试通过，并把本开发计划加入文档。
-
-### 修改文件
-
-```text
-docs/IMPLEMENTATION_PLAN.md
-docs/SESSION_SUMMARY.md
-```
+在改造前固定现有行为，避免改完后无法判断效果。
 
 ### 任务
 
-1. 运行：
-   ```bash
-   .venv/bin/python -m pytest
-   .venv/bin/python tests/smoke_outline_collaboration.py
-   .venv/bin/python tests/smoke_phase2_chat.py
-   ```
-2. 若 smoke 脚本不存在或名称变化，记录实际可用脚本。
-3. 将本计划摘要写入 `docs/IMPLEMENTATION_PLAN.md`。
-4. 在 `docs/SESSION_SUMMARY.md` 记录 baseline 测试结果。
+1. 选择 1 个 mock 项目和 1 个真实模型项目作为样本。
+2. 生成至少 6 章或 1 卷章节卡。
+3. 保存当前 chapter_card、scene_cards、draft、review、revision_plan。
+4. 人工标记每章实际强度。
 
-### 验收标准
-
-1. 当前测试结果被记录。
-2. 没有功能代码改动，或只有文档改动。
-3. docs 明确后续阶段目标。
-
-### 建议提交信息
+### 产物
 
 ```text
-docs: add full workflow implementation roadmap
+baseline/pacing_baseline_report.md
+baseline/chapter_intensity_table.csv
 ```
 
-### Codex CLI 提示词
+### 验收
+
+有一份表格记录：
 
 ```text
-请先做 Phase 0：不要改业务代码。阅读当前 README、AGENTS.md、docs 目录和 tests 目录，运行现有 pytest 和相关 smoke 脚本。把全量小说智能体工作流升级计划摘要写入 docs/IMPLEMENTATION_PLAN.md，并在 docs/SESSION_SUMMARY.md 记录 baseline 测试结果、当前可用 smoke 脚本和后续阶段。保持现有功能不变。
+章节 | 当前功能 | 当前实际强度 | 是否硬钩子 | 是否新增冲突 | 人工评价
 ```
 
 ---
 
-## 15. Phase 1：Artifact Registry
+## Phase 1：先改 Prompt 和章节卡 Schema
 
 ### 目标
 
-建立统一产物注册表，后续所有 graph 都能保存和查找产物。
+用最小代码变更解决 50% 的问题。
 
-### 新增文件
+### 任务
 
-```text
-src/ai_novelist/artifacts.py
-tests/test_artifacts.py
-```
+1. 修改 `CHAPTER_CARD_SECTIONS`。
+2. 新增章节卡字段：本章功能、目标强度、张力来源、结尾方式、禁止升级项、延后信息。
+3. 修改 chapter_card_synthesizer prompt，加入 Synthesizer Rule。
+4. 修改 scene_synthesizer prompt，加入“张力来源不等于冲突”。
+5. 修改 hook_enhancer prompt，加入“不得新增硬钩子”的约束。
+6. 修改 review_synthesizer prompt，加入 P0/P1/P2/P3 分级。
 
-### 修改文件
+### 代码改动少的原因
 
-```text
-src/ai_novelist/storage/*
-src/ai_novelist/state.py  # 如需存 artifact_registry 简要索引
-docs/IMPLEMENTATION_PLAN.md
-docs/SESSION_SUMMARY.md
-```
+这一阶段可以暂时不做动态路由，只先让现有 Agent 在输出时服从节奏字段。
 
-### 实现任务
+### 验收
 
-1. 新增 `ArtifactRecord` dataclass。
-2. 实现：
-   ```python
-   load_artifacts
-   save_artifacts
-   register_artifact
-   get_latest_artifact
-   save_markdown_artifact
-   save_json_artifact
-   load_artifact_text
-   ```
-3. `artifacts.json` 保存到：
-   ```text
-   projects/<project>/artifacts.json
-   ```
-4. 如果 `LocalStore` 有项目路径方法，新增：
-   ```python
-   artifact_registry_path(project_id)
-   ```
-   或按现有 store 风格实现。
-5. 写入时自动创建父目录。
-6. 重复注册同类型/同章节/同阶段产物时 version 自动 +1。
-7. 不要破坏现有 `persist_outputs`。
-8. 单元测试覆盖：
-   - 空 registry 加载。
-   - markdown artifact 保存。
-   - json artifact 保存。
-   - latest artifact 查询。
-   - version 递增。
-
-### 验收标准
-
-1. `tests/test_artifacts.py` 通过。
-2. `.venv/bin/python -m pytest` 通过。
-3. 旧命令仍能运行。
-4. docs 更新。
-
-### 建议提交信息
-
-```text
-feat: add artifact registry for generated novel assets
-```
-
-### Codex CLI 提示词
-
-```text
-请实现 Phase 1：新增 Artifact Registry。新增 src/ai_novelist/artifacts.py，定义 ArtifactRecord，并实现 load_artifacts、save_artifacts、register_artifact、get_latest_artifact、save_markdown_artifact、save_json_artifact、load_artifact_text。registry 保存到 projects/<project>/artifacts.json。按现有 LocalStore 风格增加路径辅助方法。新增 tests/test_artifacts.py 覆盖空加载、保存 markdown/json、latest 查询、version 递增。不要破坏现有 CLI 和测试。更新 docs/IMPLEMENTATION_PLAN.md 和 docs/SESSION_SUMMARY.md，运行 .venv/bin/python -m pytest。
-```
+- 章节卡不再固定只有“关键冲突、结尾钩子”。
+- Synthesizer 会输出 rejected/deferred suggestions。
+- 低强度章不会被 prompt 主动补硬冲突。
 
 ---
 
-## 16. Phase 2：Novel Bible
+## Phase 2：引入 Pacing Target 和动态章节规划
 
 ### 目标
 
-建立小说圣经数据结构和文件保存能力。
+让章节规划先有节奏目标，再选择 Agent。
 
-### 新增文件
+### 任务
 
-```text
-src/ai_novelist/bible.py
-tests/test_bible.py
-```
+1. 新增 `pacing.py`。
+2. 新增 `PacingTarget` 数据结构。
+3. 新增 `load_pacing_target_node`。
+4. 新增 `chapter_pacing_agent`。
+5. 新增 `restraint_agent` 和 `ending_resonance_agent`。
+6. `run_chapter_planning_agents_node` 改为动态选择 Agent。
+7. `validate_chapter_card_node` 改为动态字段校验。
 
-### 修改文件
+### 验收
 
-```text
-src/ai_novelist/storage/*
-src/ai_novelist/state.py
-docs/IMPLEMENTATION_PLAN.md
-docs/SESSION_SUMMARY.md
-```
-
-### 实现任务
-
-1. 新增 dataclass：
-   ```text
-   ProjectBrief
-   StoryConcept
-   WorldRule
-   CharacterCard
-   PlotThread
-   ForeshadowingItem
-   TimelineEvent
-   NovelBible
-   ```
-2. 实现：
-   ```python
-   bible_to_dict
-   bible_from_dict
-   load_bible
-   save_bible
-   render_bible_markdown
-   merge_bible_updates
-   detect_bible_conflicts
-   ```
-3. 保存路径：
-   ```text
-   projects/<project>/novel_bible.json
-   projects/<project>/novel_bible.md
-   ```
-4. `load_bible` 在文件不存在时返回空 `NovelBible()`。
-5. `save_bible` 同时保存 JSON 和 Markdown。
-6. `merge_bible_updates` 第一版可以简单合并：
-   - project/concept/style_guide 覆盖非空字段。
-   - world_rules/characters/timeline/foreshadowing 按 name/id 去重追加或更新。
-   - chapter_summaries 合并 dict。
-7. `detect_bible_conflicts` 第一版可做简单检查：
-   - 同名人物不同 role。
-   - 同名 world_rule 描述明显不同。
-   - 章节摘要覆盖旧摘要时记录 warning。
-
-### 验收标准
-
-1. 能保存和加载 `novel_bible.json`。
-2. 能渲染 `novel_bible.md`。
-3. 空项目不会崩溃。
-4. `.venv/bin/python -m pytest` 通过。
-
-### 建议提交信息
-
-```text
-feat: add novel bible data model and persistence
-```
-
-### Codex CLI 提示词
-
-```text
-请实现 Phase 2：新增小说圣经模块。新增 src/ai_novelist/bible.py，定义 ProjectBrief、StoryConcept、WorldRule、CharacterCard、PlotThread、ForeshadowingItem、TimelineEvent、NovelBible 等 dataclass，并实现 bible_to_dict、bible_from_dict、load_bible、save_bible、render_bible_markdown、merge_bible_updates、detect_bible_conflicts。保存到 projects/<project>/novel_bible.json 和 novel_bible.md。新增 tests/test_bible.py。保证旧 state.json 兼容，更新 docs 并运行 pytest。
-```
+- `intensity <= 2` 时不运行 `chapter_conflict_agent`，或其职责变为“避免过度冲突”。
+- `hook_strength in [none, soft]` 时不运行 `chapter_hook_agent`，改运行 `ending_resonance_agent`。
+- chapter_card 明确写出 `must_not` 和 `defer_to_later`。
 
 ---
 
-## 17. Phase 3：ContextBuilder
+## Phase 3：改造场景规划和写作增强
 
 ### 目标
 
-新增统一上下文构建器，避免各 graph 节点手拼上下文。
+阻断“场景层”和“写作增强层”的自动升压。
 
-### 新增文件
+### 任务
 
-```text
-src/ai_novelist/context_builder.py
-tests/test_context_builder.py
-```
+1. `SCENE_FIELDS` 改为动态字段。
+2. `conflict_check_agent` 改为 `pacing_guard_agent` 或 `tension_check_agent`。
+3. 低强度章节要求“微变化”，不要求“强转折”。
+4. `hook_enhance` 改成条件执行。
+5. 新增低强度章节增强器：`restraint_polisher`、`emotional_resonance_polisher`。
+6. 所有 drafting enhancer 注入 pacing target。
 
-### 修改文件
+### 验收
 
-```text
-docs/IMPLEMENTATION_PLAN.md
-docs/SESSION_SUMMARY.md
-```
-
-第一阶段先不大规模改 graph，只实现和测试 ContextBuilder。
-
-### 实现任务
-
-1. 实现 `build_context`。
-2. 支持 purpose：
-   ```text
-   director
-   outline_stage
-   chapter_planning
-   scene_design
-   drafting
-   review
-   revision
-   bible_update
-   export
-   ```
-3. 实现 section builder：
-   ```python
-   build_locked_constraints_section
-   build_project_brief_section
-   build_bible_section
-   build_artifact_section
-   build_reference_section
-   build_chapter_section
-   build_messages_summary_section
-   truncate_sections
-   ```
-4. 从 LocalStore 读取：
-   - `novel_bible.md`
-   - artifact registry 中的相关产物
-   - `reference_brief.md`
-   - chapter 文件
-5. `max_chars` 生效。
-6. 截断要保留必要小节标题。
-7. 测试覆盖：
-   - drafting context 包含 chapter_card 和 scene_cards。
-   - review context 包含 draft。
-   - locked constraints 优先保留。
-   - max_chars 限制有效。
-
-### 验收标准
-
-1. `tests/test_context_builder.py` 通过。
-2. 不影响旧 graph。
-3. docs 记录上下文策略。
-
-### 建议提交信息
-
-```text
-feat: add task-specific context builder
-```
-
-### Codex CLI 提示词
-
-```text
-请实现 Phase 3：新增统一 ContextBuilder。新增 src/ai_novelist/context_builder.py，提供 build_context(state, store, purpose, chapter=None, stage=None, max_chars=12000)，支持 director、outline_stage、chapter_planning、scene_design、drafting、review、revision、bible_update、export 等 purpose。上下文优先级为当前请求、locked_constraints、NovelBible、当前 artifact、project_context、reference_brief、章节摘要、messages 摘要。实现 truncate_sections。新增 tests/test_context_builder.py，先不要大规模改现有 graph。更新 docs 并运行 pytest。
-```
+- aftermath/breather 章节不会自动生成外部袭击或硬钩子。
+- 场景卡允许“张力来源：沉默/误解/信息不对称”。
+- 低强度章节正文结尾可以软收束。
 
 ---
 
-## 18. Phase 4：扩展 Outline Graph
+## Phase 4：改造审稿和修订
 
 ### 目标
 
-将当前六阶段大纲协作升级为完整大纲阶段。
+防止审稿和修订把低强度章节修成高强度章节。
 
-### 修改文件
+### 任务
+
+1. 新增 `pacing_guard_editor`。
+2. Review Agent 按 `PacingTarget` 动态选择。
+3. Review Synthesizer 输出 `blocking_fixes`、`pacing_safe_fixes`、`backlog_suggestions`、`rejected_suggestions`。
+4. Revision Planner 只接收 P0/P1。
+5. Targeted Reviser 只执行允许任务。
+6. Revision Self Check 增加 pacing_self_check。
+
+### 验收
+
+- 低强度章节不会因“冲突不足”直接 fail。
+- “增强钩子 / 增强冲突 / 增加反转”类建议在不合节奏时进入 backlog。
+- 修订后实际强度不超过目标强度 + 1。
+
+---
+
+## Phase 5：Finalize 回写与长期节奏调度
+
+### 目标
+
+让系统具备“整卷节奏记忆”。
+
+### 任务
+
+1. Finalize 生成 `pacing_report.json`。
+2. 记录 `actual_intensity`、`actual_hook_strength`、`actual_reveals`。
+3. 将偏差信息写回 Novel Bible 或 state。
+4. Director 在下一章规划时读取最近 3 章实际强度。
+5. 如果连续升压，建议下一章降压；如果连续低压，建议进入 build/twist。
+
+### 验收
+
+- 连续三章强度偏高时，系统能主动建议 breather/aftermath。
+- 连续三章强度偏低时，系统能主动建议 build/twist。
+- 导出的 novel_bible 能看到章节节奏轨迹。
+
+---
+
+## 10. 测试计划
+
+## 10.1 单元测试
+
+建议新增测试文件：
 
 ```text
-src/ai_novelist/graph_outline.py
-src/ai_novelist/state.py
-src/ai_novelist/prompts/*.md
-tests/test_graph_outline*.py
-tests/smoke_outline_collaboration.py
-docs/IMPLEMENTATION_PLAN.md
-docs/SESSION_SUMMARY.md
+tests/test_pacing_target.py
+tests/test_chapter_plan_pacing.py
+tests/test_scene_pacing.py
+tests/test_review_pacing.py
+tests/test_revision_pacing.py
 ```
 
-### 阶段列表
+### 测试 1：低强度章不运行冲突 Agent
 
 ```python
-OUTLINE_STAGES = [
-    "direction",
-    "concept",
-    "worldbuilding",
-    "characters",
-    "story_flow",
-    "volume_outline",
-    "chapter_outline",
-    "review_lock",
-    "done",
-]
+def test_quiet_chapter_uses_restraint_agent():
+    pacing = PacingTarget(chapter=3, function="breather", intensity=2, hook_strength="soft")
+    specs = select_chapter_agent_specs(pacing)
+    agent_names = [name for _, name in specs]
+
+    assert "chapter_conflict_agent" not in agent_names
+    assert "restraint_agent" in agent_names
+    assert "chapter_hook_agent" not in agent_names
+    assert "ending_resonance_agent" in agent_names
 ```
 
-### 兼容旧阶段
-
-如果旧 state 中存在：
-
-```text
-outline_draft
-```
-
-兼容策略：
+### 测试 2：高潮章运行冲突和钩子 Agent
 
 ```python
-if stage == "outline_draft":
-    stage = "volume_outline"
+def test_climax_chapter_uses_conflict_and_hook_agents():
+    pacing = PacingTarget(chapter=10, function="climax", intensity=5, hook_strength="hard", conflict_mode="external")
+    specs = select_chapter_agent_specs(pacing)
+    agent_names = [name for _, name in specs]
+
+    assert "chapter_conflict_agent" in agent_names
+    assert "chapter_hook_agent" in agent_names
 ```
 
-或保留旧阶段读取，但后续推进到 `chapter_outline`。
+### 测试 3：低强度章节卡不强制关键冲突
 
-### 每阶段角色 Agent
+```python
+def test_required_sections_for_aftermath_do_not_require_key_conflict():
+    pacing = PacingTarget(chapter=5, function="aftermath", intensity=1, hook_strength="none")
+    sections = required_chapter_sections(pacing)
 
-#### direction
-
-```text
-类型定位 Agent
-主题卖点 Agent
-风险编辑 Agent
+    assert "关键冲突" not in sections
+    assert "结尾钩子" not in sections
+    assert "降压策略" in sections
 ```
 
-#### concept
+### 测试 4：Review Synthesizer 不把 P2/P3 送入修订
 
-```text
-故事概念 Agent
-核心冲突 Agent
-主题表达 Agent
-反转机制 Agent
+```python
+def test_review_only_blocks_p0_p1():
+    report = synthesize_review_reports(mock_editor_reports)
+
+    assert all(item["severity"] in {"P0", "P1"} for item in report["blocking_fixes"])
+    assert all(item["severity"] in {"P2", "P3"} for item in report["backlog_suggestions"])
 ```
 
-#### worldbuilding
+### 测试 5：Revision 不执行 backlog
 
-```text
-规则架构 Agent
-势力资源 Agent
-代价限制 Agent
-原作/检索一致性 Agent
+```python
+def test_revision_ignores_backlog_suggestions():
+    plan = build_revision_plan(review_report_with_backlog)
+    executable = get_executable_revision_tasks(plan)
+
+    assert all(task["id"].startswith("fix-") for task in executable)
+    assert not any(task["id"].startswith("backlog-") for task in executable)
 ```
 
-#### characters
+## 10.2 集成测试
+
+### 场景 A：余波章
+
+输入：
 
 ```text
-主角弧光 Agent
-关系冲突 Agent
-反派/势力 Agent
-角色声音 Agent
+第 5 章是上一章失败后的余波，强度 1，不要新增危机。
 ```
 
-#### story_flow
+期望：
+
+- chapter_card 标注 `function=aftermath`。
+- 不出现硬钩子。
+- scene_cards 以情绪和关系变化为主。
+- review 不因冲突不足 fail。
+- revision 不新增敌袭。
+
+### 场景 B：蓄势章
+
+输入：
 
 ```text
-主线结构 Agent
-节奏悬念 Agent
-伏笔代价 Agent
-副线设计 Agent
+第 7 章是大战前蓄势，强度 3，压力上升但不能爆发。
 ```
 
-#### volume_outline
+期望：
+
+- 有张力，但不提前高潮。
+- 可以有倒计时和信息不对称。
+- 结尾是中等悬念，不是 cliffhanger。
+
+### 场景 C：高潮章
+
+输入：
 
 ```text
-分卷策划 Agent
-卷内高潮 Agent
-卷间钩子 Agent
+第 10 章是卷末高潮，强度 5。
 ```
 
-#### chapter_outline
+期望：
+
+- 运行 conflict/hook Agent。
+- 场景卡有正面对抗和代价。
+- review 使用完整编辑组。
+- 修订允许强化冲突，但不允许无代价胜利。
+
+---
+
+## 11. 验收指标
+
+## 11.1 结构指标
+
+| 指标 | 目标 |
+|---|---:|
+| 每章拥有 Pacing Target | 100% |
+| 章节卡包含 must_not/defer_to_later | 100% |
+| 低强度章跳过硬钩子增强 | 90%+ |
+| Review 输出 severity 分级 | 100% |
+| Revision 不执行 backlog | 100% |
+
+## 11.2 内容指标
+
+| 指标 | 目标 |
+|---|---:|
+| 连续三章 intensity >= 4 的情况 | 除非用户要求，否则 0 |
+| 低强度章出现新增袭击/背叛/硬反转 | 低于 10% |
+| 每章都硬 cliffhanger 的情况 | 明显下降 |
+| 人工评价“节奏有起伏” | 明显上升 |
+| 人工评价“章节都像高潮” | 明显下降 |
+
+## 11.3 调试指标
+
+建议在 artifact 或日志中记录：
 
 ```text
-章节拆分 Agent
-章节钩子 Agent
-章节可执行性 Agent
-连续性编辑 Agent
-```
-
-#### review_lock
-
-```text
-总编辑 Agent
-约束审计 Agent
-章节准备 Agent
-```
-
-### 输出产物
-
-每阶段保存：
-
-```text
-projects/<project>/outline/<stage>.md
-```
-
-同时更新：
-
-```text
-state.outline_stage_artifacts[stage]
-```
-
-并注册 Artifact。
-
-### 总大纲兼容
-
-`review_lock` 后生成或更新：
-
-```text
-projects/<project>/outline.md
-```
-
-内容为各阶段合并版。
-
-### 测试要求
-
-1. mock 下从 `direction` 推进到 `done`。
-2. 每阶段有 artifact。
-3. 旧 `outline_draft` state 能加载和推进。
-4. `smoke_outline_collaboration.py` 更新并通过。
-
-### 验收标准
-
-1. 用户在 chat 中继续大纲流程不报错。
-2. `outline` 命令仍可调试大纲流程。
-3. `outline.md` 仍生成。
-4. `.venv/bin/python -m pytest` 通过。
-
-### 建议提交信息
-
-```text
-feat: expand outline collaboration stages
-```
-
-### Codex CLI 提示词
-
-```text
-请实现 Phase 4：扩展 outline collaboration graph。将阶段升级为 direction、concept、worldbuilding、characters、story_flow、volume_outline、chapter_outline、review_lock、done。保持旧 outline_draft 状态兼容。为新增阶段配置角色 Agent 和 mock 输出。每阶段保存到 projects/<project>/outline/<stage>.md，写入 state.outline_stage_artifacts，并注册 artifact。review_lock 后更新 outline.md 合并版。更新相关 prompt、测试和 smoke_outline_collaboration.py。更新 docs，运行 pytest 和 outline smoke。
+chapter
+function
+intensity_target
+intensity_actual
+hook_target
+hook_actual
+agents_run
+agents_skipped
+adopted_suggestions_count
+rejected_suggestions_count
+backlog_suggestions_count
 ```
 
 ---
 
-## 19. Phase 5：Bible Graph
+## 12. 风险与应对
 
-### 目标
-
-让系统能基于 outline 和章节产物初始化/更新小说圣经。
-
-### 新增文件
-
-```text
-src/ai_novelist/graph_bible.py
-tests/test_graph_bible.py
-```
-
-### 修改文件
-
-```text
-src/ai_novelist/director_service.py
-src/ai_novelist/prompts/bible_update_extractor.md
-src/ai_novelist/prompts/bible_conflict_checker.md
-src/ai_novelist/prompts/bible_update_synthesizer.md
-docs/IMPLEMENTATION_PLAN.md
-docs/SESSION_SUMMARY.md
-```
-
-### 实现任务
-
-1. 新增 graph 节点：
-   ```text
-   load_bible
-   extract_bible_updates
-   detect_bible_conflicts
-   apply_bible_updates
-   save_bible
-   summarize_bible_update
-   ```
-2. mock 模式下从 `outline_stage_artifacts` 生成简化 Bible。
-3. 真实模式下调用 prompt 从 outline/章节产物中提取 updates。
-4. `review_lock` 完成后自动运行 `init_bible`。
-5. Director 新增 action：
-   ```text
-   init_bible
-   update_bible
-   show_bible
-   ```
-6. 用户输入“查看小说圣经”时返回 `novel_bible.md` 摘要。
-7. 保存 `novel_bible.json` 和 `novel_bible.md`。
-8. 注册 `novel_bible` artifact。
-
-### 测试要求
-
-1. 无 bible 文件时可初始化。
-2. 有 outline artifacts 时生成 bible。
-3. show_bible 返回可读摘要。
-4. 冲突检测不会阻塞 mock 主流程。
-
-### 验收标准
-
-1. 大纲锁定后有：
-   ```text
-   projects/<project>/novel_bible.json
-   projects/<project>/novel_bible.md
-   ```
-2. `chat --mock` 中输入“查看小说圣经”能返回内容。
-3. `.venv/bin/python -m pytest` 通过。
-
-### 建议提交信息
-
-```text
-feat: add novel bible graph and director actions
-```
-
-### Codex CLI 提示词
-
-```text
-请实现 Phase 5：新增 graph_bible.py。节点包括 load_bible、extract_bible_updates、detect_bible_conflicts、apply_bible_updates、save_bible、summarize_bible_update。mock 模式可从 outline_stage_artifacts 生成简化 NovelBible。review_lock 完成后自动 init/update Bible。DirectorService 新增 init_bible、update_bible、show_bible action，用户输入“查看小说圣经”可展示摘要。保存 novel_bible.json 和 novel_bible.md，并注册 artifact。新增 tests/test_graph_bible.py，更新 docs，运行 pytest。
-```
+| 风险 | 表现 | 应对 |
+|---|---|---|
+| 低强度章变无聊 | 没冲突也没推进 | 强制要求信息增量、人物微变、情绪曲线 |
+| Agent 不遵守 pacing | 仍然硬造钩子 | 在 Synthesizer、Review、Revision 三层拦截 |
+| Schema 过复杂 | 产物变冗长 | 低强度章节简化字段，高强度章节增加字段 |
+| 动态路由导致漏审 | 低强度章缺少结构检查 | 保留 pacing_guard_editor 和 continuity_editor |
+| Backlog 堆积 | 建议被延后但没人处理 | Finalize 或下一章 planning 读取 backlog |
+| Prompt 与代码重复约束 | 维护成本高 | 把通用规则放到 shared prompt snippet |
+| 实际强度难判断 | LLM 判断不稳定 | 使用 1-5 粗粒度，允许 ±1 偏差 |
 
 ---
 
-## 20. Phase 6：Chapter Planning Graph
+## 13. 推荐落地顺序
 
-### 目标
-
-从总大纲/章节大纲/小说圣经生成可直接执行的章节卡。
-
-### 新增文件
+最推荐的执行顺序：
 
 ```text
-src/ai_novelist/graph_chapter_plan.py
-src/ai_novelist/prompts/chapter_goal_agent.md
-src/ai_novelist/prompts/chapter_conflict_agent.md
-src/ai_novelist/prompts/chapter_hook_agent.md
-src/ai_novelist/prompts/chapter_card_synthesizer.md
-tests/test_graph_chapter_plan.py
+1. 修改 chapter_card schema
+2. 给 synthesizer 加 adopted / rejected / deferred
+3. 引入 PacingTarget
+4. chapter_conflict_agent 和 chapter_hook_agent 条件运行
+5. hook_enhance 条件执行
+6. review_synthesizer 加 severity 和 backlog
+7. revision 只执行 P0/P1 + pacing_safe_fixes
+8. finalize 记录 actual_intensity
 ```
 
-### 修改文件
+其中最值得优先做的是前三项：
 
 ```text
-src/ai_novelist/director_service.py
-src/ai_novelist/graph_writer.py  # compatibility wrapper if needed
-src/ai_novelist/state.py
-docs/IMPLEMENTATION_PLAN.md
-docs/SESSION_SUMMARY.md
+章节卡 schema + PacingTarget + Synthesizer 做取舍
 ```
 
-### 实现任务
-
-1. 新增 graph：
-   ```text
-   select_chapter
-   load_chapter_context
-   chapter_goal_agent
-   chapter_conflict_agent
-   chapter_hook_agent
-   chapter_card_synthesizer
-   validate_chapter_card
-   save_chapter_card
-   ```
-2. 输入章节号：
-   - 从用户输入解析。
-   - 没有则默认 `state.active_chapter`。
-3. 使用 `ContextBuilder(purpose="chapter_planning")`。
-4. 保存：
-   ```text
-   chapters/chapter_XXX/chapter_card.md
-   ```
-5. 写入：
-   ```text
-   state.current_chapter_card
-   state.active_chapter
-   ```
-6. 注册 artifact。
-7. Director 新增：
-   ```text
-   plan_chapter
-   ```
-8. 兼容旧：
-   ```text
-   plan_chapters -> plan_chapter
-   ```
-
-### 测试要求
-
-1. mock 下能生成第 1 章 chapter_card。
-2. chapter_card 包含必需小节。
-3. artifact registry 有记录。
-4. 旧 `plan_chapters` action 不报错。
-
-### 验收标准
-
-1. 用户输入“规划第 1 章”生成章节卡。
-2. 文件路径正确。
-3. pytest 通过。
-
-### 建议提交信息
-
-```text
-feat: add chapter planning graph
-```
-
-### Codex CLI 提示词
-
-```text
-请实现 Phase 6：新增 graph_chapter_plan.py。该图读取 NovelBible、chapter_outline、locked_constraints、reference_brief，通过 ContextBuilder 生成章节卡，保存到 chapters/chapter_XXX/chapter_card.md，写入 state.current_chapter_card 和 active_chapter，并注册 artifact。DirectorService 增加 plan_chapter action，旧 plan_chapters action 作为 alias。新增 prompts 和 tests/test_graph_chapter_plan.py。更新 docs，运行 pytest。
-```
+这三项能最快改变“每章都冲突、每章都钩子”的倾向。
 
 ---
 
-## 21. Phase 7：Scene Design Graph
+## 14. 最小可行版本 MVP
 
-### 目标
+如果只想用最小改动先验证效果，做以下 5 件事：
 
-将章节卡拆成可写作的场景卡，避免正文写散。
-
-### 新增文件
+### MVP-1：章节卡新增 5 个字段
 
 ```text
-src/ai_novelist/graph_scene.py
-src/ai_novelist/prompts/scene_breakdown_agent.md
-src/ai_novelist/prompts/scene_conflict_check_agent.md
-src/ai_novelist/prompts/scene_synthesizer.md
-tests/test_graph_scene.py
+本章功能
+目标强度
+张力来源
+禁止升级项
+延后信息
 ```
 
-### 修改文件
+### MVP-2：把 `关键冲突` 和 `结尾钩子` 从必填改成条件项
+
+规则：
 
 ```text
-src/ai_novelist/director_service.py
-src/ai_novelist/state.py
-docs/IMPLEMENTATION_PLAN.md
-docs/SESSION_SUMMARY.md
+intensity >= 3 才要求关键冲突。
+hook_strength in [medium, hard] 才要求结尾钩子。
 ```
 
-### 实现任务
-
-1. 新增 graph：
-   ```text
-   load_chapter_card
-   scene_breakdown_agent
-   conflict_check_agent
-   scene_synthesizer
-   validate_scene_cards
-   save_scene_cards
-   ```
-2. 输入：
-   ```text
-   current_chapter_card
-   novel_bible
-   style_guide
-   locked_constraints
-   ```
-3. 使用 `ContextBuilder(purpose="scene_design")`。
-4. 保存：
-   ```text
-   chapters/chapter_XXX/scene_cards.md
-   ```
-5. 写入：
-   ```text
-   state.current_scene_cards
-   ```
-6. 注册 artifact。
-7. Director 新增：
-   ```text
-   plan_scenes
-   ```
-
-### 验收标准
-
-1. mock 下 scene_cards 至少包含 2 个场景。
-2. 每个场景包含：地点、人物、目的、冲突、信息揭示、情绪变化、转折、退出状态。
-3. pytest 通过。
-
-### 建议提交信息
+### MVP-3：Synthesizer 必须输出 rejected/deferred
 
 ```text
-feat: add scene design graph
+采纳建议
+拒绝建议
+延后建议
 ```
 
-### Codex CLI 提示词
+### MVP-4：Hook Enhancer 加硬约束
 
 ```text
-请实现 Phase 7：新增 graph_scene.py。该图基于 chapter_card 和 NovelBible 生成 scene_cards.md，每个场景必须包含地点、出场人物、场景目的、人物目标、冲突对象、关键信息、情绪变化、场景转折、退出状态。保存到 chapters/chapter_XXX/scene_cards.md，写入 state.current_scene_cards，并注册 artifact。DirectorService 新增 plan_scenes action。新增 prompts 和 tests/test_graph_scene.py。更新 docs，运行 pytest。
+如果 hook_strength 是 none/soft，不得制造 hard hook 或 cliffhanger。
 ```
+
+### MVP-5：Review 不因低强度章缺少硬冲突 fail
+
+```text
+低强度章只检查：情绪变化、信息增量、人物微变、余味或蓄势。
+```
+
+MVP 完成后，就可以先生成一卷样章对比改造前后的节奏曲线。
 
 ---
 
-## 22. Phase 8：Drafting Graph
+## 15. 示例：改造后的章节卡
 
-### 目标
+```markdown
+# 第 5 章章节卡
 
-将章节正文写作升级为基于章节卡和场景卡的多节点草稿流程。
+## 本章功能
+余波章 / aftermath。承接第 4 章失败后的代价，让读者感到主角团队受损，但不新增外部危机。
 
-### 新增文件
+## 目标强度
+1/5。
 
-```text
-src/ai_novelist/graph_drafting.py
-src/ai_novelist/prompts/chapter_writer.md
-src/ai_novelist/prompts/dialogue_enhancer.md
-src/ai_novelist/prompts/atmosphere_enhancer.md
-src/ai_novelist/prompts/hook_enhancer.md
-src/ai_novelist/prompts/style_normalizer.md
-tests/test_graph_drafting.py
-tests/smoke_chapter_pipeline_mock.py
-```
+## 节奏位置
+第 4 章小高潮之后的降压段。功能是沉淀、后果呈现、关系裂缝，而不是继续升级。
 
-### 修改文件
+## 主要推进
+人物状态与关系推进。
 
-```text
-src/ai_novelist/director_service.py
-src/ai_novelist/graph_writer.py
-src/ai_novelist/state.py
-docs/IMPLEMENTATION_PLAN.md
-docs/SESSION_SUMMARY.md
-```
+## 张力来源
+主角对牺牲者的愧疚、队友未说出口的不信任、记录器仍在闪烁的信息不对称。
 
-### 实现任务
+## 信息增量
+读者知道牺牲者留下了记录器，但不知道内容。主角也暂时不打开。
 
-1. 新增 graph：
-   ```text
-   load_drafting_context
-   draft_scene_batch
-   merge_scenes
-   dialogue_enhance
-   atmosphere_enhance
-   hook_enhance
-   style_normalize
-   save_draft
-   ```
-2. `write_chapter` 前置检查：
-   - 无 chapter_card：自动运行 `graph_chapter_plan`。
-   - 无 scene_cards：自动运行 `graph_scene`。
-3. 使用 `ContextBuilder(purpose="drafting")`。
-4. 保存：
-   ```text
-   chapters/chapter_XXX/draft_v1.md
-   ```
-5. 兼容旧路径：
-   ```text
-   chapters/chapter_001.md
-   ```
-   可同步写入。
-6. 写入：
-   ```text
-   state.chapter_draft
-   ```
-7. 注册 artifact。
-8. 修改旧 `graph_writer.py` 中的写作路径，尽量变成 wrapper。
-
-### 验收标准
-
-1. 用户直接输入“写第 1 章”时，如果缺少 chapter_card 和 scene_cards，系统自动补齐。
-2. 生成 draft_v1.md。
-3. 旧 `write-chapter` 命令仍可用。
-4. `smoke_chapter_pipeline_mock.py` 通过。
-5. pytest 通过。
-
-### 建议提交信息
-
-```text
-feat: add drafting graph with chapter and scene prerequisites
-```
-
-### Codex CLI 提示词
-
-```text
-请实现 Phase 8：新增 graph_drafting.py，并让旧 write_chapter 路径调用它。Drafting Graph 包含 load_drafting_context、draft_scene_batch、merge_scenes、dialogue_enhance、atmosphere_enhance、hook_enhance、style_normalize、save_draft。write_chapter 如果缺 chapter_card 则先调用 graph_chapter_plan，如果缺 scene_cards 则先调用 graph_scene。保存 draft_v1.md，并兼容旧 chapters/chapter_001.md 路径。写入 state.chapter_draft，注册 artifact。新增 tests/test_graph_drafting.py 和 smoke_chapter_pipeline_mock.py。更新 docs，运行 pytest 和 smoke。
-```
-
----
-
-## 23. Phase 9：Review Graph
-
-### 目标
-
-将单一编辑审稿升级为多编辑审稿，并输出结构化 review report。
-
-### 新增文件
-
-```text
-src/ai_novelist/graph_review.py
-src/ai_novelist/prompts/continuity_editor.md
-src/ai_novelist/prompts/structure_editor.md
-src/ai_novelist/prompts/character_arc_editor.md
-src/ai_novelist/prompts/style_editor.md
-src/ai_novelist/prompts/simulated_reader.md
-src/ai_novelist/prompts/review_synthesizer.md
-tests/test_graph_review.py
-```
-
-### 修改文件
-
-```text
-src/ai_novelist/director_service.py
-src/ai_novelist/graph_writer.py
-src/ai_novelist/state.py
-docs/IMPLEMENTATION_PLAN.md
-docs/SESSION_SUMMARY.md
-```
-
-### 实现任务
-
-1. 新增 graph：
-   ```text
-   load_review_context
-   continuity_review_agent
-   structure_review_agent
-   character_arc_review_agent
-   style_review_agent
-   simulated_reader_agent
-   review_synthesizer
-   decide_pass_or_revise
-   save_review_report
-   ```
-2. 使用 `ContextBuilder(purpose="review")`。
-3. 保存：
-   ```text
-   chapters/chapter_XXX/review_v1.md
-   chapters/chapter_XXX/review_v1.json
-   ```
-4. JSON 必须包含：
-   ```text
-   decision
-   score
-   blocking_issues
-   issues
-   rewrite_tasks
-   ```
-5. 写入：
-   ```text
-   state.editor_notes
-   state.editor_decision
-   state.quality_score
-   state.current_review_report
-   ```
-6. 注册 artifact。
-7. Director 新增/映射：
-   ```text
-   review_chapter
-   review -> review_chapter
-   ```
-
-### 验收标准
-
-1. mock 下首次 review 可稳定返回 revise 或 pass，按现有测试需要调整。
-2. review JSON 可被解析。
-3. 旧 `review` action 不报错。
-4. pytest 通过。
-
-### 建议提交信息
-
-```text
-feat: add multi-editor chapter review graph
-```
-
-### Codex CLI 提示词
-
-```text
-请实现 Phase 9：新增 graph_review.py，并替代旧 editor review 路径。Review Graph 包含 continuity_review_agent、structure_review_agent、character_arc_review_agent、style_review_agent、simulated_reader_agent、review_synthesizer、decide_pass_or_revise、save_review_report。输出 review_v1.md 和 review_v1.json，JSON 包含 decision、score、blocking_issues、issues、rewrite_tasks。写入 state.editor_notes、state.editor_decision、state.quality_score、state.current_review_report，并注册 artifact。DirectorService 中 review_chapter 和旧 review action 调用该 graph。新增 tests/test_graph_review.py，更新 docs，运行 pytest。
-```
-
----
-
-## 24. Phase 10：Revision Graph
-
-### 目标
-
-让审稿意见驱动局部修订，而不是盲目整章重写。
-
-### 新增文件
-
-```text
-src/ai_novelist/graph_revision.py
-src/ai_novelist/prompts/revision_planner.md
-src/ai_novelist/prompts/targeted_reviser.md
-src/ai_novelist/prompts/revision_self_check.md
-tests/test_graph_revision.py
-```
-
-### 修改文件
-
-```text
-src/ai_novelist/director_service.py
-src/ai_novelist/graph_writer.py
-src/ai_novelist/state.py
-docs/IMPLEMENTATION_PLAN.md
-docs/SESSION_SUMMARY.md
-```
-
-### 实现任务
-
-1. 新增 graph：
-   ```text
-   load_revision_context
-   build_revision_plan
-   revise_targeted_sections
-   merge_revision
-   revision_self_check
-   save_revised_draft
-   maybe_review_again
-   ```
-2. 读取：
-   ```text
-   review_v1.json
-   state.editor_notes
-   state.chapter_draft
-   chapter_card
-   scene_cards
-   ```
-3. 保存：
-   ```text
-   chapters/chapter_XXX/revision_plan_v1.md
-   chapters/chapter_XXX/draft_v2.md
-   ```
-4. 写入：
-   ```text
-   state.current_revision_plan
-   state.chapter_draft
-   state.revision_count += 1
-   ```
-5. 超过 `max_revisions` 停止并提示用户确认。
-6. 注册 artifact。
-
-### 验收标准
-
-1. 有 review_report 时生成 revision_plan。
-2. 有 rewrite_tasks 时 draft_v2 包含修订结果。
-3. revision_count 正确增加。
-4. pytest 通过。
-
-### 建议提交信息
-
-```text
-feat: add targeted revision graph
-```
-
-### Codex CLI 提示词
-
-```text
-请实现 Phase 10：新增 graph_revision.py。该图读取 review_report.json 或 state.editor_notes，生成 revision_plan_v1.md，根据 rewrite_tasks 执行 targeted_reviser，保存 draft_v2.md，revision_count + 1。若 revision_count >= max_revisions，则停止并让 Director 提示用户确认。写入 state.current_revision_plan 和 state.chapter_draft，注册 artifact。DirectorService 中 revise_chapter action 调用该 graph。新增 tests/test_graph_revision.py，更新 docs，运行 pytest。
-```
-
----
-
-## 25. Phase 11：Finalize Chapter + Bible Update
-
-### 目标
-
-章节通过审稿或用户确认后定稿，并把本章事实写回小说圣经。
-
-### 新增/修改文件
-
-```text
-src/ai_novelist/graph_bible.py
-src/ai_novelist/director_service.py
-src/ai_novelist/state.py
-tests/test_finalize_chapter.py
-tests/smoke_bible_update_mock.py
-docs/IMPLEMENTATION_PLAN.md
-docs/SESSION_SUMMARY.md
-```
-
-### 实现任务
-
-1. 新增流程函数或 graph 节点：
-   ```text
-   load_latest_draft
-   save_final_chapter
-   summarize_chapter
-   extract_bible_updates_from_final
-   update_bible
-   save_chapter_summary
-   ```
-2. 保存：
-   ```text
-   chapters/chapter_XXX/final.md
-   chapters/chapter_XXX/summary.md
-   ```
-3. 更新 NovelBible：
-   ```text
-   chapter_summaries
-   timeline
-   foreshadowing
-   character states
-   open questions
-   ```
-4. 更新 state：
-   ```text
-   state.current_final_chapter
-   state.chapter_summaries[str(chapter)]
-   state.bible_version
-   state.bible_updated_at
-   ```
-5. 注册 artifact：
-   ```text
-   final_chapter
-   chapter_summary
-   novel_bible
-   ```
-6. Director 新增：
-   ```text
-   finalize_chapter
-   ```
-7. 用户输入“定稿第 1 章”可触发。
-
-### 验收标准
-
-1. 定稿后 `final.md` 存在。
-2. `summary.md` 存在。
-3. NovelBible 更新章节摘要。
-4. 下一章 ContextBuilder 能读取上一章摘要。
-5. pytest 和 smoke 通过。
-
-### 建议提交信息
-
-```text
-feat: finalize chapters and update novel bible
-```
-
-### Codex CLI 提示词
-
-```text
-请实现 Phase 11：实现 finalize_chapter 流程。若 editor_decision == pass 或用户明确要求定稿，则保存 chapters/chapter_XXX/final.md，生成 summary.md，并调用 graph_bible 更新 timeline、chapter_summaries、character_states、foreshadowing、open_questions。更新 state.current_final_chapter、state.chapter_summaries、bible_version、bible_updated_at，注册 final_chapter、chapter_summary、novel_bible artifacts。DirectorService 新增 finalize_chapter action，用户输入“定稿第 1 章”可触发。新增 tests/test_finalize_chapter.py 和 smoke_bible_update_mock.py。更新 docs，运行 pytest 和 smoke。
-```
-
----
-
-## 26. Phase 12：Export Graph
-
-### 目标
-
-支持导出整卷、整本、小说圣经。
-
-### 新增文件
-
-```text
-src/ai_novelist/graph_export.py
-tests/test_graph_export.py
-```
-
-### 修改文件
-
-```text
-src/ai_novelist/director_service.py
-src/ai_novelist/cli.py  # 可选，如果要加单步命令
-src/ai_novelist/state.py
-docs/IMPLEMENTATION_PLAN.md
-docs/SESSION_SUMMARY.md
-```
-
-### 实现任务
-
-1. 新增 graph：
-   ```text
-   collect_final_chapters
-   normalize_format
-   build_manuscript
-   build_volume
-   copy_bible_export
-   save_export
-   ```
-2. 收集：
-   ```text
-   chapters/chapter_*/final.md
-   ```
-3. 按章节号排序。
-4. 输出：
-   ```text
-   exports/manuscript.md
-   exports/volume_001.md
-   exports/novel_bible.md
-   ```
-5. Director 新增：
-   ```text
-   export_project
-   ```
-6. 用户输入“导出小说”可触发。
-7. 如果没有 final 章节，返回明确提示，不崩溃。
-
-### 验收标准
-
-1. 至少一个 final 章节时可导出 manuscript。
-2. 没有 final 章节时给提示。
-3. pytest 通过。
-
-### 建议提交信息
-
-```text
-feat: add manuscript export graph
-```
-
-### Codex CLI 提示词
-
-```text
-请实现 Phase 12：新增 graph_export.py。该图收集 chapters/chapter_*/final.md，按章节号排序，生成 exports/manuscript.md、exports/volume_001.md，并复制/导出 exports/novel_bible.md。DirectorService 新增 export_project action，用户输入“导出小说”可触发。没有 final 章节时返回明确提示。新增 tests/test_graph_export.py。更新 docs，运行 pytest。
-```
-
----
-
-## 27. Phase 13：Director UX + Full Smoke Workflow
-
-### 目标
-
-把所有新增 graph 串成用户可用的自然语言主流程。
-
-### 新增文件
-
-```text
-tests/test_director_prerequisites.py
-tests/smoke_full_workflow_mock.py
-```
-
-### 修改文件
-
-```text
-src/ai_novelist/director_service.py
-src/ai_novelist/prompts/director.md
-src/ai_novelist/cli.py  # 如需更新 help 文案
-README.md
-docs/IMPLEMENTATION_PLAN.md
-docs/SESSION_SUMMARY.md
-```
-
-### 实现任务
-
-1. 完善意图识别：
-   ```text
-   查看小说圣经 -> show_bible
-   更新小说圣经 -> update_bible
-   规划第 N 章 -> plan_chapter
-   拆第 N 章场景 -> plan_scenes
-   写第 N 章 -> write_chapter
-   审稿第 N 章 -> review_chapter
-   修订第 N 章 -> revise_chapter
-   定稿第 N 章 -> finalize_chapter
-   导出小说 -> export_project
-   ```
-2. 完善 `resolve_prerequisites`。
-3. 完善用户可见回复：
-   - 完成了什么。
-   - 生成了哪些产物。
-   - 当前状态是什么。
-   - 下一步建议是什么。
-4. 新增完整 mock smoke：
-   ```text
-   启动 chat mock
-   输入创意
-   推进 outline 到 review_lock
-   查看 bible
-   写第 1 章
-   审稿
-   修订
-   定稿
-   导出
-   检查关键文件存在
-   ```
-5. README 更新新能力和产物路径。
-
-### 验收标准
-
-1. `.venv/bin/python -m pytest` 通过。
-2. `.venv/bin/python tests/smoke_full_workflow_mock.py` 通过。
-3. README 有新工作流说明。
-4. 旧 smoke 仍通过，或若更新了路径，文档明确记录原因。
-
-### 建议提交信息
-
-```text
-feat: connect full novel workflow through director chat
-```
-
-### Codex CLI 提示词
-
-```text
-请实现 Phase 13：完善 Director UX 和完整 mock 工作流。更新 DirectorService 和 director prompt，使自然语言命令可路由到 show_bible、update_bible、plan_chapter、plan_scenes、write_chapter、review_chapter、revise_chapter、finalize_chapter、export_project。实现/完善 resolve_prerequisites，让“写第 1 章”可自动补齐 Bible、章节卡、场景卡。新增 tests/test_director_prerequisites.py 和 smoke_full_workflow_mock.py，覆盖从创意、大纲、小说圣经、写章、审稿、修订、定稿到导出的流程。更新 README 和 docs，运行 pytest 和 smoke。
-```
-
----
-
-## 28. 兼容性要求清单
-
-改造完成后，以下命令应继续可用：
-
-```bash
-.venv/bin/ai-novelist --help
-.venv/bin/ai-novelist chat --project demo-chat --mock
-.venv/bin/ai-novelist outline --project demo-outline --idea "小说创意" --mock --auto-approve
-.venv/bin/ai-novelist compose --project demo-compose --idea "小说创意" --chapter 1 --mock --auto-approve
-.venv/bin/ai-novelist plan-chapters --project demo --mock --auto-approve
-.venv/bin/ai-novelist write-chapter --project demo --chapter 1 --mock --auto-approve
-.venv/bin/ai-novelist review --project demo --chapter 1 --mock --auto-approve
-.venv/bin/ai-novelist show --project demo
-```
-
-新增能力可先只通过 `chat` 支持，不一定要马上做单步命令。但如果实现成本低，可以新增：
-
-```bash
-.venv/bin/ai-novelist show-bible --project demo
-.venv/bin/ai-novelist plan-scenes --project demo --chapter 1 --mock --auto-approve
-.venv/bin/ai-novelist finalize-chapter --project demo --chapter 1 --mock --auto-approve
-.venv/bin/ai-novelist export --project demo
-```
-
----
-
-## 29. 全局测试计划
-
-### 29.1 Unit tests
-
-必须逐步新增：
-
-```text
-tests/test_artifacts.py
-tests/test_bible.py
-tests/test_context_builder.py
-tests/test_graph_bible.py
-tests/test_graph_chapter_plan.py
-tests/test_graph_scene.py
-tests/test_graph_drafting.py
-tests/test_graph_review.py
-tests/test_graph_revision.py
-tests/test_finalize_chapter.py
-tests/test_graph_export.py
-tests/test_director_prerequisites.py
-```
-
-### 29.2 Smoke tests
-
-新增：
-
-```text
-tests/smoke_chapter_pipeline_mock.py
-tests/smoke_bible_update_mock.py
-tests/smoke_full_workflow_mock.py
-```
-
-### 29.3 必测场景
-
-1. 从旧 `state.json` 加载，不崩溃。
-2. Artifact Registry 空加载，不崩溃。
-3. NovelBible 空加载，不崩溃。
-4. Outline 从新项目推进到 `done`。
-5. `review_lock` 后生成 Bible。
-6. 用户直接说“写第 1 章”，自动生成 chapter_card、scene_cards、draft。
-7. Review 输出 JSON。
-8. Revision 读取 rewrite_tasks，生成 draft_v2。
-9. Finalize 保存 final.md 和 summary.md，并更新 Bible。
-10. Export 生成 manuscript.md。
-11. `--mock` 全流程稳定。
-12. 旧 CLI 命令仍可用。
-
-### 29.4 每阶段运行命令
-
-基础：
-
-```bash
-.venv/bin/python -m pytest
-```
-
-涉及 outline：
-
-```bash
-.venv/bin/python tests/smoke_outline_collaboration.py
-```
-
-涉及 chat：
-
-```bash
-.venv/bin/python tests/smoke_phase2_chat.py
-```
-
-涉及章节 pipeline：
-
-```bash
-.venv/bin/python tests/smoke_chapter_pipeline_mock.py
-```
-
-最终：
-
-```bash
-.venv/bin/python tests/smoke_full_workflow_mock.py
-```
-
----
-
-## 30. Mock 输出设计
-
-mock 模式要稳定，不要随机。
-
-建议 mock 内容模板：
-
-### chapter_card mock
-
-```text
-# 第 1 章：失忆工程师醒来
-
-## 本章目标
-展示主角处境，抛出核心谜团。
-
-## 本章视角人物
-主角
-
-## 入场状态
-主角在陌生地点醒来，缺失关键记忆。
-
-## 主要冲突
-主角想查明自己身份，但外部系统阻止他接触档案。
-
-## 关键事件
-1. 主角醒来。
-2. 发现异常证据。
-3. 遭遇第一个阻碍。
-
-## 新增信息
-主角与核心谜团有关。
-
-## 伏笔设置
-主角随身物品中出现未知标记。
-
-## 伏笔回收
-暂无。
-
-## 人物变化
-从迷茫转为主动追查。
+## 人物状态变化
+主角从麻木回避，转为愿意把记录器收起来。这是微小但明确的重新行动。
 
 ## 情绪曲线
-困惑 -> 紧张 -> 决心。
+压抑 → 短暂接近 → 安静的不安。
 
-## 结尾钩子
-主角收到来自“自己”的警告。
+## 结尾方式
+soft_resonance。以记录器在衣袋中轻微震动收束，不出现敌袭，不制造 cliffhanger。
 
-## 禁止事项
-不得推翻已锁定世界观。
+## 连续性约束
+上一章失败的代价必须存在。队友 A 的不信任不能在本章完全解决。
 
-## 预计字数
-3000
+## 禁止升级项
+- 不新增反派袭击。
+- 不让队友 A 当场背叛。
+- 不揭示记录器内容。
+- 不让主角立刻振作并宣战。
+
+## 延后信息
+- 记录器真正内容延后到第 7 章。
+- 队友 A 的正面爆发延后到第 6 或第 7 章。
+- 反派真正计划延后到第 8 章。
+
+## 本章写作输入
+写成安静、克制、有余味的一章。重点是动作、沉默、空间感和潜台词。不要用大段解释替代情绪。
+
+## 自检
+- 是否完成余波功能：是。
+- 是否超过目标强度：否。
+- 是否新增硬冲突：否。
+- 是否保留后续期待：是，以记录器和关系裂缝保留软期待。
 ```
 
-### scene_cards mock
+---
 
-```text
-# Scene 1：醒来
-...
-
-# Scene 2：调查
-...
-
-# Scene 3：警告
-...
-```
-
-### review JSON mock
+## 16. 示例：改造后的审稿输出
 
 ```json
 {
-  "decision": "revise",
-  "score": 78,
-  "blocking_issues": [],
-  "issues": [
+  "chapter": 5,
+  "target_intensity": 1,
+  "estimated_actual_intensity": 2,
+  "pass": true,
+  "blocking_fixes": [],
+  "pacing_safe_fixes": [
     {
-      "type": "structure",
-      "severity": "medium",
-      "location": "Scene 2",
-      "problem": "调查过程略快。",
-      "suggestion": "增加一个阻碍，让线索获得更有代价。"
+      "severity": "P1",
+      "target": "结尾",
+      "problem": "最后一句暗示敌人已到门外，接近 hard hook",
+      "instruction": "改为记录器轻微震动，保留不安但不制造外部危机"
     }
   ],
-  "rewrite_tasks": [
+  "backlog_suggestions": [
     {
-      "target": "Scene 2",
-      "instruction": "增加一次失败尝试，再让主角通过代价获得线索。"
+      "severity": "P2",
+      "suggestion": "让队友 A 与主角爆发争吵",
+      "reason": "适合后续 build 章节，不适合本章余波"
+    }
+  ],
+  "rejected_suggestions": [
+    {
+      "severity": "P3",
+      "suggestion": "结尾安排反派袭击",
+      "reason": "违反 must_not: 不新增外部危机"
     }
   ]
 }
@@ -2890,216 +2019,44 @@ mock 模式要稳定，不要随机。
 
 ---
 
-## 31. 常见风险与处理方案
+## 17. 最终建议
 
-### 风险 1：state.json 变得过大
+你的项目已经有比较完整的 LangGraph 创作流水线。现在最重要的不是继续增加更多 Agent，而是让所有 Agent 服从同一个“节奏主编”。
 
-处理：
-
-```text
-大文本写文件；state 只保存摘要、路径、当前状态。
-```
-
-### 风险 2：Agent 上下文污染
-
-处理：
+建议把系统核心从：
 
 ```text
-所有 Agent 使用 ContextBuilder，不直接读取全部 messages。
+多 Agent 发现问题 → 汇总所有问题 → 修掉所有问题
 ```
 
-### 风险 3：旧测试大量失败
-
-处理：
+改成：
 
 ```text
-优先保留旧字段和旧路径。
-graph_writer.py 先做 wrapper，不急着删除旧逻辑。
-旧 action 通过 alias 映射到新 action。
+Pacing Target 定义本章功能
+  ↓
+多 Agent 只在本章功能内提出建议
+  ↓
+Synthesizer 采纳少量建议，拒绝或延后不合节奏的建议
+  ↓
+Drafting 不越界增强
+  ↓
+Review 不用高潮章标准审低谷章
+  ↓
+Revision 只修 P0/P1 和节奏安全问题
+  ↓
+Finalize 记录实际强度并反馈后续章节
 ```
 
-### 风险 4：review JSON 解析失败
-
-处理：
+这样你的小说就能形成更自然的曲线：
 
 ```text
-实现 fallback：若无法提取 JSON，则创建保守 review_report：decision=revise，score=60，issues 包含解析失败提示。
+铺垫 → 升压 → 缓冲 → 小高潮 → 余波 → 低谷 → 蓄势 → 反转 → 高潮 → 尾声
 ```
 
-### 风险 5：Bible merge 误覆盖设定
-
-处理：
+而不是每一章都被系统推成：
 
 ```text
-merge 层只合并非空字段。
-锁定约束不可覆盖。
-冲突写入 open_questions 或 conflict report，不直接覆盖。
+冲突 → 钩子 → 转折 → 冲突 → 钩子 → 转折
 ```
 
-### 风险 6：自动前置步骤导致用户困惑
-
-处理：
-
-```text
-Director 返回时说明自动完成了哪些前置步骤，例如“检测到缺少场景卡，已先生成场景卡，再写正文”。
-```
-
----
-
-## 32. Definition of Done
-
-整个全量工作流改造完成的标准：
-
-1. `chat --mock` 能完成：
-   ```text
-   创意 -> 大纲 -> 小说圣经 -> 第 1 章章节卡 -> 场景卡 -> 草稿 -> 审稿 -> 修订 -> 定稿 -> 导出
-   ```
-2. 新增产物存在：
-   ```text
-   artifacts.json
-   novel_bible.json
-   novel_bible.md
-   outline/*.md
-   chapters/chapter_001/chapter_card.md
-   chapters/chapter_001/scene_cards.md
-   chapters/chapter_001/draft_v1.md
-   chapters/chapter_001/review_v1.json
-   chapters/chapter_001/final.md
-   exports/manuscript.md
-   ```
-3. 旧入口不破坏：
-   ```text
-   chat
-   outline
-   compose
-   plan-chapters
-   write-chapter
-   review
-   show
-   ```
-4. 测试通过：
-   ```bash
-   .venv/bin/python -m pytest
-   .venv/bin/python tests/smoke_full_workflow_mock.py
-   ```
-5. docs 更新完整。
-6. 不依赖真实模型也能完成 mock 全流程。
-7. 真实模型模式继续沿用现有 provider/adapters，不新增强依赖。
-
----
-
-## 33. 最终用户体验示例
-
-用户：
-
-```text
-我想写一个月球城市失忆工程师的悬疑科幻
-```
-
-Director：
-
-```text
-进入大纲共创 direction 阶段，生成类型定位、主题卖点和风险建议。
-```
-
-用户：
-
-```text
-选择方向 1，强化主角罪感，继续
-```
-
-Director 自动推进：
-
-```text
-concept -> worldbuilding -> characters -> story_flow -> volume_outline -> chapter_outline -> review_lock
-```
-
-用户：
-
-```text
-查看小说圣经
-```
-
-Director：
-
-```text
-展示 novel_bible.md 摘要。
-```
-
-用户：
-
-```text
-写第 1 章
-```
-
-Director：
-
-```text
-检测到第 1 章缺少章节卡，已生成 chapter_card.md。
-检测到第 1 章缺少场景卡，已生成 scene_cards.md。
-已生成 draft_v1.md。
-```
-
-用户：
-
-```text
-让编辑审稿
-```
-
-Director：
-
-```text
-多编辑审稿完成，decision=revise，score=78。
-生成 review_v1.md 和 review_v1.json。
-```
-
-用户：
-
-```text
-修订
-```
-
-Director：
-
-```text
-根据 rewrite_tasks 生成 revision_plan_v1.md，并完成 draft_v2.md。
-```
-
-用户：
-
-```text
-定稿第 1 章
-```
-
-Director：
-
-```text
-保存 final.md，生成 summary.md，并更新 novel_bible。
-```
-
-用户：
-
-```text
-导出小说
-```
-
-Director：
-
-```text
-生成 exports/manuscript.md。
-```
-
----
-
-## 34. 一句话架构总结
-
-```text
-LangGraph 负责流程和状态流转；
-DirectorService 负责统一调度和用户交互；
-NovelState 负责短期运行状态；
-Artifact Registry 负责产物版本；
-NovelBible 负责长期创作知识；
-ContextBuilder 负责让每个 Agent 精准获取所需知识；
-各专业 Graph 负责可测试、可复用的创作能力。
-```
-
+这也是本次改造的核心价值。
