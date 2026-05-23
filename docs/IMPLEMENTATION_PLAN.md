@@ -2117,3 +2117,22 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Retrieval context synthesizer 是事实简报整理器，不是创作器。
 - 检索线索只有被用户确认后才可进入创作约束或 stable canon。
+
+## 87. 节奏改造 Phase 1（Prompt + 章节卡 Schema）
+
+目标：执行 `plan.md` 的 Phase 1，用最小代码变更先把章节卡与提示词对齐“节奏目标优先”。
+
+已完成：
+
+- `graph_chapter_plan.CHAPTER_CARD_SECTIONS` 改为节奏字段优先：新增 `本章功能/目标强度/张力来源/结尾方式/禁止升级项/延后信息`，并取消“关键冲突/结尾钩子”必填。
+- `chapter_card_synthesizer.md` 增加 Synthesizer Rule：必须显式输出 `采纳建议/拒绝建议/延后建议`，并声明“关键冲突/结尾钩子”为条件项。
+- `scene_synthesizer.md` 增加约束：`张力来源不等于冲突`，允许沉默、误解、信息不对称等低强度张力。
+- `hook_enhancer.md` 增加节奏护栏：当章节为软收束/余波/过渡时不得新增硬钩子；必须遵守“禁止升级项”。
+- `review_synthesizer.md` 增加 P0/P1/P2/P3 分级规则（保持现有 JSON 字段不变）。
+- mock 输出同步到新章节卡结构：`CodexCLIAdapter._mock_chapter_card` 增加节奏字段与采纳/拒绝/延后建议示例。
+
+当前边界：
+
+- 这是 Phase 1 最小落地，尚未引入动态路由和 `PacingTarget` 数据结构（Phase 2）。
+- 运行时仍会执行既有 Agent 编排，但输出侧已被节奏字段约束。
+

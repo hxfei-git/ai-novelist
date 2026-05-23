@@ -211,6 +211,7 @@ def test_scene_synthesizer_prompt_requires_inherited_fields_and_scene_local_deta
     assert "每场固定 9 个核心字段" in prompt
     assert "每字段不超过 60 中文字符" in prompt
     assert "必须从章节卡、场景拆分报告、冲突检查报告和已有 canon 继承" in prompt
+    assert "张力来源不等于冲突" in prompt
     assert "detail_scope: scene-local" in prompt
     assert "不得写入小说圣经" in prompt
     assert "source_hint" in prompt
@@ -273,6 +274,7 @@ def test_hook_enhancer_prompt_requires_existing_foreshadowing_sources():
     assert "新增钩子必须可追溯到章节卡/场景卡已有伏笔" in prompt
     assert "不得改变结尾事件" in prompt
     assert "不得泄露后续真相" in prompt
+    assert "不得新增硬钩子" in prompt
     for forbidden in ("新增全局真相", "大反转", "新敌人", "新组织", "新世界规则", "无依据异常", "结尾事实"):
         assert forbidden in prompt
 
@@ -379,6 +381,10 @@ def test_review_synthesizer_prompt_limits_and_uses_upstream_only():
     assert "只汇总上游 editor JSON" in prompt
     assert "不得新增上游未提出的问题" in prompt
     assert "rewrite_tasks` 必须去重" in prompt
+    assert "P0" in prompt
+    assert "P1" in prompt
+    assert "P2" in prompt
+    assert "P3" in prompt
     assert "blocking_issues 最多 3 条" in prompt
     assert "issues 最多 6 条" in prompt
     assert "rewrite_tasks 最多 8 条" in prompt

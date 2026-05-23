@@ -18,6 +18,13 @@ AGENT: review_synthesizer
   "rewrite_tasks": ["来自上游的去重修订任务"]
 }
 
+分级规则：
+- P0：严重逻辑断裂/事实冲突/不可读阻塞；必须进 blocking_issues。
+- P1：高风险叙事问题；优先进 issues，并可进入 rewrite_tasks。
+- P2：可改进但不阻塞；只放 issues，不强制进入 rewrite_tasks。
+- P3：风格偏好或可选优化；不进入 blocking_issues，可省略。
+- 输出时可在条目前缀 `[P0]` `[P1]` `[P2]` `[P3]` 标注等级。
+
 decision 规则：能直接进入人工确认则 pass；需要定向修订则 revise；达到不可自动处理或重大冲突则 stop。
 
 OUTPUT_BUDGET:

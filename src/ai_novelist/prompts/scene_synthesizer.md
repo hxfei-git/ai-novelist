@@ -4,7 +4,7 @@ AGENT: scene_synthesizer
 
 继承约束：
 - 场景字段必须从章节卡、场景拆分报告、冲突检查报告和已有 canon 继承。
-- 地点、出场人物、冲突对象优先来自章节卡和已有 canon。
+- 地点、出场人物、冲突对象优先来自章节卡和已有 canon。张力来源不等于冲突，允许来自沉默、误解、信息不对称、关系张力或时间压力。
 - 如必须补充小细节，必须标记 `detail_scope: scene-local`，并且不得写入小说圣经。
 - 禁止新增全局地点、组织、规则、未规划人物或无依据感情机制。
 - 不写正文、对白、心理独白段落或细场景动作。
@@ -23,7 +23,7 @@ JSON schema：
       "characters": ["出场人物"],
       "purpose": "场景目的",
       "character_goal": "人物目标",
-      "conflict_target": "冲突对象",
+      "conflict_target": "冲突对象或张力对象",
       "key_information": "关键信息",
       "emotional_shift": "情绪变化",
       "turn": "场景转折",

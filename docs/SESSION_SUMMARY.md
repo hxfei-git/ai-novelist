@@ -1934,3 +1934,32 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 # 83 passed
 ```
 
+## 91. 本轮更新：执行 `plan.md` Phase 1（节奏改造最小版）
+
+代码改动：
+
+- `src/ai_novelist/graph_chapter_plan.py`：章节卡必需小节改为节奏字段优先，取消“关键冲突/结尾钩子”必填。
+- `src/ai_novelist/prompts/chapter_card_synthesizer.md`：新增 Synthesizer Rule（采纳/拒绝/延后建议）与条件项约束。
+- `src/ai_novelist/prompts/scene_synthesizer.md`：新增“张力来源不等于冲突”约束。
+- `src/ai_novelist/prompts/hook_enhancer.md`：新增“软收束章节不得硬钩子”和“禁止升级项”约束。
+- `src/ai_novelist/prompts/review_synthesizer.md`：新增 P0/P1/P2/P3 分级规则。
+- `src/ai_novelist/adapters/codex_cli.py`：mock 章节卡补齐节奏字段与采纳/拒绝/延后建议示例。
+- `tests/test_prompt_loader.py`：新增对应 prompt 约束断言。
+
+测试结果：
+
+```bash
+.venv/bin/python -m pytest tests/test_graph_chapter_plan.py tests/test_graph_review.py tests/test_prompt_loader.py -k "scene_synthesizer or hook_enhancer or review_synthesizer"
+# 4 passed
+
+.venv/bin/python -m pytest tests/test_graph_chapter_plan.py tests/test_prompt_loader.py tests/test_graph_review.py
+# 46 passed, 1 failed
+# 失败项：tests/test_prompt_loader.py::test_world_builder_prompt_limits_rules_to_conflict_principles
+# 说明：该断言与本次节奏改造无关，为既有 world_builder prompt 文案不一致。
+```
+
+已知限制：
+
+- 尚未进入 Phase 2（`PacingTarget` 结构、动态选择 Agent、动态校验字段）。
+- 审稿与修订的结构化分流（blocking/pacing_safe/backlog/rejected）尚未改造，预计在 Phase 4。
+
