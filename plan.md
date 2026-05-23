@@ -1,2352 +1,1372 @@
-# AI Novelist「真实作者构思方法库」完整实现计划书
+# AI Novelist 大纲共创链路重构计划 v3：从未修改仓库出发的 Codex CLI 可执行稿
 
-> 目标版本：Author Craft Layer v1.0  
-> 目标项目：`hxfei-git/ai-novelist`  
-> 日期：2026-05-23  
-> 核心目标：让 AI Novelist 在大纲、章节规划、场景规划、正文写作、审稿、修订、定稿各阶段，能够参考本地小说库中真实作者的“构思方法”，而不是只依赖大模型凭空生成。  
-> 核心边界：不复刻原文，不模仿具体作者表达，不搬运设定，只抽象叙事结构、冲突机制、人物弧线、场景推进、章节钩子、节奏控制和修订策略。
+> 使用方式：把本文整体贴给 Codex CLI。本文假设仓库代码仍是当前 `main` 状态，没有执行过我之前给出的 v1/v2 方案。请 Codex 按本文直接修改代码、提示词、mock、测试和必要文档。不要只做文案替换，也不要只加一个 forbidden phrases 列表。
 
 ---
 
-## 0. 当前仓库基线判断
+## 0. 你要扮演的角色
 
-当前项目已经具备接入 Author Craft Layer 的基础：
+你是本仓库 `hxfei-git/ai-novelist` 的代码维护者。你的任务是修复 `chat` 入口中的大纲共创阶段质量问题，尤其是：
 
-1. 主入口是 `chat`，由 Director Agent 调度 outline、worldbuilding、chapter planning、scene planning、drafting、review、revision、finalize、export 等工作流。
-2. 当前已有阶段化写作流水线：
-   - Outline Collaboration Graph
-   - Chapter Planning Graph
-   - Scene Planning Graph
-   - Drafting Graph
-   - Review Graph
-   - Revision Graph
-   - Finalize Graph
-3. 当前已有 `ContextBuilder`，负责给不同阶段组装任务上下文。
-4. 当前已有 `Artifact Registry`，可以保存并版本化阶段产物。
-5. 当前已有 `state.json`，但不应继续塞入大文本。
-6. 当前已有 research 搜索体系，支持本地轻量 RAG 和网络搜索，但它主要解决“参考资料/事实/同人资料检索”，不是“真实作者构思方法学习”。
-7. 最新 `plan.md` 已经引入 Pacing Target / 章节节奏目标改造方向。Author Craft Layer 必须兼容 Pacing Target，不能再把每章都推向高冲突、高钩子、高转折。
+1. 方向定位阶段过长、过早写具体代价。
+2. `concept` 故事概念阶段与方向定位高度重合，且只有一个 Agent 仍被汇总。
+3. 世界观阶段不像世界观，常写成抽象规则、剧情机制、代价说明书。
+4. 输出中反复出现公式化绝对因果句，例如“每一次……都会……”“从来不是免费的”“有债必偿”等同类表达。
+5. 模型会把用户没提过的设定变成待确认问题，让用户选择模型自造的机制。
+6. 现有测试还在固化旧的世界观标题与旧阶段结构。
 
-因此，本计划不是另起一套写作系统，而是在现有流程中新增一个独立的“真实作者构思方法库”层：
-
-```text
-本地真实小说 txt/md
-  -> Corpus Ingest
-  -> Chunk / Chapter / Scene Index
-  -> Craft Profile Extraction
-  -> Craft Retrieval
-  -> Stage Craft Brief
-  -> ContextBuilder 注入
-  -> 各阶段 Agent 使用
-  -> Similarity Guard 防复刻
-  -> Finalize 后沉淀 Project Craft Memory
-```
+本次目标不是把用户列举的坏句子逐条硬编码禁止，而是建立可泛化的阶段治理体系。
 
 ---
 
-## 1. 一句话结论
+## 1. 当前仓库基线
 
-Author Craft Layer 要做的不是“把小说原文塞进 prompt”，而是：
+以当前未改仓库为基准，不要假设前两版计划已经执行。
 
-> 把本地小说库中的真实作品，离线提炼成可检索、可解释、可控的“创作方法库”，并在每个创作阶段只注入当前阶段真正需要的构思方法。
+当前可观察基线：
 
-例如：
-
-```text
-不要：
-某本小说原文片段 -> 直接塞给 chapter_writer -> 模仿作者写法
-
-要：
-某本小说章节
-  -> 分析：这一章如何开场、如何制造压力、如何延迟解释、如何软钩子收尾
-  -> 保存：ChapterCraftProfile
-  -> 当前项目写第 1 章时检索到该方法
-  -> 注入：StageCraftBrief
-  -> Agent 用这个方法生成当前项目自己的原创章节方案
-```
+- README 说明 `chat` 是当前主入口，Director Agent 会在同一项目状态里调度 outline collaboration graph、世界观、章节写手、编辑等子工作流。因此本问题属于主链路治理问题，不是单个输出文案问题。
+- `src/ai_novelist/graph_outline.py` 当前活跃阶段仍包含 8 个阶段：`direction`、`concept`、`worldbuilding`、`characters`、`story_flow`、`volume_outline`、`chapter_outline`、`review_lock`。
+- `concept` 当前只有 `故事概念 Agent`，但仍走 role agent + synthesizer 的通用阶段汇总流程。
+- `worldbuilding` 当前角色偏“规则架构 Agent / 原作或检索一致性 Agent”，输出模板偏“世界运行原则 / 关键边界 / 冲突资源 / 代价红线”。
+- `src/ai_novelist/prompts/world_builder.md` 当前也包含“每次选择都会留下后果”这类容易诱导公式句的表达，并维护了“禁止词与高风险表达”词表。
+- `tests/test_outline_collaboration.py` 当前仍断言旧世界观标题，例如 `## 世界运行原则`、`## 关键边界`、`## 冲突资源`、`## 代价红线`，这些测试必须改掉，否则会把错误结构继续固化。
 
 ---
 
-## 2. 总体原则
+## 2. 最重要的设计原则
 
-### 2.1 数据边界
+### 2.1 不要把坏例子硬编码成唯一规则
 
-必须区分四类数据：
+用户列举的坏例子只能作为回归样例，不应作为全部治理策略。
 
-| 类型 | 内容 | 是否可进入最终 prompt | 是否可长期保存 |
-|---|---|---:|---:|
-| `RawText` | 本地小说原文 | 否 | 可以，只在本地索引中 |
-| `RetrievalChunk` | 原文切块，带 offset 和 metadata | 否 | 可以，只在本地 JSONL |
-| `CraftProfile` | 从原文抽象出的创作方法 | 可以 | 可以 |
-| `StageCraftBrief` | 当前阶段可用的作者构思参考 | 可以 | 可以，作为项目 artifact |
+错误做法：
 
-第一版要求：
-
-```text
-StageCraftBrief 不携带长原文。
-CraftEvidence 不保存长原文，只保存 source id、位置、分析摘要、标签。
-所有创作 Agent 只能看到“方法”，不能看到可复刻的长段原文。
+```python
+FORBIDDEN = [
+    "每一次示弱都是邀请他人掠夺",
+    "庇护从来不是免费的",
+    "前世记忆有债必偿",
+]
 ```
 
-### 2.2 优先级
+正确做法：识别这些句子背后的错误类型。
 
-在所有 prompt 和 resolver 中明确优先级：
+需要识别的错误类型：
 
-```text
-用户明确要求
-  > 锁定约束 locked_constraints
-  > Novel Bible / 项目已定设定
-  > Pacing Target / 节奏目标
-  > 当前章节卡 / 场景卡 / 审稿任务
-  > Project Craft Memory / 本项目已形成的方法
-  > External Author Craft / 外部小说库构思参考
-  > 大模型自由发挥
-```
+1. **阶段越权**：方向阶段提前写世界观代价；世界观阶段提前写剧情流程；人物阶段提前写福利或系统机制。
+2. **无来源新设定**：用户没有说、前序未锁定，模型却造出寿元债、羁绊抵押、三宗制衡等具体 canon。
+3. **非世界观语言**：把小说世界写成产品规则、编剧机制、数值机制、抽象因果模型。
+4. **公式化绝对因果句**：`每一次 / 每次 / 任何 / 一旦 / 凡是 / 只要` + `都会 / 必然 / 必定 / 就会 / 从来 / 永远 / 有债必偿`。
+5. **假确认问题**：让用户在模型自造的选项之间选择，例如“前世记忆消耗生命力还是削弱情感纽带”。
 
-Author Craft 永远不能覆盖用户锁定约束、小说圣经和 Pacing Target。
+### 2.2 区分硬规则与软规则，避免把创作写死
 
-### 2.3 与 Pacing Target 的关系
+硬规则只约束流程正确性：
 
-最新 `plan.md` 已经指出当前系统容易过度强化冲突、钩子和转折。Author Craft Layer 必须服务于 Pacing Target。
+- 当前阶段能不能新增具体 canon。
+- 具体设定是否有来源。
+- 是否越权写了后续阶段。
+- 是否把未确认设定写入锁定产物。
+- 是否让用户确认模型自造选项。
 
-例如：
+软规则只约束表达质量：
 
-```text
-如果当前章 function=aftermath, intensity=1, hook_strength=none：
-  Author Craft 应检索“余波章、低压张力、情绪沉淀、软收束”方法。
-  不应检索“强反转、强对抗、硬 cliffhanger”方法。
+- 语言不要像产品经理、游戏机制、编剧术语。
+- 世界观尽量写成角色能看见、听见、触碰、承受的事物。
+- 少用绝对化句式和玄学债务句式。
+- 输出不要过长，不要百科堆设定。
 
-如果当前章 function=twist, intensity=4, hook_strength=hard：
-  Author Craft 才可以检索“认知反转、信息重释、强钩子”方法。
-```
+不能把以下内容写死：
 
-StageCraftBrief 必须包含：
+- 一定是寿元代价或一定不是寿元代价。
+- 一定是三宗、一门、一城或几卷几章。
+- 所有题材都按仙侠模板输出。
+- 所有世界观都必须使用同一组标题。
+- 用户明确要求的怪词、黑色幽默或现代制度梗一律删除。
 
-```text
-## 与 Pacing Target 的对齐
-- 本章功能：
-- 目标强度：
-- 本次采用的作者构思方法为何不破坏节奏目标：
-- 本阶段禁止使用的方法：
-```
+用户显式要求优先。但用户要求的内容也要放在合适阶段，并用小说内部表达承载。
 
-### 2.4 第一版不做的事
+### 2.3 用“三层门”解决问题
 
-第一版明确不做：
+本次不要只改 prompt。请建立三层治理：
 
-```text
-不引入数据库。
-不引入向量库。
-不做 fine-tuning。
-不做自动下载小说。
-不在 prompt 中注入长原文。
-不让模型模仿某个具体作者风格。
-不把本地小说设定直接迁移到当前项目。
-不要求一次性处理所有历史文件，先支持增量。
-```
+1. **Stage Contract 阶段契约**：每个阶段定义职责、可新增内容、禁止越权内容、canon policy、建议输出槽位。
+2. **Source Ledger 设定来源账本**：具体设定必须来自用户、已锁定阶段、参考简报或当前阶段草案，并标注来源等级。
+3. **Quality Gate 质量门**：泛化检测公式句、抽象机制语言、无来源具体设定、假确认问题。
 
 ---
 
-## 3. 最终目标架构
+## 3. 总体改造结果
 
-```mermaid
-flowchart TD
-    A[本地小说库 txt/md] --> B[Corpus Ingest]
-    B --> C[章节/场景/Chunk 切分]
-    C --> D[corpus_index JSONL]
-    D --> E[Craft Profile Extractor]
-    E --> F[Work/Chapter/Scene/Genre Craft Profiles]
+### 3.1 新活跃阶段改成 7 个
 
-    U[用户请求] --> DIR[Director]
-    DIR --> G[当前 Graph load_context 节点]
-    G --> PT[读取 Pacing Target]
-    G --> QP[Craft Query Planner]
-    PT --> QP
-    QP --> R[Craft Retriever]
-    F --> R
-    R --> S[Stage Craft Brief Synthesizer]
-    S --> ART[projects/<project>/craft/stage_briefs/*.md]
-    ART --> CB[ContextBuilder]
-    CB --> AG[阶段 Agent]
-    AG --> OUT[章节卡/场景卡/正文/审稿/修订]
-    OUT --> SG[Similarity Guard]
-    SG --> SAVE[保存 Artifact]
-    SAVE --> PM[Project Craft Memory]
+删除用户可见的独立 `concept` 阶段。新项目活跃阶段为：
+
+```python
+ACTIVE_OUTLINE_STAGES = [
+    "direction",
+    "worldbuilding",
+    "characters",
+    "story_flow",
+    "volume_outline",
+    "chapter_outline",
+    "review_lock",
+]
 ```
 
-核心组件职责：
+`concept` 不要粗暴删除历史数据，而是作为 legacy 阶段兼容。
 
-| 组件 | 职责 |
-|---|---|
-| `corpus/ingest.py` | 扫描本地小说文件，识别编码、元数据、文件指纹 |
-| `corpus/chunker.py` | 按章节、场景、段落、长度切分 |
-| `corpus/index.py` | 读写 `manifest.json`、`works.jsonl`、`chapters.jsonl`、`scenes.jsonl`、`chunks.jsonl` |
-| `corpus/craft_schema.py` | 定义 Craft 数据结构 |
-| `corpus/craft_extractor.py` | 从 chunk / chapter / scene 提炼创作方法 |
-| `corpus/craft_query_planner.py` | 根据当前阶段、题材、Pacing Target 生成检索意图 |
-| `corpus/craft_retriever.py` | 从 profiles 中检索适合当前阶段的方法 |
-| `corpus/craft_brief.py` | 合成 StageCraftBrief |
-| `corpus/craft_resolver.py` | 在图节点中统一生成并保存 brief |
-| `corpus/similarity_guard.py` | 检测过度相似和原文复刻风险 |
-| `corpus/project_memory.py` | 从已定稿章节沉淀本项目自己的 craft memory |
-| `context_builder.py` | 只负责注入已生成的 craft brief，不负责检索和生成 |
-| `artifacts.py` | 注册 craft 相关项目产物 |
-| `state.py` | 只保存 craft 轻量状态，不保存大文本 |
+### 3.2 `concept` 旧阶段兼容策略
+
+- 新项目不再进入 `concept`。
+- `STAGE_LABELS` 可以保留 `concept: "故事概念（旧版）"`，仅用于旧项目显示。
+- `STAGE_ROLES` 不再包含 `concept`。
+- `OUTLINE_STAGES` 对新流程应等于 7 个 active stages。
+- 新增 `LEGACY_OUTLINE_STAGES = {"concept", "outline_draft"}`。
+- 若旧 state 的 `outline_stage == "concept"`：
+  - 如果 `direction` 已有产物或已锁定，则迁移到 `worldbuilding`。
+  - 否则迁移到 `direction`。
+- 若旧项目存在 `outline_stage_artifacts["concept"]`：
+  - 保留为 legacy artifact，不参与新阶段推进。
+  - 最终合并大纲时可作为“旧版故事概念参考”，但不得覆盖新的 `direction`。
+- 用户输入“故事概念 / 一句话故事 / 核心概念”时，Director 路由到 `direction`，不是恢复旧 `concept` 阶段。
+
+### 3.3 每个阶段的职责边界
+
+| 阶段 | 核心问题 | 可以新增什么 | 不能新增什么 | 确认问题规则 |
+|---|---|---|---|---|
+| direction 方向定位 | 这是一个什么故事，读者期待什么 | 类型、主角姿态、核心看点、核心冲突、情绪边界 | 具体代价、门派名、修炼体系、章节桥段、人物小传 | 原则上 0-1 个，只问方向偏好 |
+| worldbuilding 世界观 | 这个世界怎样让故事成立 | 力量体系、门派/组织、本门生态、势力理念、日常场景素材 | 章节流程、完整人物小传、结局安排、抽象剧情算法 | 只问影响长期写作的世界缺口 |
+| characters 人物关系 | 谁推动冲突，彼此怎样牵制 | 角色目标、秘密、资源、关系张力、主线功能 | 新世界规则、完整剧情流程、福利机制 | 只问角色功能或关系基调 |
+| story_flow 故事流程 | 主线怎样推进与升级 | 阶段目标、关键转折、信息释放、伏笔回收方向 | 新门派体系、新人物机制、逐章细纲 | 只问主线走向或终局方向 |
+| volume_outline 分卷大纲 | 每卷完成什么变化 | 卷目标、卷矛盾、卷高潮、主角变化、卷间钩子 | 逐章细节、正文场景、临时新 canon | 只问分卷规模或高潮方向 |
+| chapter_outline 章节大纲 | 前若干章如何可写 | 章节目标、冲突、信息增量、人物状态变化、钩子 | 正文对白、完整场景卡、新世界规则 | 只问首批章节范围或开篇策略 |
+| review_lock 审稿锁定 | 这些设定能否进入写作 | 一致性检查、风险标注、锁定建议 | 新设定、新人物、新剧情重写 | 不问创意题，只问是否锁定或修订 |
 
 ---
 
-## 4. 新增目录与文件
+## 4. 新增模块结构
 
-### 4.1 新增源码目录
+新增包：
 
 ```text
-src/ai_novelist/corpus/
+src/ai_novelist/outline/
   __init__.py
-  encoding.py
-  models.py
-  ingest.py
-  chunker.py
-  index.py
-  craft_schema.py
-  craft_extractor.py
-  craft_query_planner.py
-  craft_retriever.py
-  craft_brief.py
-  craft_resolver.py
-  similarity_guard.py
-  project_memory.py
-  quality_report.py
-  mock.py
+  stage_contracts.py
+  source_ledger.py
+  stage_guard.py
+  question_filter.py
+  renderers.py
+  legacy_migration.py
 ```
 
-说明：
-
-```text
-models.py              低层 corpus 数据结构：Work、Chapter、Scene、Chunk。
-craft_schema.py        高层 craft 数据结构：CraftProfile、CraftEvidence、StageCraftBrief。
-mock.py                mock extractor / mock resolver，保证测试不依赖真实模型。
-quality_report.py      输出索引质量报告和异常文件报告。
-```
-
-### 4.2 新增 prompt
-
-```text
-src/ai_novelist/prompts/craft_profile_extractor.md
-src/ai_novelist/prompts/stage_craft_brief_synthesizer.md
-src/ai_novelist/prompts/project_craft_memory_extractor.md
-src/ai_novelist/prompts/partials/author_craft_policy.md
-```
-
-如果当前 prompt loader 暂不支持 partial，第一版可以先在核心 prompt 中复制 policy，但最终目标是支持统一注入。
-
-### 4.3 新增测试
-
-```text
-tests/fixtures/corpus/mock_novel_a.txt
-tests/fixtures/corpus/mock_novel_b.txt
-tests/fixtures/corpus/mock_novel_a.meta.json
-
-tests/test_corpus_encoding.py
-tests/test_corpus_ingest.py
-tests/test_corpus_chunker.py
-tests/test_corpus_index.py
-tests/test_craft_schema.py
-tests/test_craft_extractor_mock.py
-tests/test_craft_query_planner.py
-tests/test_craft_retriever.py
-tests/test_craft_resolver.py
-tests/test_craft_context_builder.py
-tests/test_similarity_guard.py
-tests/test_project_craft_memory.py
-tests/test_cli_craft.py
-tests/smoke_author_craft_mock.py
-```
-
-测试 fixture 必须是自造短篇，不使用真实版权文本。
+这些模块是建议结构。Codex 可以在保持清晰的前提下调整文件名，但必须实现同等能力，并补测试。
 
 ---
 
-## 5. 数据产物目录
+## 5. `stage_contracts.py`：阶段契约
 
-### 5.1 全局 corpus index
-
-默认路径：
-
-```text
-corpus_index/
-  manifest.json
-  works.jsonl
-  chapters.jsonl
-  scenes.jsonl
-  chunks.jsonl
-  craft_units.jsonl
-  quality_report.md
-  errors.jsonl
-  pending_jobs.jsonl
-  craft_profiles/
-    works/
-      <work_id>.json
-    chapters/
-      <work_id>.jsonl
-    scenes/
-      <work_id>.jsonl
-    genres/
-      <genre>.json
-```
-
-环境变量可覆盖：
-
-```text
-AI_NOVELIST_AUTHOR_CORPUS_DIR=/path/to/novels
-AI_NOVELIST_CORPUS_INDEX_DIR=corpus_index
-```
-
-### 5.2 项目内 craft 产物
-
-```text
-projects/<project>/craft/
-  stage_briefs/
-    outline_stage_direction.md
-    chapter_001_chapter_planning.md
-    chapter_001_scene_design.md
-    chapter_001_drafting.md
-    chapter_001_review.md
-    chapter_001_revision.md
-  stage_sources/
-    chapter_001_chapter_planning.sources.json
-  project_craft_memory.json
-  similarity_reports/
-    chapter_001_draft_v1.json
-    chapter_001_final.json
-```
-
-### 5.3 Artifact 类型
-
-新增 artifact type：
-
-```text
-stage_craft_brief
-stage_craft_sources
-work_craft_profile
-chapter_craft_profile
-scene_craft_profile
-genre_craft_profile
-project_craft_memory
-craft_similarity_report
-craft_quality_report
-```
-
----
-
-## 6. 数据模型设计
-
-### 6.1 Corpus 低层模型
-
-建议放在 `src/ai_novelist/corpus/models.py`。
+新增数据结构：
 
 ```python
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Literal
 
-@dataclass(frozen=True)
-class CorpusWork:
-    work_id: str
-    title: str
-    author: str = ""
-    genre: list[str] = field(default_factory=list)
-    source_path: str = ""
-    sha256: str = ""
-    char_count: int = 0
-    encoding: str = "utf-8"
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-@dataclass(frozen=True)
-class CorpusChapter:
-    chapter_id: str
-    work_id: str
-    chapter_index: int
-    title: str
-    char_start: int
-    char_end: int
-    role_hint: str = ""  # opening/setup/escalation/midpoint/climax/aftermath/resolution
-
-@dataclass(frozen=True)
-class CorpusScene:
-    scene_id: str
-    work_id: str
-    chapter_id: str
-    scene_index: int
-    char_start: int
-    char_end: int
-    position: str = ""  # scene_opening/scene_middle/scene_ending
-
-@dataclass(frozen=True)
-class RetrievalChunk:
-    chunk_id: str
-    work_id: str
-    chapter_id: str
-    scene_id: str
-    chunk_index: int
-    text: str
-    char_start: int
-    char_end: int
-    chapter_index: int
-    chapter_title: str
-    position: str
-    tags: list[str] = field(default_factory=list)
-    metadata: dict[str, Any] = field(default_factory=dict)
-```
-
-### 6.2 Craft 高层模型
-
-建议放在 `src/ai_novelist/corpus/craft_schema.py`。
-
-```python
-from dataclasses import dataclass, field
-from typing import Any, Literal
-
-CraftFacet = Literal[
-    "premise",
-    "conflict",
-    "character_arc",
-    "relationship",
-    "scene_turn",
-    "chapter_hook",
-    "foreshadowing",
-    "information_release",
-    "pacing",
-    "restraint",
-    "narrative_distance",
-    "dialogue",
-    "atmosphere",
-    "revision_strategy",
+CanonPolicy = Literal[
+    "no_new_canon",        # 不允许新增具体 canon，只能写方向原则
+    "draft_canon_allowed", # 允许新增草案 canon，但必须能说明来源或用途
+    "locked_only",         # 原则上只使用前序已确立设定
+    "audit_only",          # 只审计，不新增
 ]
 
-ProfileScope = Literal["work", "chapter", "scene", "genre", "project"]
+@dataclass(frozen=True)
+class StageSlot:
+    key: str
+    label: str
+    description: str
+    required: bool = True
+    max_items: int | None = None
+    max_chars_per_item: int | None = None
 
 @dataclass(frozen=True)
-class CraftEvidence:
-    source_id: str
-    work_id: str
-    chapter_id: str = ""
-    scene_id: str = ""
-    chunk_id: str = ""
-    location_label: str = ""
-    summary: str = ""
-    # 第一版禁止保存长原文；quote 默认为空，最多允许短句，且不进入 StageCraftBrief
-    short_quote: str = ""
-
-@dataclass(frozen=True)
-class CraftNote:
-    note_id: str
-    scope: ProfileScope
-    facet: CraftFacet
-    title: str
-    pattern: str
-    why_it_works: str
-    use_when: list[str]
-    avoid_when: list[str]
-    pacing_functions: list[str]
-    intensity_range: tuple[int, int] = (1, 5)
-    evidence: list[CraftEvidence] = field(default_factory=list)
-    tags: list[str] = field(default_factory=list)
-    score: float = 0.0
-
-@dataclass(frozen=True)
-class CraftProfile:
-    profile_id: str
-    scope: ProfileScope
-    work_id: str = ""
-    title: str = ""
-    author: str = ""
-    genre: list[str] = field(default_factory=list)
-    notes: list[CraftNote] = field(default_factory=list)
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-@dataclass(frozen=True)
-class CraftContext:
+class StageContract:
+    key: str
+    label: str
     purpose: str
-    chapter: int | None
-    stage: str
-    query_terms: list[str]
-    selected_notes: list[CraftNote]
-    sources: list[CraftEvidence]
-    max_chars: int
+    canon_policy: CanonPolicy
+    allowed_intents: tuple[str, ...]
+    forbidden_intents: tuple[str, ...]
+    slots: tuple[StageSlot, ...]
+    confirmation_policy: str
+    max_questions: int = 1
+    max_total_chars: int | None = None
+```
+
+定义 7 个 active contracts。不要在 contract 中塞固定剧情，只定义语义槽。
+
+### 5.1 direction contract
+
+```python
+StageContract(
+    key="direction",
+    label="方向定位",
+    purpose="确定故事类型、主角姿态、读者期待、冲突方向和情绪边界。",
+    canon_policy="no_new_canon",
+    allowed_intents=(
+        "故事类型", "主角行动姿态", "核心看点", "核心冲突方向", "情绪边界", "创作禁区",
+    ),
+    forbidden_intents=(
+        "具体代价形式", "修炼体系", "门派制度", "专有名词清单", "章节桥段", "人物小传",
+    ),
+    slots=(
+        StageSlot("genre", "类型定位", "这是什么类型的故事", True, 1, 60),
+        StageSlot("protagonist_stance", "主角姿态", "主角主要如何行动", True, 1, 60),
+        StageSlot("reader_payoff", "核心看点", "读者期待的爽点或张力", True, 1, 70),
+        StageSlot("central_conflict", "核心冲突", "长期冲突方向", True, 1, 70),
+        StageSlot("emotional_boundary", "情绪边界", "作品气质与禁区", True, 1, 70),
+    ),
+    confirmation_policy="只问方向偏好；不要求确认具体世界机制。",
+    max_questions=1,
+    max_total_chars=420,
+)
+```
+
+方向定位允许写：
+
+```text
+前世记忆不是万能外挂。
+```
+
+方向定位不允许主动写：
+
+```text
+每一次动用前世记忆都需付出预支的代价。
+前世记忆消耗寿元。
+前世记忆会削弱情感纽带。
+```
+
+除非用户明确输入这些具体代价，否则方向阶段一律降级为“限制留到世界观或故事流程阶段确认”。
+
+### 5.2 worldbuilding contract
+
+世界观不是“剧情机制说明书”，而是“角色在世界里会实际遇到的规则、组织、资源、场景和压力”。
+
+```python
+StageContract(
+    key="worldbuilding",
+    label="世界观设定",
+    purpose="建立支撑故事长期写作的世界内部结构。",
+    canon_policy="draft_canon_allowed",
+    allowed_intents=(
+        "力量或修炼体系", "门派/组织生态", "势力格局与理念", "资源与场景素材", "可持续冲突来源",
+    ),
+    forbidden_intents=(
+        "抽象剧情算法", "代价红线式标题", "人物小传", "章节流程", "结局安排", "产品规则语言",
+    ),
+    slots=(
+        StageSlot("power_system", "力量体系", "修炼/技术/能力如何存在并限制角色", True, 3, 120),
+        StageSlot("home_institution", "本门或核心组织", "主角所在门派/组织/城市生态", True, 3, 120),
+        StageSlot("factions", "势力与理念", "外部势力、阵营理念或利益冲突", False, 3, 120),
+        StageSlot("daily_scenes", "日常场景与素材", "可反复进入章节的地点、任务、仪式、物件", True, 5, 80),
+        StageSlot("open_questions", "待确认", "真正影响后续写作的世界缺口", False, 3, 120),
+    ),
+    confirmation_policy="只问会影响长期写作的世界缺口；不得让用户选择模型自造机制。",
+    max_questions=3,
+    max_total_chars=1200,
+)
+```
+
+世界观阶段应尽量写成题材内部表达：
+
+- 仙侠/玄幻：修炼体系、功法、宗门、外门/内门、本门生态、坊市、秘境、执法堂、任务、药园、试炼。
+- 科幻：技术基底、城市/空间站制度、机构、资源分配、事故边界、可写场景。
+- 都市/悬疑：城市结构、职业生态、关系网络、案件场域、信息流通方式。
+- 普通题材：选择 generic profile，不硬套“修炼体系”。
+
+注意：这些是 profile 方向，不是固定模板。validator 只检查语义覆盖，不检查 exact heading。
+
+### 5.3 characters contract
+
+人物阶段不新增世界规则，只建立人物功能。
+
+必须覆盖：
+
+- 主角：目标、缺陷、秘密、资源、底线。
+- 关键关系：谁能帮助，谁会牵制，谁会误解，谁可能背叛。
+- 反派/对立面：欲望、资源、压迫方式、和主线的关系。
+- 每个角色必须有主线功能，不能只是设定装饰。
+
+禁止：
+
+- 福利机制、亲密行为规则、恋爱系统表格。
+- 新修炼体系或新门派制度。
+- 完整剧情流程。
+
+### 5.4 story_flow contract
+
+故事流程阶段只回答“故事怎样推进”，不新增世界规则。
+
+必须覆盖：
+
+- 开局压力。
+- 第一阶段目标与失败风险。
+- 中段升级与反转。
+- 后段主线冲突显形。
+- 终局方向。
+- 主要伏笔的布置与回收方向。
+
+禁止：
+
+- 新门派名、新规则名、新系统名。
+- 逐章细纲。
+- 正文片段。
+
+### 5.5 volume_outline contract
+
+分卷阶段只做卷级结构。
+
+必须覆盖：
+
+- 卷名或卷功能。
+- 卷目标。
+- 卷内主要矛盾。
+- 卷级高潮。
+- 主角能力/认知/关系变化。
+- 卷间钩子。
+
+禁止：
+
+- 逐章细纲。
+- 具体场景动作。
+- 临时新增世界规则。
+
+### 5.6 chapter_outline contract
+
+章节大纲阶段只做前若干章可写规划。
+
+必须覆盖：
+
+- 章节编号。
+- 章节目标。
+- 主要冲突。
+- 信息增量。
+- 人物状态变化。
+- 结尾钩子。
+- 连续性提醒。
+
+禁止：
+
+- 正文对白。
+- 完整场景卡。
+- 新世界规则。
+
+### 5.7 review_lock contract
+
+审稿锁定阶段只做审计。
+
+必须覆盖：
+
+- 阶段承接检查。
+- 已锁定 canon 清单。
+- 未解决风险。
+- 需要回改的阶段。
+- 是否可进入章节卡。
+
+禁止：
+
+- 新设定。
+- 新人物。
+- 新剧情重写。
+
+---
+
+## 6. `source_ledger.py`：设定来源账本
+
+新增来源账本，解决“用户没提却被模型写成 canon”的问题。
+
+### 6.1 来源等级
+
+```python
+from dataclasses import dataclass
+from enum import Enum
+
+class SourceLevel(str, Enum):
+    USER_EXPLICIT = "user_explicit"
+    LOCKED_STAGE = "locked_stage"
+    REFERENCE_BRIEF = "reference_brief"
+    CURRENT_DRAFT = "current_draft"
+    MODEL_UNSUPPORTED = "model_unsupported"
 
 @dataclass(frozen=True)
-class StageCraftBrief:
-    project_id: str
-    purpose: str
-    chapter: int | None
-    stage: str
-    content: str
-    source_profile_ids: list[str]
-    source_note_ids: list[str]
-    source_evidence: list[CraftEvidence]
-    digest: str
-    metadata: dict[str, Any] = field(default_factory=dict)
+class SourceHit:
+    level: SourceLevel
+    source: str
+    excerpt: str
 ```
 
----
-
-## 7. Phase 0：Author Craft Contract
-
-### 7.1 目标
-
-先定义系统边界，避免后续实现变成“本地小说模仿器”。
-
-### 7.2 要做的改动
-
-新增：
-
-```text
-docs/author_craft_contract.md
-src/ai_novelist/prompts/partials/author_craft_policy.md
-tests/test_author_craft_contract.py
-```
-
-`author_craft_policy.md` 内容必须包含：
-
-```text
-你可能会收到“作者构思参考”。这些内容来自本地小说库的结构化分析。
-
-你应该：
-- 学习真实作者的构思方法、结构策略、冲突组织、场景推进、信息释放、节奏控制和修订策略。
-- 将其转化为当前项目自己的原创方案。
-- 优先遵守用户要求、锁定约束、小说圣经、Pacing Target 和当前阶段产物。
-
-你不能：
-- 复刻本地小说原文。
-- 模仿某个具体作者的独特表达。
-- 搬运原作品人物、设定、情节。
-- 输出与语料高度相似的连续段落。
-- 为了贴近参考作品而覆盖本项目设定。
-```
-
-### 7.3 验收标准
-
-```text
-- docs/author_craft_contract.md 存在。
-- author_craft_policy.md 存在。
-- 测试能检查 policy 中包含“不复刻”“不模仿”“Pacing Target 优先”等关键短语。
-```
-
----
-
-## 8. Phase A：Corpus 基础设施
-
-### 8.1 目标
-
-把本地 `.txt/.md` 小说库稳定转换为 JSONL 索引。第一版不引入数据库、不引入向量库。
-
-### 8.2 编码识别
-
-新增 `encoding.py`：
-
-```text
-read_text_with_fallback(path: Path) -> tuple[str, str]
-```
-
-支持顺序：
-
-```text
-utf-8
-utf-8-sig
-gb18030
-gbk
-```
-
-失败时写入 `errors.jsonl`，不要让整个索引流程崩溃。
-
-### 8.3 文件扫描
-
-新增 `ingest.py`：
-
-```text
-scan_corpus(corpus_dir: Path) -> list[CorpusFile]
-```
-
-规则：
-
-```text
-- 递归扫描 .txt/.md。
-- 跳过隐藏目录、__MACOSX、.git、corpus_index、projects。
-- 支持同名 .meta.json。
-- 计算 sha256、size、mtime、char_count。
-- 生成稳定 work_id。
-```
-
-`.meta.json` 示例：
-
-```json
-{
-  "title": "示例小说A",
-  "author": "mock_author",
-  "genre": ["悬疑", "科幻"],
-  "permission": "user_provided"
-}
-```
-
-### 8.4 中文章节识别
-
-新增 `chunker.py`：
-
-```text
-split_chapters(text: str) -> list[ChapterSpan]
-split_scenes(chapter_text: str) -> list[SceneSpan]
-chunk_scene(scene_text: str, target_chars=2400, overlap_chars=300) -> list[ChunkSpan]
-```
-
-章节正则：
+### 6.2 要实现的函数
 
 ```python
-CHAPTER_PATTERNS = [
-    r"^\s*第[一二三四五六七八九十百千万零〇两\d]+[章节回卷部].*$",
-    r"^\s*(序章|楔子|引子|尾声|终章|番外.*).*$",
-    r"^\s*Chapter\s+\d+.*$",
-]
+def build_source_ledger(state: NovelState) -> SourceLedger:
+    """收集用户原始输入、最近用户反馈、锁定阶段产物、检索简报、小说圣经。"""
+
+class SourceLedger:
+    def has_explicit_source(self, text: str) -> bool: ...
+    def find_source(self, text: str) -> SourceHit | None: ...
+    def is_user_requested(self, text: str) -> bool: ...
 ```
 
-切块参数：
+实现可以先用保守启发式：
 
-```text
-target_chunk_chars = 2400
-min_chunk_chars = 800
-max_chunk_chars = 3600
-overlap_chars = 300
-```
+- 将 `state.idea`、`state.user_request`、`state.locked_constraints`、用户消息历史视为用户显式来源。
+- 将 `outline_stage_artifacts` 中 `status == "locked"` 的 synthesis、summary、stage_memory 视为锁定来源。
+- 将 `reference_brief`、`retrieval_context` 视为参考来源。
+- 不要把当前模型刚生成的 role reviews 直接视为已锁定来源。
 
-切分优先级：
+### 6.3 什么叫“具体 canon”
 
-```text
-章节标题
-  -> 场景分隔符（***、——、时间/地点跳转）
-  -> 空行
-  -> 段落
-  -> 固定长度硬切
-```
-
-### 8.5 双层切块
-
-必须同时生成：
-
-```text
-chapters.jsonl      章节级分析单元
-scenes.jsonl        场景级分析单元
-chunks.jsonl        检索用 chunk
-```
-
-原因：
-
-```text
-RetrievalChunk 用于检索。
-Chapter/Scene CraftUnit 用于提炼真实作者的构思方法。
-```
-
-### 8.6 Index 读写
-
-新增 `index.py`：
-
-```text
-build_corpus_index(corpus_dir, index_dir, incremental=True) -> CorpusIndexResult
-load_chunks(index_dir) -> Iterator[RetrievalChunk]
-load_profiles(index_dir) -> Iterator[CraftProfile]
-```
-
-写入：
-
-```text
-manifest.json
-works.jsonl
-chapters.jsonl
-scenes.jsonl
-chunks.jsonl
-quality_report.md
-errors.jsonl
-```
-
-### 8.7 增量索引
-
-`manifest.json` 记录：
-
-```json
-{
-  "version": 1,
-  "created_at": "...",
-  "updated_at": "...",
-  "corpus_dir": "/path/to/novels",
-  "files": {
-    "relative/path/a.txt": {
-      "work_id": "work_xxx",
-      "sha256": "...",
-      "mtime": 123456789,
-      "size": 10240000,
-      "status": "indexed"
-    }
-  }
-}
-```
-
-规则：
-
-```text
-sha256 未变：跳过。
-sha256 变化：重建该 work 的 works/chapters/scenes/chunks/profile。
-文件删除：清理对应 work 的索引记录。
-```
-
-### 8.8 验收标准
-
-```text
-.venv/bin/ai-novelist index-corpus --corpus-dir tests/fixtures/corpus --index-dir /tmp/corpus_index
-
-必须生成：
-- manifest.json
-- works.jsonl
-- chapters.jsonl
-- scenes.jsonl
-- chunks.jsonl
-- quality_report.md
-
-测试：
-.venv/bin/python -m pytest tests/test_corpus_encoding.py tests/test_corpus_ingest.py tests/test_corpus_chunker.py tests/test_corpus_index.py
-```
-
----
-
-## 9. Phase B：Craft Profile 提炼
-
-### 9.1 目标
-
-从本地小说原文中提炼“创作方法”，而不是保存原文。
-
-### 9.2 Profile 分层
-
-必须实现四层 profile：
-
-```text
-WorkCraftProfile       一本小说整体结构方法
-ChapterCraftProfile    每章开场、推进、转折、结尾方法
-SceneCraftProfile      场景目标、阻碍、转折、退出状态
-GenreCraftProfile      多作品聚合出的类型策略
-```
-
-第一版可以先实现 work/chapter/scene，genre aggregation 可在 Phase B 后半段完成。
-
-### 9.3 提炼维度
-
-Craft facet 至少包含：
-
-```text
-premise
-conflict
-character_arc
-relationship
-scene_turn
-chapter_hook
-foreshadowing
-information_release
-pacing
-restraint
-narrative_distance
-dialogue
-atmosphere
-revision_strategy
-```
-
-每个 CraftNote 必须回答：
-
-```text
-- pattern：作者用了什么方法？
-- why_it_works：为什么有效？
-- use_when：适合什么时候使用？
-- avoid_when：什么时候不能用？
-- pacing_functions：适合哪些章节功能？
-- intensity_range：适合强度范围？
-- evidence：证据摘要，不含长原文。
-```
-
-### 9.4 Mock Extractor
-
-`--mock` 下不调用真实模型，必须稳定输出。
-
-新增：
-
-```text
-src/ai_novelist/corpus/mock.py
-```
-
-Mock 规则示例：
-
-```text
-- chapter_index == 1 -> opening / premise / hook notes
-- scene_position == ending -> chapter_hook / scene_turn notes
-- 出现“但是/然而/忽然/沉默/门/信/名单”等词 -> 生成对应标签
-```
-
-Mock 输出要稳定，不依赖随机数。
-
-### 9.5 Real Extractor
-
-真实模式使用现有 `AgentAdapter` 机制调用模型。
-
-新增 prompt：
-
-```text
-src/ai_novelist/prompts/craft_profile_extractor.md
-```
-
-Prompt 要求：
-
-```text
-- 只输出 JSON。
-- 不复述原文。
-- 不模仿作者。
-- 每条 note 最多 120 中文字。
-- evidence.summary 是分析摘要，不是原文。
-- short_quote 默认空；如必须使用，不超过 30 中文字，且不进入 StageCraftBrief。
-```
-
-### 9.6 输出文件
-
-```text
-corpus_index/craft_profiles/works/<work_id>.json
-corpus_index/craft_profiles/chapters/<work_id>.jsonl
-corpus_index/craft_profiles/scenes/<work_id>.jsonl
-corpus_index/craft_profiles/genres/<genre>.json
-```
-
-### 9.7 验收标准
-
-```text
-.venv/bin/ai-novelist extract-craft --index-dir /tmp/corpus_index --mock
-
-必须生成：
-- craft_profiles/works/*.json
-- craft_profiles/chapters/*.jsonl
-- craft_profiles/scenes/*.jsonl
-
-测试：
-.venv/bin/python -m pytest tests/test_craft_schema.py tests/test_craft_extractor_mock.py
-```
-
----
-
-## 10. Phase C：阶段化检索与 Query Planner
-
-### 10.1 目标
-
-根据当前创作阶段、当前题材、Pacing Target、章节位置、当前项目状态，检索最相关的作者构思方法。
-
-### 10.2 Purpose -> Facet 映射
-
-新增 `craft_query_planner.py`。
-
-基础映射：
+需要一个启发式函数：
 
 ```python
-PURPOSE_TO_FACETS = {
-    "outline_stage": [
-        "premise",
-        "conflict",
-        "character_arc",
-        "information_release",
-        "pacing",
-    ],
-    "chapter_planning": [
-        "chapter_hook",
-        "conflict",
-        "character_arc",
-        "information_release",
-        "pacing",
-        "restraint",
-    ],
-    "scene_design": [
-        "scene_turn",
-        "conflict",
-        "relationship",
-        "information_release",
-        "atmosphere",
-    ],
-    "drafting": [
-        "narrative_distance",
-        "dialogue",
-        "atmosphere",
-        "information_release",
-        "pacing",
-    ],
-    "review": [
-        "conflict",
-        "character_arc",
-        "chapter_hook",
-        "pacing",
-        "restraint",
-    ],
-    "revision": [
-        "revision_strategy",
-        "character_arc",
-        "information_release",
-        "foreshadowing",
-        "pacing",
-    ],
-}
-```
-
-### 10.3 Pacing Target 对检索的影响
-
-新增：
-
-```text
-plan_craft_query(state, store, purpose, chapter, stage, pacing_target) -> CraftQuery
-```
-
-如果 `pacing_target` 存在：
-
-```text
-function=breather/aftermath/setup:
-  boost facets: restraint, atmosphere, relationship, emotional pacing
-  suppress facets: hard_hook, major_reveal, external_conflict
-
-function=twist/climax:
-  boost facets: chapter_hook, reveal, conflict, information_release
-  suppress facets: over-exposition
-
-intensity <= 2:
-  只允许检索 intensity_range 覆盖 1-2 的 notes
-
-intensity >= 4:
-  可以检索 high-intensity notes，但仍必须遵守 reveal_quota
-```
-
-如果 Pacing Target 尚未实现，则使用中性默认值：
-
-```json
-{
-  "function": "unknown",
-  "intensity": 3,
-  "hook_strength": "medium",
-  "conflict_mode": "mixed"
-}
-```
-
-### 10.4 Retriever
-
-新增 `craft_retriever.py`：
-
-```text
-retrieve_craft_context(index_dir, query, max_notes=8) -> CraftContext
-```
-
-第一版检索策略：
-
-```text
-score =
-  facet_match * 3
-  + genre_match * 2
-  + stage_match * 2
-  + pacing_function_match * 2
-  + intensity_match * 2
-  + keyword_match
-  + diversity_bonus
-```
-
-不要引入向量库。中文关键词可先用字符 bigram + 简单词表。
-
-### 10.5 Source Diversity
-
-同一次 StageCraftBrief 中：
-
-```text
-- 同一本作品最多 3 条 note。
-- 同一章节最多 2 条 note。
-- 至少优先混合 work/chapter/scene 三种 scope。
-- 如果 Project Craft Memory 存在，优先插入 1-3 条本项目 notes。
-```
-
-### 10.6 验收标准
-
-```text
-- chapter_planning 检索不到 drafting-only notes。
-- breather/aftermath 不检索 hard hook 作为主建议。
-- craft_mode=off 时不检索。
-- 查询结果不包含 raw text。
-```
-
-测试：
-
-```text
-.venv/bin/python -m pytest tests/test_craft_query_planner.py tests/test_craft_retriever.py
-```
-
----
-
-## 11. Phase D：Stage Craft Brief 合成
-
-### 11.1 目标
-
-把检索到的 CraftNotes 合成为当前阶段能直接注入 prompt 的 Markdown 简报。
-
-### 11.2 新增 `craft_brief.py`
-
-```text
-build_stage_craft_brief(context: CraftContext, pacing_target: dict | None, max_chars: int) -> StageCraftBrief
-```
-
-### 11.3 StageCraftBrief 模板
-
-```markdown
-# 作者构思参考
-
-## 使用规则
-- 只学习构思方法，不复刻原文。
-- 只学习结构策略，不模仿具体作者表达。
-- 当前项目的锁定约束、小说圣经、Pacing Target 优先级更高。
-- 如果参考方法与本章节奏目标冲突，必须放弃该参考方法。
-
-## 当前阶段
-- purpose:
-- chapter:
-- stage:
-- craft_mode:
-
-## 与 Pacing Target 的对齐
-- 本章功能：
-- 目标强度：
-- 钩子强度：
-- 冲突模式：
-- 本次可用方法：
-- 本次禁止方法：
-
-## 可采用的真实作者构思方法
-1. 方法名：
-   - 方法：
-   - 为什么有效：
-   - 适用条件：
-   - 当前项目可如何转化：
-   - 避免事项：
-
-## 本阶段应用建议
-- 对当前任务的 3-6 条具体建议。
-
-## 不应采纳的方向
-- 与 Pacing Target 或当前项目设定冲突的方向。
-
-## 来源摘要
-- work_id / profile_id / note_id / location_label / summary
-```
-
-### 11.4 字符限制
-
-配置：
-
-```text
-AI_NOVELIST_CRAFT_MAX_CHARS=3000
-```
-
-规则：
-
-```text
-- 默认最多 3000 字符。
-- strict 模式最多 4500。
-- assist 模式最多 3000。
-- review/revision 可到 4000。
-- 超限时优先保留 Pacing 对齐、应用建议、禁止方向。
-```
-
-### 11.5 验收标准
-
-```text
-- StageCraftBrief 不含长原文。
-- 生成内容包含“使用规则”“与 Pacing Target 的对齐”“可采用方法”“不应采纳方向”。
-- max_chars 生效。
-- source ids 写入 sources.json。
-```
-
-测试：
-
-```text
-.venv/bin/python -m pytest tests/test_craft_resolver.py
-```
-
----
-
-## 12. Phase E：AuthorCraftResolver 接入
-
-### 12.1 目标
-
-不要让 `ContextBuilder` 负责检索和生成，只让它注入。新增 Resolver 在各 graph 的 load_context 节点中执行。
-
-### 12.2 新增 `craft_resolver.py`
-
-```python
-def resolve_author_craft(
-    state: NovelState,
-    store: LocalStore,
-    purpose: str,
-    chapter: int | None = None,
-    stage: str | None = None,
-    adapter: AgentAdapter | None = None,
-    max_chars: int | None = None,
-) -> NovelState:
+def looks_like_concrete_canon(text: str) -> bool:
     ...
 ```
 
-职责：
+它不需要完美，但要能捕捉以下类别：
 
-```text
-1. 检查 craft_mode。
-2. 读取 corpus_index。
-3. 读取 Pacing Target。
-4. 生成 CraftQuery。
-5. 检索 CraftContext。
-6. 合成 StageCraftBrief。
-7. 保存 projects/<project>/craft/stage_briefs/*.md。
-8. 保存 projects/<project>/craft/stage_sources/*.json。
-9. 注册 artifact。
-10. 更新 state 中的轻量字段。
+- 具体代价：寿元、生命力、情感纽带、羁绊、债、魔痕、灵魂、记忆损耗、反噬等。
+- 具体组织/地名/体系名：宗、门、堂、阁、司、会、城、院、榜、令、契、册等构成的专名。
+- 具体数值规则：次数、阈值、等级、积分、倒计时、不可逆等。
+- 具体机制名：以“机制、系统、规则、模型、结构、变量、红线、阈值、抵押”等抽象后缀命名的设定。
+
+注意：这些是类别启发，不是禁止词列表。用户明确要求时允许保留，但要标注来源并放到合适阶段。
+
+---
+
+## 7. `stage_guard.py`：质量门与阶段越权检测
+
+新增统一质量门。方向阶段现有 `sanitize_direction_stage_output` 可以被迁移或委托给它。
+
+### 7.1 数据结构
+
+```python
+from dataclasses import dataclass, field
+
+@dataclass
+class GuardIssue:
+    code: str
+    severity: str  # "error" | "warning" | "rewrite"
+    message: str
+    excerpt: str = ""
+
+@dataclass
+class GuardResult:
+    text: str
+    issues: list[GuardIssue] = field(default_factory=list)
 ```
 
-### 12.3 Graph 接入点
+### 7.2 入口函数
 
-#### 12.3.1 Chapter Planning
-
-在 `graph_chapter_plan.py` 的 `load_chapter_context_node` 中：
-
-```text
-当前：
-context = build_context(state, store, "chapter_planning", chapter=state.active_chapter, max_chars=14000)
-
-改为：
-state = resolve_author_craft(state, store, "chapter_planning", chapter=state.active_chapter)
-context = build_context(state, store, "chapter_planning", chapter=state.active_chapter, max_chars=14000)
+```python
+def guard_stage_output(text: str, stage: str, state: NovelState) -> GuardResult:
+    """对阶段产物做非硬编码质量控制。"""
 ```
 
-#### 12.3.2 Scene Design
+内部至少调用：
 
-在 `graph_scene.py` 构建 `scene_design_context` 前：
-
-```text
-state = resolve_author_craft(state, store, "scene_design", chapter=state.active_chapter)
-context = build_context(state, store, "scene_design", chapter=state.active_chapter, max_chars=14000)
+```python
+def detect_stage_overreach(text: str, contract: StageContract) -> list[GuardIssue]: ...
+def detect_unsupported_canon(text: str, stage: str, ledger: SourceLedger) -> list[GuardIssue]: ...
+def detect_formulaic_causality(text: str) -> list[GuardIssue]: ...
+def detect_non_worldbuilding_language(text: str, stage: str) -> list[GuardIssue]: ...
+def rewrite_or_demote_issues(text: str, issues: list[GuardIssue], stage: str, ledger: SourceLedger) -> str: ...
 ```
 
-#### 12.3.3 Drafting
+### 7.3 公式化绝对因果检测
 
-在 `graph_drafting.py` 构建 `drafting_context` 前：
+不要只检测“每一次示弱都是邀请他人掠夺”这一句。检测结构：
 
-```text
-state = resolve_author_craft(state, store, "drafting", chapter=state.active_chapter)
-context = build_context(state, store, "drafting", chapter=state.active_chapter, max_chars=18000)
+```python
+UNIVERSAL_MARKERS = (
+    "每一次", "每次", "任何", "所有", "一旦", "只要", "凡是", "无论",
+)
+INEVITABILITY_MARKERS = (
+    "必然", "必定", "都会", "就会", "从来", "永远", "注定", "有债必偿",
+)
 ```
 
-#### 12.3.4 Review
+如果同一句里同时出现 universal marker 和 inevitability marker，视为 `formulaic_absolute_causality`。
 
-在 `graph_review.py` 构建 `review_context` 前：
+这不是硬性删掉所有“每次”。如果用户明确要求这种誓言式或讽刺式表达，可以保留在正文风格中；但大纲阶段产物里默认应改写为更具体、可写的表述。
+
+示例改写策略：
+
+- 原：`每一次示弱都是邀请他人掠夺。`
+- 改：`外门弟子一旦暴露软弱，容易被同门盯上资源和任务名额。`
+
+- 原：`庇护从来不是免费的。`
+- 改：`强者给出的庇护通常会附带差事、人情或把柄。`
+
+- 原：`前世记忆有债必偿。`
+- 改：`前世记忆可能不完整，且会因今生行动改变而失准；是否存在明确代价留待确认。`
+
+重点：改写为“世界内可观察后果”，而不是玄学绝对句。
+
+### 7.4 抽象机制语言检测
+
+不要维护一个无限扩张的词表，而是检测语言形态。
+
+高风险语言形态：
+
+- 以“机制、系统、模型、结构、变量、阈值、红线、优先级、抵押、债务、闭环、反馈”构造设定名。
+- “X 即 Y”“X 从来不是 Y”“X 有债必偿”“X 不是免费的”这类口号化标题句。
+- “每条边界如何制造冲突 / 代价”如果被模型复述为抽象说明，而非世界内物件、组织、事件、日常压力。
+
+在 `worldbuilding` 阶段，抽象机制语言要改成：
+
+- 组织行为。
+- 修炼限制。
+- 场景素材。
+- 资源分配。
+- 人情、任务、把柄、名声、生死风险。
+
+### 7.5 方向阶段具体代价降级
+
+方向阶段 `canon_policy="no_new_canon"`，因此：
+
+- 用户未明确要求的具体代价形式，全部降级为“限制留待世界观或故事流程阶段确认”。
+- 如果模型写了寿元、生命力、情感纽带、羁绊债、魔痕、不可逆阈值等，但 ledger 找不到用户来源，必须删除或替换。
+
+替换句建议：
 
 ```text
-state = resolve_author_craft(state, store, "review", chapter=state.active_chapter)
-context = build_context(state, store, "review", chapter=state.active_chapter, max_chars=18000)
+前世记忆不是万能外挂，具体限制留到世界观或故事流程阶段确认。
 ```
 
-#### 12.3.5 Revision
+### 7.6 世界观阶段具体设定处理
 
-在 `graph_revision.py` 构建 `revision_context` 前：
+世界观阶段允许 draft canon，但必须满足其一：
+
+1. 来自用户显式输入。
+2. 来自已锁定方向或参考简报。
+3. 是为支撑主线必要的草案，并且表述为“可调整草案”或“待确认”。
+
+用户没提“前世记忆代价”时，世界观可以写：
 
 ```text
-state = resolve_author_craft(state, store, "revision", chapter=state.active_chapter)
-context = build_context(state, store, "revision", chapter=state.active_chapter, max_chars=18000)
+待确认：是否需要为前世记忆设置明确限制；若暂不确认，只按“记忆不完整且会因今生行动改变而失准”处理。
 ```
 
-#### 12.3.6 Outline Stage
-
-如果 outline graph 当前使用 `build_context(..., "outline_stage")`，在各 stage agent 前调用：
+不可以直接写：
 
 ```text
-state = resolve_author_craft(state, store, "outline_stage", stage=state.outline_stage)
-```
-
-第一版可以先覆盖：
-
-```text
-chapter_planning
-scene_design
-drafting
-review
-revision
-```
-
-outline_stage 可作为 Phase E 后半段。
-
-### 12.4 验收标准
-
-```text
-- 执行 plan_chapter 时生成 chapter_001_chapter_planning.md。
-- 执行 plan_scenes 时生成 chapter_001_scene_design.md。
-- 执行 write_chapter 时生成 chapter_001_drafting.md。
-- craft_mode=off 不生成 brief。
-- Resolver 失败不应中断主写作流程，应降级为“不注入作者构思参考”，并在 state.error 或 debug report 记录轻量警告。
+前世记忆消耗寿元。
+前世记忆削弱情感纽带。
+前世记忆有债必偿。
 ```
 
 ---
 
-## 13. Phase F：ContextBuilder 注入
-
-### 13.1 目标
-
-`ContextBuilder` 在上下文中加入“作者构思参考”小节。
-
-### 13.2 修改 `context_builder.py`
-
-新增 profile section key：
-
-```text
-author_craft
-```
+## 8. `question_filter.py`：确认问题过滤
 
 新增函数：
 
 ```python
-def build_author_craft_section(state: NovelState, store: LocalStore, mode: str = "brief") -> str:
+def filter_stage_confirmation_questions(
+    stage: str,
+    questions: list[str],
+    state: NovelState,
+    synthesis: str = "",
+) -> list[str]:
     ...
 ```
 
-读取优先级：
+### 8.1 过滤规则
+
+1. 超出阶段职责的问题删除。
+2. 要求用户选择模型自造具体选项的问题删除或改写。
+3. 不允许把模型刚生成的机制当成用户需要确认的前提。
+4. 每阶段问题数不超过 contract.max_questions。
+5. 如果没有真正影响后续写作的缺口，返回空列表。
+
+### 8.2 假确认问题示例
+
+错误：
 
 ```text
-1. state.active_craft_brief_path 指向的 artifact 文件
-2. get_latest_artifact(project_dir, "stage_craft_brief", chapter=chapter, stage=purpose/stage)
-3. state.craft_context_digest
-4. 暂无
+前世记忆的代价形式更倾向“消耗生命力”还是“削弱情感纽带”？
 ```
 
-### 13.3 注入位置
-
-在所有创作类 profile 中，放在：
+如果用户没有提过这两个选项，改成：
 
 ```text
-锁定约束之后
-小说圣经 / chapter artifacts 之前
+是否需要为前世记忆设置明确限制？如果暂不确认，将按“记忆不完整且会因行动改变而失准”保守处理。
 ```
 
-例如：
+或者在方向阶段直接删除，因为方向阶段不应确认世界机制。
 
-```python
-"chapter_planning": ContextProfile(
-    sections=(
-        "user_request",
-        "task",
-        "locked_constraints",
-        "author_craft",
-        "chapter_outline_slice",
-        "previous_chapter_summaries",
-        "bible_digest",
-    ),
-)
-```
-
-需要修改的 profiles：
+错误：
 
 ```text
-director：可选，第一版不强制
-outline_role
-outline_synthesizer
-chapter_planning
-review_context
-review_editor
-review_synthesizer
-revision
-fallback build_context
+本门更像血煞宗、炼魂宗还是魅影宗？
 ```
 
-如果当前没有 `scene_design` / `drafting` / `review` 明确 profile，要添加 profile，避免 fallback 上下文过大和不可控。
-
-### 13.4 验收标准
+如果这些宗门名是模型自造，改成：
 
 ```text
-- build_context(..., "chapter_planning") 中出现“作者构思参考”。
-- “作者构思参考”位于“锁定约束”之后。
-- craft_mode=off 时不出现该小节或显示“暂无”。
-- 不影响原有 section。
+本门气质更偏残酷武力、诡秘术法，还是权谋秩序？
 ```
 
-测试：
-
-```text
-.venv/bin/python -m pytest tests/test_craft_context_builder.py
-```
+这类问题问的是风格方向，不把自造专名变 canon。
 
 ---
 
-## 14. Phase G：State、Artifact、Storage
+## 9. `renderers.py`：阶段渲染，不把模板写死
 
-### 14.1 修改 `state.py`
+新增渲染层，负责生成 prompt 的输出规则。validator 不应该依赖 exact heading。
 
-新增轻量字段：
-
-```python
-craft_mode: str = "off"  # off / assist / strict
-active_craft_brief_path: str = ""
-craft_profile_ids: list[str] = field(default_factory=list)
-craft_sources: list[dict[str, Any]] = field(default_factory=list)
-craft_context_digest: str = ""
-craft_updated_at: str = ""
-project_craft_memory_path: str = ""
-craft_options: dict[str, Any] = field(default_factory=dict)
-```
-
-`from_dict()` 必须兼容旧 state。
-
-### 14.2 State 禁止保存
-
-不要在 state 中保存：
-
-```text
-- raw text
-- RetrievalChunk.text
-- 完整 StageCraftBrief
-- 大量 evidence
-- 大量 profiles
-```
-
-### 14.3 Artifact Registry
-
-`artifacts.py` 不需要强制改数据结构，但要在调用处注册新类型：
-
-```text
-stage_craft_brief
-stage_craft_sources
-project_craft_memory
-craft_similarity_report
-```
-
-如果需要，可以新增 helper：
-
-```python
-def save_craft_markdown_artifact(...)
-def save_craft_json_artifact(...)
-```
-
-但不要破坏现有 `save_markdown_artifact` / `save_json_artifact`。
-
-### 14.4 LocalStore
-
-如果 `LocalStore` 已有 path helper，可新增：
-
-```python
-def craft_dir(project_id: str) -> Path
-def stage_craft_brief_path(project_id: str, purpose: str, chapter: int | None, stage: str | None) -> Path
-def stage_craft_sources_path(...)
-def project_craft_memory_path(project_id: str) -> Path
-```
-
-如果不想改 `LocalStore`，resolver 也可以用 `store.project_dir(project_id) / "craft"`。
-
-### 14.5 验收标准
-
-```text
-- 旧 state.json 能正常加载。
-- 新 state 保存后包含 craft 轻量字段。
-- artifacts.json 中能看到 stage_craft_brief 记录。
-```
-
----
-
-## 15. Phase H：CLI 与配置
-
-### 15.1 修改 `config.py`
-
-新增 Settings 字段：
-
-```python
-author_corpus_dir: str = ""
-corpus_index_dir: str = "corpus_index"
-craft_mode: str = "off"
-craft_max_chars: int = 3000
-craft_similarity_guard: bool = True
-craft_extract_mock: bool = False
-```
-
-新增环境变量：
-
-```text
-AI_NOVELIST_AUTHOR_CORPUS_DIR
-AI_NOVELIST_CORPUS_INDEX_DIR
-AI_NOVELIST_CRAFT_MODE
-AI_NOVELIST_CRAFT_MAX_CHARS
-AI_NOVELIST_CRAFT_SIMILARITY_GUARD
-AI_NOVELIST_CRAFT_EXTRACT_MOCK
-```
-
-注意：保留现有 `AI_NOVELIST_LOCAL_CORPUS_DIR` 和 `--local-corpus-dir`，不破坏 research 流程。
-
-### 15.2 新增 CLI 命令
-
-```bash
-ai-novelist index-corpus \
-  --corpus-dir /path/to/novels \
-  --index-dir corpus_index
-
-ai-novelist extract-craft \
-  --index-dir corpus_index \
-  --mock
-
-ai-novelist craft-status \
-  --project demo \
-  --index-dir corpus_index
-
-ai-novelist craft-profiles \
-  --index-dir corpus_index \
-  --limit 20
-
-ai-novelist craft-brief \
-  --project demo \
-  --purpose chapter_planning \
-  --chapter 1 \
-  --index-dir corpus_index \
-  --craft-mode assist
-
-ai-novelist craft-similarity-check \
-  --project demo \
-  --chapter 1 \
-  --draft projects/demo/chapters/chapter_001/draft_v1.md \
-  --index-dir corpus_index
-```
-
-### 15.3 扩展现有命令参数
-
-给这些命令添加：
-
-```text
-chat
-feishu
-compose
-write-chapter
-review
-finalize-chapter 可选
-```
-
-参数：
-
-```text
---author-corpus-dir
---corpus-index-dir
---craft-mode off|assist|strict
---craft-max-chars
---craft-profile
---craft-genre
---craft-exclude-work
-```
-
-第一版至少给 `chat` 和 `feishu` 增加：
-
-```text
---author-corpus-dir
---corpus-index-dir
---craft-mode
-```
-
-### 15.4 craft_mode 语义
-
-```text
-off：
-  完全不使用 Author Craft Layer。
-
-assist：
-  注入简短 StageCraftBrief，作为参考，不强制。
-
-strict：
-  注入更完整 brief，并要求 synthesizer 解释采用/拒绝哪些方法。
-  仍然不得覆盖锁定约束、Novel Bible、Pacing Target。
-```
-
-### 15.5 验收标准
-
-```text
-.venv/bin/ai-novelist --help 能看到新命令。
-.venv/bin/ai-novelist chat --help 能看到 --author-corpus-dir / --craft-mode。
---local-corpus-dir 仍然存在且语义不变。
-```
-
-测试：
-
-```text
-.venv/bin/python -m pytest tests/test_cli_craft.py
-```
-
----
-
-## 16. Phase I：Prompt Policy 统一接入
-
-### 16.1 目标
-
-所有创作类 prompt 明确如何使用作者构思参考。
-
-### 16.2 核心规则
-
-在以下 prompt 中加入或自动注入 `author_craft_policy.md`：
-
-```text
-director.md
-direction_proposer.md
-outline_planner.md
-world_builder.md
-chapter_goal_agent.md
-chapter_conflict_agent.md
-chapter_hook_agent.md
-chapter_card_synthesizer.md
-scene_breakdown_agent.md
-scene_conflict_check_agent.md
-scene_synthesizer.md
-chapter_writer.md
-dialogue_enhancer.md
-atmosphere_enhancer.md
-hook_enhancer.md
-style_normalizer.md
-continuity_editor.md
-structure_editor.md
-character_arc_editor.md
-style_editor.md
-simulated_reader.md
-review_synthesizer.md
-revision_planner.md
-targeted_reviser.md
-revision_self_check.md
-```
-
-如果 prompt 文件名和当前仓库不完全一致，Codex 应以实际 `src/ai_novelist/prompts/` 目录为准。
-
-### 16.3 Synthesizer 特别规则
-
-对 synthesizer 类 prompt 增加：
-
-```text
-你不是会议纪要员，而是主编。
-不要机械合并所有 Author Craft 建议。
-只采纳符合当前项目、锁定约束、Novel Bible、Pacing Target 的方法。
-必须区分：
-- adopted_craft_methods
-- rejected_craft_methods
-- deferred_craft_methods
-```
-
-### 16.4 Review / Revision 特别规则
-
-Review：
-
-```text
-审稿时判断当前输出是否正确使用了作者构思参考。
-如果输出为了追求真实作者感而破坏 Pacing Target，应指出。
-如果输出与本地语料过度相似，应标记 originality_risk。
-```
-
-Revision：
-
-```text
-修订只能执行不破坏 Pacing Target、不复刻本地语料的方法。
-对 originality_risk 必须做原创化重写。
-```
-
-### 16.5 验收标准
-
-```text
-- 核心 prompt 中包含“不复刻原文、不模仿具体作者表达、Pacing Target 优先”。
-- Synthesizer 能输出采纳/拒绝/延后。
-```
-
----
-
-## 17. Phase J：Similarity Guard 防复刻
-
-### 17.1 目标
-
-不能只靠 prompt 防复刻。必须做后置检查。
-
-### 17.2 新增 `similarity_guard.py`
-
-第一版实现：
-
-```text
-1. normalize_text(text)
-2. char_ngrams(text, n=8)
-3. longest_common_substring(a, b, max_scan_chars)
-4. overlap_score(generated, source_chunk)
-5. check_similarity(generated, candidate_chunks) -> SimilarityReport
-```
-
-不要对全库所有 chunks 暴力比对。候选来源：
-
-```text
-- 本次 StageCraftBrief 使用过的 source chunks。
-- 检索得分最高的前 N 个 chunks。
-- 同一 work/chapter 的相邻 chunks。
-```
-
-### 17.3 阈值建议
-
-```text
-longest_common_substring > 120 中文字符：高风险
-8-gram overlap > 0.22：中高风险
-连续相似句式多处出现：中风险
-```
-
-第一版阈值可配置：
-
-```text
-AI_NOVELIST_CRAFT_MAX_COMMON_SUBSTRING=120
-AI_NOVELIST_CRAFT_NGRAM_OVERLAP_THRESHOLD=0.22
-```
-
-### 17.4 接入点
-
-第一版只在保存正文后运行：
-
-```text
-drafting save_draft 后
-revision save_revised_draft 后
-finalize save_final_chapter 前或后
-```
-
-如果高风险：
-
-```text
-assist 模式：记录报告 + review 中提示 originality_risk。
-strict 模式：设置 review_status=revision_requested 或追加修订任务。
-```
-
-### 17.5 输出
-
-```text
-projects/<project>/craft/similarity_reports/chapter_001_draft_v1.json
-```
-
-报告结构：
-
-```json
-{
-  "project_id": "demo",
-  "chapter": 1,
-  "artifact": "draft_v1",
-  "risk": "low|medium|high",
-  "max_common_substring": 0,
-  "max_ngram_overlap": 0.0,
-  "matched_sources": [
-    {
-      "chunk_id": "...",
-      "work_id": "...",
-      "score": 0.0,
-      "reason": "..."
-    }
-  ],
-  "recommendations": []
-}
-```
-
-### 17.6 验收标准
-
-```text
-- 明显复制 fixture 原文时能判 high risk。
-- 原创文本时 low risk。
-- 报告注册为 craft_similarity_report artifact。
-```
-
-测试：
-
-```text
-.venv/bin/python -m pytest tests/test_similarity_guard.py
-```
-
----
-
-## 18. Phase K：Project Craft Memory
-
-### 18.1 目标
-
-系统不应永远只学外部小说库，也要学习当前项目已经定稿的章节，从而保持长篇写作的一致性。
-
-### 18.2 新增 `project_memory.py`
-
-```text
-extract_project_craft_memory(state, store, chapter, adapter=None) -> ProjectCraftMemory
-load_project_craft_memory(project_id) -> CraftProfile
-```
-
-定稿后，从以下材料提炼：
-
-```text
-final.md
-summary.md
-review_v*.json
-revision_plan_v*.md
-Novel Bible
-Pacing Target 实际达成情况
-```
-
-提炼内容：
-
-```text
-- 本项目已确立的章节开法
-- 本项目已确立的场景节奏
-- 主角内心推进方式
-- 对白边界
-- 信息释放边界
-- 本项目禁用套路
-- 容易偏离的风险
-```
-
-### 18.3 接入点
-
-在 `finalize_chapter` 流程中：
-
-```text
-save_final_chapter
-summarize_chapter
-extract_bible_updates_from_final
-update_bible
-extract_project_craft_memory
-```
-
-如果不想改 finalize graph 的顺序，第一版可在 finalize 结束后调用。
-
-### 18.4 Project Memory 优先级
-
-在 `craft_retriever` 中：
-
-```text
-Project Craft Memory notes 优先级高于外部 Author Craft notes。
-每次 StageCraftBrief 至少尝试注入 1 条 project note。
-```
-
-### 18.5 验收标准
-
-```text
-- 定稿第 1 章后生成 projects/<project>/craft/project_craft_memory.json。
-- 写第 2 章时 StageCraftBrief 中出现“本项目已确立方法”。
-```
-
-测试：
-
-```text
-.venv/bin/python -m pytest tests/test_project_craft_memory.py
-```
-
----
-
-## 19. Phase L：效果评测与回归
-
-### 19.1 目标
-
-证明 Author Craft Layer 真的有用，而不是只是多塞了一段上下文。
-
-### 19.2 新增 eval cases
-
-```text
-tests/evals/author_craft_cases.jsonl
-```
-
-每行：
-
-```json
-{
-  "case_id": "chapter_opening_identity_crisis",
-  "purpose": "chapter_planning",
-  "genre": ["悬疑", "科幻"],
-  "chapter": 1,
-  "pacing_target": {
-    "function": "setup",
-    "intensity": 2,
-    "hook_strength": "soft"
-  },
-  "user_request": "月球城市失忆工程师醒来后发现自己可能参与事故",
-  "expected_facets": ["premise", "information_release", "pacing", "chapter_hook"],
-  "forbidden_facets": ["hard_cliffhanger", "major_reveal"],
-  "forbidden_phrases": ["模仿", "照着", "复刻"]
-}
-```
-
-### 19.3 自动检查
-
-```text
-- StageCraftBrief 是否包含 expected_facets。
-- 是否没有 forbidden_facets。
-- 是否没有长原文。
-- 是否没有“模仿某作者”的措辞。
-- 是否遵守 max_chars。
-- craft_mode=off 时是否不注入。
-- Pacing Target 低强度时是否不建议强钩子。
-```
-
-### 19.4 人工评分维度
-
-为真实模型输出留人工评估表：
-
-```text
-1. 真实作者构思感：1-5
-2. 原创性：1-5
-3. 阶段相关性：1-5
-4. Pacing Target 对齐：1-5
-5. 冲突质量：1-5
-6. 人物动机质量：1-5
-7. 信息释放质量：1-5
-8. 是否有复刻风险：low/medium/high
-```
-
-### 19.5 验收标准
-
-```text
-.venv/bin/python tests/smoke_author_craft_mock.py
-
-必须完成：
-- index-corpus
-- extract-craft --mock
-- craft-brief
-- chat --mock --craft-mode assist
-- pytest 全通过
-```
-
----
-
-## 20. Phase M：文档与用户体验
-
-### 20.1 README 更新
-
-新增章节：
-
-```text
-## 真实作者构思方法库 Author Craft Layer
-```
-
-包含：
-
-```bash
-export AI_NOVELIST_AUTHOR_CORPUS_DIR=/path/to/novels
-export AI_NOVELIST_CORPUS_INDEX_DIR=corpus_index
-export AI_NOVELIST_CRAFT_MODE=assist
-
-.venv/bin/ai-novelist index-corpus --corpus-dir "$AI_NOVELIST_AUTHOR_CORPUS_DIR"
-.venv/bin/ai-novelist extract-craft --index-dir "$AI_NOVELIST_CORPUS_INDEX_DIR" --mock
-.venv/bin/ai-novelist chat --project demo --mock --craft-mode assist
-```
-
-### 20.2 docs 新增
-
-```text
-docs/author_craft_layer.md
-docs/author_craft_contract.md
-docs/corpus_format.md
-docs/craft_eval.md
-```
-
-### 20.3 用户命令说明
-
-在 chat 中逐步支持自然语言：
-
-```text
-开启作者构思参考
-关闭作者构思参考
-查看本章作者构思参考
-本章不要使用本地小说库
-只参考悬疑类作品
-不要参考某本作品
-```
-
-第一版可以只支持 CLI，不必马上支持自然语言 Director intent。
-
----
-
-## 21. Phase N：性能与成本控制
-
-### 21.1 成本原则
-
-```text
-- Runtime 阶段只读 profiles，不临时分析原文。
-- 原文分析只在 index/extract 阶段做。
-- 文件未变化不重建。
-- profiles 已存在且 hash 未变不重提炼。
-```
-
-### 21.2 批处理
-
-`extract-craft` 支持：
-
-```text
---limit-files
---limit-chunks
---work-id
---resume
---dry-run
---mock
-```
-
-`--dry-run` 输出：
-
-```text
-- 将处理多少 work
-- 将处理多少 chapter
-- 将处理多少 scene
-- 预计 profile 数
-- 预计调用模型次数
-```
-
-### 21.3 失败恢复
-
-写入：
-
-```text
-pending_jobs.jsonl
-errors.jsonl
-```
-
-失败不影响已完成 profile。
-
-### 21.4 验收标准
-
-```text
-- 重复运行 index-corpus 时未变化文件被跳过。
-- extract-craft 中断后可以 resume。
-- --dry-run 不写 profile。
-```
-
----
-
-## 22. 端到端执行脚本
+### 9.1 题材 profile
 
 新增：
 
-```text
-tests/smoke_author_craft_mock.py
+```python
+@dataclass(frozen=True)
+class GenreProfile:
+    key: str
+    signals: tuple[str, ...]
+    worldbuilding_slots: tuple[StageSlot, ...]
+    style_hint: str
 ```
 
-内容应覆盖：
+至少支持：
+
+- `xianxia`：修仙、仙侠、玄幻、魔门、宗门、灵根、筑基、功法、飞升。
+- `scifi`：科幻、星舰、月球、火星、AI、工程师、空间站、殖民地。
+- `urban_suspense`：都市、刑侦、悬疑、记者、警察、公司、医院、学校。
+- `fantasy`：奇幻、骑士、王国、魔法、公会、神明。
+- `historical`：古代、朝堂、江湖、王府、县衙、书院。
+- `generic`：无法判断时使用通用世界观槽位。
+
+### 9.2 仙侠世界观默认槽位
+
+当 idea 或方向中包含魔门、修炼、宗门等信号时，世界观默认建议槽位为：
+
+```md
+## 世界观设定稿
+
+### 修炼与力量体系
+### 门派与本门生态
+### 势力格局与理念冲突
+### 日常场景与可写素材
+### 待确认
+```
+
+这不是硬模板。Codex 实现时应让 prompt 表达为“默认建议结构，可按题材改名”，测试也不要断言必须完全相同标题，只检查不再出现旧标题，并覆盖语义。
+
+### 9.3 非仙侠世界观槽位示例
+
+科幻默认：
+
+```md
+### 技术与生存条件
+### 城市/机构生态
+### 资源与权限分配
+### 日常场景与事故素材
+### 待确认
+```
+
+都市悬疑默认：
+
+```md
+### 城市与职业生态
+### 信息流通方式
+### 机构与灰色地带
+### 案件场景与可写素材
+### 待确认
+```
+
+通用默认：
+
+```md
+### 世界基本样貌
+### 角色所在组织或生活圈
+### 资源、压力与行动限制
+### 可反复使用的场景素材
+### 待确认
+```
+
+---
+
+## 10. 修改 `graph_outline.py`
+
+### 10.1 阶段列表
+
+把当前：
 
 ```python
-def test_author_craft_mock_flow(tmp_path):
-    # 1. 创建 mock corpus
-    # 2. index-corpus
-    # 3. extract-craft --mock
-    # 4. 创建项目
-    # 5. craft-brief chapter_planning
-    # 6. chat/write-chapter --mock --craft-mode assist
-    # 7. 断言 stage_craft_brief artifact 存在
-    # 8. 断言 ContextBuilder 中有“作者构思参考”
-    # 9. 断言 brief 不含长原文
+OUTLINE_STAGES = [
+    "direction",
+    "concept",
+    "worldbuilding",
+    "characters",
+    "story_flow",
+    "volume_outline",
+    "chapter_outline",
+    "review_lock",
+]
 ```
 
-CLI 手工验收命令：
+改为：
+
+```python
+ACTIVE_OUTLINE_STAGES = [
+    "direction",
+    "worldbuilding",
+    "characters",
+    "story_flow",
+    "volume_outline",
+    "chapter_outline",
+    "review_lock",
+]
+
+OUTLINE_STAGES = ACTIVE_OUTLINE_STAGES
+LEGACY_OUTLINE_STAGES = {"concept", "outline_draft"}
+```
+
+### 10.2 labels
+
+保留 legacy label：
+
+```python
+STAGE_LABELS = {
+    "direction": "方向定位",
+    "concept": "故事概念（旧版）",
+    "worldbuilding": "世界观设定",
+    ...
+}
+```
+
+但 `concept` 不得出现在 `OUTLINE_STAGES` 或 `STAGE_ROLES`。
+
+### 10.3 roles
+
+修改：
+
+```python
+STAGE_ROLES = {
+    "direction": ["类型定位 Agent", "卖点边界 Agent"],
+    "worldbuilding": ["题材世界观 Agent", "组织生态 Agent", "可写素材 Agent"],
+    "characters": ["主角弧光 Agent", "关系冲突 Agent", "反派/势力 Agent"],
+    "story_flow": ["主线结构 Agent", "节奏悬念 Agent", "伏笔 Agent"],
+    "volume_outline": ["分卷策划 Agent", "卷内高潮 Agent", "卷间钩子 Agent"],
+    "chapter_outline": ["章节拆分 Agent", "章节钩子 Agent", "连续性编辑 Agent"],
+    "review_lock": ["总编辑 Agent", "约束审计 Agent", "章节准备 Agent"],
+}
+```
+
+### 10.4 `ensure_outline_stage`
+
+确保：
+
+- 如果 `state.outline_stage` 不在 active stages：
+  - `concept` 按旧阶段策略迁移。
+  - `outline_draft` 映射到 `volume_outline`。
+  - 其他非法值回到 `direction`。
+- 不要让新项目进入 `concept`。
+
+伪代码：
+
+```python
+def ensure_outline_stage(state: NovelState) -> None:
+    normalize_legacy_outline_artifacts(state)
+    if state.outline_stage == "concept":
+        direction = state.outline_stage_artifacts.get("direction")
+        if isinstance(direction, dict) and direction.get("synthesis"):
+            state.outline_stage = "worldbuilding"
+        else:
+            state.outline_stage = "direction"
+    elif state.outline_stage == "outline_draft":
+        state.outline_stage = "volume_outline"
+    elif state.outline_stage not in OUTLINE_STAGES and state.outline_stage != "done":
+        state.outline_stage = "direction"
+    if not state.outline_stage_status:
+        state.outline_stage_status = "collecting"
+```
+
+### 10.5 `run_outline_stage_node`
+
+当前流程中，synthesizer 输出后只对 `direction` 做了特殊 sanitize。改为统一：
+
+```python
+result = guard_stage_output(synthesis, stage, state)
+synthesis = result.text
+questions = extract_stage_confirmation_questions(synthesis)
+questions = filter_stage_confirmation_questions(stage, questions, state, synthesis)
+```
+
+不要只对 `direction` 清洗。世界观、人物、流程也需要质量门。
+
+### 10.6 `build_outline_stage_role_prompt`
+
+把 `role_focus_instruction`、`outline_stage_boundary_prompt`、`worldbuilding_overfine_terms_guard` 逐步改为读取 `StageContract`。
+
+角色短评 prompt 必须包含：
+
+```text
+STAGE_CONTRACT:
+- 本阶段目的：...
+- 允许新增：...
+- 禁止越权：...
+- Canon policy：...
+- 所有具体设定必须说明来源，不能把自造机制写成已锁定事实。
+
+LANGUAGE_QUALITY:
+- 不写公式化绝对因果句。
+- 不写产品规则、游戏机制、编剧理论语言。
+- 世界观阶段多写角色能看见、听见、触碰、承受的事物。
+```
+
+### 10.7 `build_outline_stage_synthesizer_prompt`
+
+改为通过 `renderers.build_stage_output_rule(stage, state)` 生成阶段输出规则。
+
+不要再在 worldbuilding 的 output rule 中输出：
+
+```text
+## 世界运行原则
+## 关键边界
+## 冲突资源
+## 代价红线
+```
+
+这些只能作为回归测试里的坏样例，不应进入 prompt。
+
+### 10.8 `outline_stage_synthesizer_output_rule`
+
+如果保留该函数，则其内部委托给新 renderer：
+
+```python
+def outline_stage_synthesizer_output_rule(stage: str, state: NovelState | None = None) -> str:
+    return build_stage_output_rule(stage, state)
+```
+
+如果很多测试还直接调用它，可以给 `state=None` 的兼容逻辑，但不要恢复旧 concept/worldbuilding 模板。
+
+### 10.9 `next_outline_stage`、`stage_number`、`finalize_locked_outline`
+
+全部使用 active 7 阶段。
+
+所有用户可见文案从“八阶段”改为“七阶段”或“全部阶段”。
+
+### 10.10 stage reference 检测
+
+如果用户说“故事概念”，映射到 `direction`，并给出内部 intent 为 `concept_request`，不要把 `state.outline_stage` 设为 `concept`。
+
+---
+
+## 11. 修改 `director_service.py`
+
+当前 `persist_outputs` 分支存在一个高风险逻辑：如果 `decision.task_args["stage"]` 指向下一阶段，代码可能先把 `state.outline_stage` 改成 requested stage，再调用 `advance_outline_stage_node`，导致用户确认上一阶段时实际锁定下一阶段。
+
+修复原则：
+
+- `advance_current_stage` / `persist_outputs` 的语义永远是“锁定当前阶段并进入下一阶段”。
+- 不要在调用 `advance_outline_stage_node` 前用 `task_args["stage"]` 覆盖 `state.outline_stage`。
+- `task_args["stage"]` 只用于 show/revise/switch，不用于 advance 当前阶段。
+- 如果模型返回 `task_args.stage == next_outline_stage(state.outline_stage)`，说明它想表达“进入下一阶段”，应忽略该 stage 参数，继续锁定当前阶段。
+- 如果模型返回 `task_args.stage` 是早先阶段，且 intent 是修订，则走 revise/switch，不走 persist。
+
+建议修改：
+
+```python
+elif decision.action == "persist_outputs":
+    if state.active_workflow == "outline" and state.outline_stage != "done" and not state.outline.strip():
+        from ai_novelist.graph_outline import advance_outline_stage_node
+        # 不要在这里根据 decision.task_args["stage"] 改写 state.outline_stage。
+        result_state = NovelState.from_dict(
+            advance_outline_stage_node(state.to_dict(), self.adapter, self.store, self.progress or noop_progress)
+        )
+    else:
+        result_state = NovelState.from_dict(persist_available_outputs(state.to_dict(), self.store))
+```
+
+为这个 bug 加测试。
+
+---
+
+## 12. 修改 `world_builder.md`
+
+`src/ai_novelist/prompts/world_builder.md` 是独立世界观 Agent 的 prompt，也要和 outline worldbuilding 阶段统一。
+
+### 12.1 删除或改写诱导公式句的表达
+
+把当前类似：
+
+```text
+为什么每次选择都会留下后果
+```
+
+改为：
+
+```text
+说明世界如何让角色的选择产生可被看见、可被追踪、可被后续章节利用的后果。
+```
+
+避免诱导“每次/每一次……都会……”句式。
+
+### 12.2 不再以“禁止词与高风险表达”词表作为核心策略
+
+可以保留“语言质量提醒”，但不要让 prompt 变成无限扩展的坏词表。
+
+改成分类说明：
+
+```md
+## 语言质量要求
+
+不要把世界观写成产品规则、游戏机制、编剧理论或抽象算法。
+高风险写法包括：
+- 用“机制/阈值/变量/红线/模型/系统”命名设定。
+- 用“每一次/每次/任何/一旦 + 必然/都会/从来/永远”写绝对因果。
+- 把情感、人情、庇护、代价写成数学规则或玄学债务。
+
+如果需要表达类似含义，请改写成角色能在世界中实际遇到的组织行为、任务、人情、把柄、伤病、资源损失、名声风险或生死威胁。
+```
+
+### 12.3 输出格式改成题材自适应
+
+不要所有题材都输出“主线相关背景边界 / 世界里的压力源 / 禁忌与后果”。
+
+建议输出：
+
+```md
+## 世界观设定稿
+
+### 世界一句话
+
+### 题材核心结构
+根据题材选择：修炼与力量体系 / 技术与生存条件 / 城市与职业生态 / 世界基本样貌。
+
+### 主角所在组织或生活圈
+
+### 势力、资源与日常压力
+
+### 可持续写作素材
+
+### 待确认事项
+
+### 自检
+```
+
+对于仙侠/魔门题材，明确建议写：
+
+- 修炼与力量体系。
+- 门派与本门生态。
+- 势力格局与理念冲突。
+- 日常场景与可写素材。
+- 待确认。
+
+---
+
+## 13. 修改 mock 输出
+
+查找 mock adapter 或测试 mock 中关于 outline stage 的输出，确保它不再生成：
+
+- `concept` 阶段。
+- `## 世界运行原则`、`## 关键边界`、`## 冲突资源`、`## 代价红线`。
+- `每一次...都会...`、`每次...都会...`、`庇护从来不是免费的`、`有债必偿` 等同类绝对因果句。
+
+mock 方向阶段建议输出：
+
+```md
+## 方向定位稿
+- 类型定位：重生魔门苟道成长，暗线带生死智斗。
+- 主角姿态：低调藏锋，优先求生，再守住身边温情。
+- 核心看点：用前世经验避险破局，但不写成全知外挂。
+- 核心冲突：魔门求生逻辑与守护他人的选择互相撕扯。
+- 情绪边界：残酷底色中保留轻松日常和微弱温情。
+```
+
+mock 世界观阶段建议输出：
+
+```md
+## 世界观设定稿
+
+### 修炼与力量体系
+- 外门弟子靠残卷、药材和师承入门，功法来路决定他们能走多远。
+- 魔功见效快，但气息难藏，主角越想低调越要避开公开试炼。
+
+### 门派与本门生态
+- 本门外门像一座小江湖，执事、长老、弟子之间靠任务、药材和人情牵连。
+- 执法堂不主持公道，只维护本门脸面，主角不能靠喊冤解决危机。
+
+### 势力格局与理念冲突
+- 魔门讲结果，正道讲名义，两边都可能把底层弟子当成消耗品。
+
+### 日常场景与可写素材
+- 功房残卷、药园夜巡、山门黑市、外门小比、执法堂问案。
+
+### 待确认
+- 是否需要为前世记忆设置明确限制；若暂不确认，只按“记忆不完整且会因今生行动改变而失准”处理。
+```
+
+注意：这只是 mock 样例，不是强制所有真实输出完全照抄。
+
+---
+
+## 14. 测试修改与新增
+
+### 14.1 修改旧测试
+
+修改 `tests/test_outline_collaboration.py`。
+
+删除或替换以下断言：
+
+```python
+assert "## 故事概念稿" in concept_prompt
+assert "## 世界运行原则" in world_prompt
+assert "## 关键边界" in synth_prompt
+assert "## 冲突资源" in synth_prompt
+assert "## 代价红线" in synth_prompt
+assert "6-8 条" in synth_prompt
+assert "每条不超过 100 中文字符" in synth_prompt
+assert "最多列 3 个阵营或资源冲突点" in synth_prompt
+```
+
+替换为：
+
+```python
+def test_active_outline_stages_exclude_concept():
+    assert "concept" not in OUTLINE_STAGES
+    assert OUTLINE_STAGES == [
+        "direction",
+        "worldbuilding",
+        "characters",
+        "story_flow",
+        "volume_outline",
+        "chapter_outline",
+        "review_lock",
+    ]
+
+
+def test_worldbuilding_prompt_uses_genre_worldbuilding_slots():
+    state = NovelState(project_id="demo", title="Demo", idea="重生魔门底层弟子，苟道藏锋")
+    prompt = build_outline_stage_synthesizer_prompt(state, "worldbuilding", [])
+    assert "世界观设定" in prompt
+    assert any(term in prompt for term in ("修炼", "力量体系", "门派", "本门", "组织生态"))
+    assert "可写素材" in prompt or "日常场景" in prompt
+    for old in ("## 世界运行原则", "## 关键边界", "## 冲突资源", "## 代价红线"):
+        assert old not in prompt
+```
+
+### 14.2 新增阶段契约测试
+
+新建或扩展测试：
+
+```python
+def test_stage_contracts_have_active_stages_only():
+    from ai_novelist.outline.stage_contracts import get_stage_contract
+    for stage in OUTLINE_STAGES:
+        contract = get_stage_contract(stage)
+        assert contract.key == stage
+        assert contract.purpose
+        assert contract.slots
+    with pytest.raises(KeyError):
+        get_stage_contract("concept")
+```
+
+或如果实现选择兼容返回 legacy contract，则断言：
+
+```python
+assert get_stage_contract("concept").key == "direction"
+```
+
+二者选一，保持实现一致。
+
+### 14.3 新增方向阶段清洗测试
+
+```python
+def test_direction_guard_demotes_unsupported_concrete_memory_cost():
+    state = NovelState(project_id="demo", title="Demo", idea="重生魔门底层弟子，苟道藏锋")
+    text = "## 方向定位稿\n- 每一次动用前世记忆都需付出预支的代价，可能消耗生命力。"
+    result = guard_stage_output(text, "direction", state)
+    assert "每一次" not in result.text
+    assert "消耗生命力" not in result.text
+    assert "前世记忆不是万能外挂" in result.text or "具体限制留" in result.text
+
+
+def test_direction_guard_preserves_user_explicit_cost_at_high_level():
+    state = NovelState(project_id="demo", title="Demo", idea="主角用前世记忆会消耗寿命")
+    text = "## 方向定位稿\n- 前世记忆会消耗寿命，所以主角不能滥用。"
+    result = guard_stage_output(text, "direction", state)
+    # 用户明确要求时不应无脑删掉，但方向阶段仍应避免细则化。
+    assert "寿命" in result.text or "具体限制留" in result.text
+```
+
+### 14.4 新增公式化句式测试
+
+```python
+@pytest.mark.parametrize("bad", [
+    "每一次示弱都是邀请他人掠夺。",
+    "每次动用都会招来新的敌人。",
+    "凡是求稳必然付出代价。",
+    "一旦保护别人就会被世界收债。",
+])
+def test_formulaic_causality_detection_is_pattern_based(bad):
+    issues = detect_formulaic_causality(bad)
+    assert any(issue.code == "formulaic_absolute_causality" for issue in issues)
+```
+
+这组测试包含用户列举过的，也包含新句式，证明不是硬编码。
+
+### 14.5 新增世界观语言测试
+
+```python
+def test_worldbuilding_guard_rejects_abstract_mechanism_language():
+    state = NovelState(project_id="demo", title="Demo", idea="重生魔门底层弟子")
+    text = "## 世界观设定稿\n## 代价红线\n前世记忆有债必偿，情感变量超过阈值会触发羁绊抵押。"
+    result = guard_stage_output(text, "worldbuilding", state)
+    for bad in ("代价红线", "有债必偿", "情感变量", "阈值", "羁绊抵押"):
+        assert bad not in result.text
+    assert "待确认" in result.text or "世界" in result.text
+```
+
+注意：这里可以把用户列举的词作为 fixture，但实现不能只靠这些词。
+
+### 14.6 新增确认问题过滤测试
+
+```python
+def test_question_filter_removes_model_invented_choice_menu():
+    state = NovelState(project_id="demo", title="Demo", idea="重生魔门底层弟子，苟道藏锋")
+    questions = ["前世记忆的代价形式更倾向消耗生命力还是削弱情感纽带？"]
+    filtered = filter_stage_confirmation_questions("worldbuilding", questions, state)
+    assert len(filtered) <= 1
+    assert not any("消耗生命力" in q and "削弱情感纽带" in q for q in filtered)
+    assert filtered == [] or "是否需要为前世记忆设置明确限制" in filtered[0]
+```
+
+### 14.7 新增 Director 推进测试
+
+确保确认当前阶段时不会锁错下一阶段。
+
+伪代码：
+
+```python
+def test_persist_outputs_advances_current_stage_not_requested_next_stage(tmp_path):
+    # 构造 state：active_workflow outline，outline_stage direction，direction artifact 已生成。
+    # 模拟 DirectorDecision(action="persist_outputs", task_args={"stage": "worldbuilding"})。
+    # 执行 handle_turn 或内部执行函数。
+    # 断言 direction 被 locked，state.outline_stage == "worldbuilding"。
+    # 断言 worldbuilding 没有被错误标记 locked。
+```
+
+### 14.8 新增 legacy concept 测试
+
+```python
+def test_legacy_concept_stage_migrates_without_entering_active_flow():
+    state = NovelState(project_id="demo", title="Demo", idea="旧项目")
+    state.outline_stage = "concept"
+    state.outline_stage_artifacts["concept"] = {
+        "stage": "concept",
+        "label": "故事概念",
+        "status": "locked",
+        "synthesis": "旧版故事概念。",
+    }
+    ensure_outline_stage(state)
+    assert state.outline_stage in {"direction", "worldbuilding"}
+    assert "concept" not in OUTLINE_STAGES
+```
+
+### 14.9 smoke 测试
+
+更新 smoke：
 
 ```bash
 .venv/bin/python -m pytest
-
-.venv/bin/ai-novelist index-corpus \
-  --corpus-dir tests/fixtures/corpus \
-  --index-dir /tmp/ai_novelist_corpus_index
-
-.venv/bin/ai-novelist extract-craft \
-  --index-dir /tmp/ai_novelist_corpus_index \
-  --mock
-
-.venv/bin/ai-novelist craft-brief \
-  --project craft-demo \
-  --purpose chapter_planning \
-  --chapter 1 \
-  --index-dir /tmp/ai_novelist_corpus_index \
-  --craft-mode assist \
-  --mock
-
-.venv/bin/ai-novelist chat \
-  --project craft-demo \
-  --mock \
-  --corpus-index-dir /tmp/ai_novelist_corpus_index \
-  --craft-mode assist
+.venv/bin/python tests/smoke_phase2_chat.py
+.venv/bin/python tests/smoke_outline_collaboration.py
 ```
+
+如果环境无法执行全部 smoke，至少执行相关单元测试并在最终说明无法执行的原因。
 
 ---
 
-## 23. Codex CLI 推荐迭代顺序
+## 15. 验收标准
 
-### 23.1 总体执行原则
+### 15.1 行为验收
 
-每次交给 Codex CLI 只做一个 phase，避免一次性大改。
+1. 新项目开始大纲共创时，第一阶段为 `direction`。
+2. 锁定 direction 后，下一个阶段为 `worldbuilding`，中间不出现 `concept`。
+3. 旧项目存在 `concept` artifact 不崩溃，但新流程不进入 concept。
+4. `STAGE_ROLES` 不包含 `concept`。
+5. `stage_number("worldbuilding") == 2`。
+6. 最终合并大纲只按 7 个 active stages 排序。
+7. 用户确认“进入下一阶段”时，系统锁定当前阶段，而不是先切到下一阶段再锁。
+8. `worldbuild` 独立命令和 outline worldbuilding prompt 风格一致，不再鼓励“每次选择都会留下后果”。
 
-推荐每个 phase 的固定提示：
+### 15.2 质量验收
 
-```text
-你正在实现 AI Novelist 的 Author Craft Layer。请只实现 Phase X，不要提前实现后续 phase。
-必须保持现有测试通过。
-不得破坏现有 --local-corpus-dir research 流程。
-不得引入数据库或向量库。
-mock 模式必须稳定，不依赖真实模型。
-实现后运行相关 pytest，并修复失败。
-```
-
-### 23.2 迭代 1：Phase 0 + Phase A 最小版
-
-交给 Codex：
+使用创意：
 
 ```text
-实现 Author Craft Layer Phase 0 和 Phase A 最小版：
-- 新增 docs/author_craft_contract.md
-- 新增 prompts/partials/author_craft_policy.md
-- 新增 src/ai_novelist/corpus/encoding.py / models.py / ingest.py / chunker.py / index.py
-- 新增 index-corpus CLI
-- 生成 manifest.json / works.jsonl / chapters.jsonl / scenes.jsonl / chunks.jsonl / quality_report.md
-- 新增 tests/test_corpus_encoding.py / test_corpus_ingest.py / test_corpus_chunker.py / test_corpus_index.py
-- 不引入数据库，不引入向量库
-- 不改现有 research 的 --local-corpus-dir 语义
+重生魔门底层弟子，苟道藏锋，守护师姐师妹
 ```
 
-验收：
+方向阶段应接近：
 
-```bash
-.venv/bin/python -m pytest tests/test_corpus_encoding.py tests/test_corpus_ingest.py tests/test_corpus_chunker.py tests/test_corpus_index.py
+```md
+## 方向定位稿
+- 类型定位：重生魔门苟道成长，暗线带生死智斗。
+- 主角姿态：低调藏锋，优先求生，再守住身边温情。
+- 核心看点：用前世经验避险破局，但不写成全知外挂。
+- 核心冲突：魔门求生逻辑与守护他人的选择互相撕扯。
+- 情绪边界：残酷底色中保留轻松日常和微弱温情。
 ```
 
-### 23.3 迭代 2：Phase B Mock Craft Profile
-
-交给 Codex：
+方向阶段不应出现：
 
 ```text
-实现 Phase B 的 mock craft profile 提炼：
-- 新增 craft_schema.py / craft_extractor.py / mock.py
-- 新增 craft_profile_extractor.md
-- 新增 extract-craft CLI，支持 --mock
-- 从 chunks/chapters/scenes 中生成 work/chapter/scene profiles
-- 输出 craft_profiles/works/*.json、chapters/*.jsonl、scenes/*.jsonl
-- 不调用真实模型
-- 不保存长原文到 profile
+每一次动用前世记忆都需付出预支的代价
+消耗生命力
+削弱情感纽带
+寿元债
+羁绊抵押
+不可逆阈值
 ```
 
-验收：
+除非这些内容来自用户明确输入。
 
-```bash
-.venv/bin/python -m pytest tests/test_craft_schema.py tests/test_craft_extractor_mock.py
+世界观阶段应接近：
+
+```md
+## 世界观设定稿
+
+### 修炼与力量体系
+- 外门弟子靠残卷、药材和师承入门，功法来路决定他们能走多远。
+- 魔功见效快，但气息难藏，主角越想低调越要避开公开试炼。
+
+### 门派与本门生态
+- 本门外门像一座小江湖，执事、长老、弟子之间靠任务、药材和人情牵连。
+- 执法堂不主持公道，只维护本门脸面，主角不能靠喊冤解决危机。
+
+### 势力格局与理念冲突
+- 魔门讲结果，正道讲名义，两边都可能把底层弟子当成消耗品。
+
+### 日常场景与可写素材
+- 功房残卷、药园夜巡、山门黑市、外门小比、执法堂问案。
+
+### 待确认
+- 是否需要为前世记忆设置明确限制；若暂不确认，只按“记忆不完整且会因今生行动改变而失准”处理。
 ```
 
-### 23.4 迭代 3：Phase C + D 检索和 Brief
-
-交给 Codex：
+世界观阶段不应默认出现旧结构：
 
 ```text
-实现 Phase C 和 Phase D：
-- 新增 craft_query_planner.py / craft_retriever.py / craft_brief.py
-- 新增 craft-brief CLI
-- 根据 purpose 和可选 pacing_target 检索 notes
-- 生成 StageCraftBrief Markdown 和 sources JSON
-- brief 必须包含使用规则、Pacing Target 对齐、可采用方法、不应采纳方向、来源摘要
-- 不输出长原文
+世界运行原则
+关键边界
+冲突资源
+代价红线
+情感变量
+寿元债
+羁绊抵押
+不可逆阈值
 ```
 
-验收：
-
-```bash
-.venv/bin/python -m pytest tests/test_craft_query_planner.py tests/test_craft_retriever.py tests/test_craft_resolver.py
-```
-
-### 23.5 迭代 4：Phase E + F 接入 ContextBuilder
-
-交给 Codex：
-
-```text
-实现 AuthorCraftResolver 和 ContextBuilder 注入：
-- 新增 craft_resolver.py
-- 修改 state.py 添加 craft 轻量字段并兼容旧 state
-- 修改 context_builder.py 添加 author_craft section
-- 在 chapter_plan/scene/drafting/review/revision 的 load_context 节点前调用 resolver
-- craft_mode=off 时完全不注入
-- resolver 失败时降级，不中断主工作流
-```
-
-验收：
-
-```bash
-.venv/bin/python -m pytest tests/test_craft_context_builder.py tests/test_craft_resolver.py
-.venv/bin/python -m pytest
-```
-
-### 23.6 迭代 5：Phase H CLI + Prompt Policy
-
-交给 Codex：
-
-```text
-实现 CLI/config/prompt policy：
-- config.py 新增 Author Craft 设置
-- chat/feishu 增加 --author-corpus-dir、--corpus-index-dir、--craft-mode、--craft-max-chars
-- 新增 craft-status / craft-profiles
-- 核心创作 prompt 加入 author_craft_policy
-- 不破坏现有 CLI
-```
-
-验收：
-
-```bash
-.venv/bin/ai-novelist --help
-.venv/bin/ai-novelist chat --help
-.venv/bin/python -m pytest tests/test_cli_craft.py
-```
-
-### 23.7 迭代 6：Phase J Similarity Guard
-
-交给 Codex：
-
-```text
-实现 Similarity Guard：
-- 新增 similarity_guard.py
-- 支持 ngram overlap 和 longest common substring
-- 在 drafting/revision/finalize 保存后生成 similarity_report
-- high risk 在 strict 模式进入 revision_requested
-- assist 模式只记录 report
-```
-
-验收：
-
-```bash
-.venv/bin/python -m pytest tests/test_similarity_guard.py
-```
-
-### 23.8 迭代 7：Phase K Project Craft Memory
-
-交给 Codex：
-
-```text
-实现 Project Craft Memory：
-- 新增 project_memory.py
-- finalize 后从 final chapter / summary / review report 提炼项目自身 craft notes
-- 保存 projects/<project>/craft/project_craft_memory.json
-- retriever 优先使用 project memory
-```
-
-验收：
-
-```bash
-.venv/bin/python -m pytest tests/test_project_craft_memory.py
-```
-
-### 23.9 迭代 8：Phase L/M/N 完整闭环
-
-交给 Codex：
-
-```text
-实现 Author Craft Layer 端到端验收：
-- 新增 tests/evals/author_craft_cases.jsonl
-- 新增 tests/smoke_author_craft_mock.py
-- README 和 docs 更新
-- dry-run/resume/quality report 完善
-- 确保 .venv/bin/python -m pytest 全通过
-```
-
-验收：
-
-```bash
-.venv/bin/python -m pytest
-.venv/bin/python tests/smoke_author_craft_mock.py
-```
+但请注意：这里的不应出现是验收样例，不是鼓励你只把这些词写进黑名单。真正要通过的是泛化质量门。
 
 ---
 
-## 24. 关键验收清单
+## 16. 具体提交步骤建议
 
-最终完成后，应满足：
+请按以下顺序实现，降低回归风险。
 
-```text
-[ ] 可以索引 tests/fixtures/corpus/*.txt。
-[ ] 可以处理单本 10MB 中文小说。
-[ ] 可以增量跳过未变化文件。
-[ ] 可以生成 work/chapter/scene craft profiles。
-[ ] mock 模式不调用真实模型。
-[ ] chat --craft-mode off 不注入作者构思参考。
-[ ] chat --craft-mode assist 注入 StageCraftBrief。
-[ ] StageCraftBrief 不含长原文。
-[ ] StageCraftBrief 与 Pacing Target 对齐。
-[ ] Chapter Planning 能使用作者构思方法生成更真实的章节卡。
-[ ] Scene Design 能使用场景推进方法。
-[ ] Drafting 能使用叙述距离、对白、氛围、信息释放方法。
-[ ] Review 能检查是否滥用或误用作者构思参考。
-[ ] Revision 能执行原创化修订。
-[ ] Similarity Guard 能发现明显复刻。
-[ ] Finalize 后能沉淀 Project Craft Memory。
-[ ] Project Craft Memory 在后续章节优先于外部 craft。
-[ ] artifacts.json 记录 stage_craft_brief / similarity_report / project_craft_memory。
-[ ] state.json 不保存原文或大文本。
-[ ] 现有 --local-corpus-dir research 流程不受影响。
-[ ] .venv/bin/python -m pytest 通过。
-```
+### Step 1：新增 outline 包与 stage contracts
 
----
+- 新增 `src/ai_novelist/outline/__init__.py`。
+- 新增 `stage_contracts.py`，定义 active stages 和 contracts。
+- 修改 `graph_outline.py` 使用 active stages。
+- 先跑相关 import 测试。
 
-## 25. 风险与规避
+### Step 2：删除 active concept，保留 legacy
 
-### 25.1 复刻风险
+- 从 `OUTLINE_STAGES` 和 `STAGE_ROLES` 删除 `concept`。
+- 修改 `ensure_outline_stage`、`detect_stage_reference`、`next_outline_stage`、`stage_number`。
+- 新增 legacy migration 测试。
 
-风险：
+### Step 3：接入 source ledger 与 stage guard
 
-```text
-模型看到过多原文后，可能复刻句式或桥段。
-```
+- 新增 `source_ledger.py`。
+- 新增 `stage_guard.py`。
+- 在 `run_outline_stage_node` 中调用 `guard_stage_output`。
+- 让原 `sanitize_direction_stage_output` 委托给 `guard_stage_output`，或保留兼容 wrapper。
 
-规避：
+### Step 4：接入 question filter
 
-```text
-- StageCraftBrief 不注入长原文。
-- Evidence 只保存摘要和 source id。
-- Similarity Guard 后置检查。
-- Prompt policy 明确禁止复刻。
-```
+- 新增 `question_filter.py`。
+- 在 `extract_stage_confirmation_questions` 后调用 filter。
+- 修改 `stage_ready_message`，当没有问题时只要求确认锁定或继续修改。
 
-### 25.2 过度套路化
+### Step 5：改世界观 renderer 与 prompts
 
-风险：
+- 新增 `renderers.py`。
+- 修改 `outline_stage_synthesizer_output_rule`。
+- 修改 `role_focus_instruction` 或相关边界 prompt。
+- 修改 `world_builder.md`。
 
-```text
-CraftProfile 全是“冲突升级、结尾钩子”，导致每章更套路。
-```
+### Step 6：修复 Director 阶段推进 bug
 
-规避：
+- 修改 `director_service.py` 的 `persist_outputs` 分支。
+- 新增测试防止确认时锁错阶段。
 
-```text
-- Query Planner 必须使用 Pacing Target。
-- 低强度章节 boost restraint / atmosphere / relationship。
-- Synthesizer 必须输出 rejected/deferred methods。
-```
+### Step 7：更新 mock 与测试
 
-### 25.3 Context 过载
-
-风险：
-
-```text
-每阶段塞太多 craft，影响主任务。
-```
-
-规避：
-
-```text
-- 默认 craft_max_chars=3000。
-- 每次最多 6-8 条 CraftNote。
-- Project Craft Memory 优先，外部 craft 精简。
-```
-
-### 25.4 与 Research 混淆
-
-风险：
-
-```text
-AI_NOVELIST_LOCAL_CORPUS_DIR 和 AI_NOVELIST_AUTHOR_CORPUS_DIR 职责混乱。
-```
-
-规避：
-
-```text
-- local-corpus-dir 继续用于 research 检索资料。
-- author-corpus-dir 专用于 Author Craft Layer。
-- 两套配置、两套索引、两套产物，不互相污染。
-```
-
-### 25.5 Pacing Target 尚未完全实现
-
-风险：
-
-```text
-Author Craft Layer 依赖 Pacing Target，但 Pacing Target 可能未全部落地。
-```
-
-规避：
-
-```text
-- resolver 读取 pacing target 时必须容错。
-- 不存在则使用 neutral pacing target。
-- 后续 Pacing Target 落地后，替换 reader 即可。
-```
+- 更新 mock 输出。
+- 删除旧标题断言。
+- 新增上述测试。
+- 跑 `pytest`。
 
 ---
 
-## 26. 最终效果示例
+## 17. 不要做的事情
 
-### 26.1 输入
-
-```text
-写第 1 章。
-题材：月球城市失忆工程师的悬疑科幻。
-主角醒来后发现自己可能参与了一场城市级事故。
-```
-
-### 26.2 StageCraftBrief 输出片段
-
-```markdown
-# 作者构思参考
-
-## 与 Pacing Target 的对齐
-- 本章功能：setup
-- 目标强度：2
-- 钩子强度：soft
-- 冲突模式：latent
-- 可用方法：异常事实开场、规则压力、身份疑问、延迟解释
-- 禁止方法：强反转、重大真相揭示、硬 cliffhanger
-
-## 可采用的真实作者构思方法
-1. 用“异常事实”代替“世界观说明”
-   - 方法：开篇先让世界规则否定主角认知。
-   - 为什么有效：读者先进入问题，而不是先听设定。
-   - 当前项目转化：主角醒来时，城市系统显示他已死亡。
-   - 避免事项：不要立刻解释月球城市历史。
-
-2. 失忆必须绑定外部压力
-   - 方法：主角不是单纯追问“我是谁”，而是在权限、氧气、时间限制下行动。
-   - 当前项目转化：身份权限将在 30 分钟后注销，必须进入维修区。
-```
-
-### 26.3 Chapter Goal Agent 输出变好
-
-从：
-
-```text
-主角醒来，发现失忆，开始调查事故。
-```
-
-变成：
-
-```text
-本章目标：让主角在“系统判定自己已死亡”的异常事实中醒来，并通过氧气权限、门禁、维修区封锁三个规则压力，建立月球城市的生存逻辑。主角本章不是直接找到真相，而是从“事故受害者”转向“可能参与事故流程的人”这一危险疑问。
-```
-
-这就是 Author Craft Layer 的目标效果。
+1. 不要只新增 `FORBIDDEN_PHRASES`。
+2. 不要把用户列举的坏句子逐条硬编码为唯一禁止项。
+3. 不要为了通过测试把所有题材都锁死成仙侠模板。
+4. 不要删除旧项目 `concept` artifact 导致旧 state 崩溃。
+5. 不要让 validator 断言 exact heading；应检查语义覆盖。
+6. 不要让世界观阶段继续写成“世界运行原则 / 关键边界 / 冲突资源 / 代价红线”。
+7. 不要让方向阶段主动发明寿元、情感、羁绊、债务等具体代价。
+8. 不要让确认问题继承模型自造选项。
+9. 不要把用户明确要求的内容误删；应标注来源并放到合适阶段。
+10. 不要只改 prompt，不改测试和 mock。
 
 ---
 
-## 27. 最终 Definition of Done
+## 18. 最终交付说明格式
 
-Author Craft Layer v1.0 完成的标准：
+修改完成后，请 Codex 输出：
 
-```text
-1. 用户可以把本地小说 txt/md 放进一个目录。
-2. index-corpus 能稳定生成 JSONL 索引。
-3. extract-craft 能生成不含长原文的 CraftProfiles。
-4. chat/write/review/revision 能通过 craft_mode 控制是否注入作者构思参考。
-5. StageCraftBrief 能按 purpose 和 Pacing Target 精准变化。
-6. 所有创作 prompt 明确禁止复刻和模仿。
-7. Similarity Guard 能发现明显复制。
-8. 定稿后能形成 Project Craft Memory。
-9. 所有新增功能有 mock 测试。
-10. 全量 pytest 通过。
+```md
+## 修改完成
+
+### 关键改动
+- ...
+
+### 新增文件
+- ...
+
+### 修改文件
+- ...
+
+### 测试结果
+- `pytest ...`：通过/失败
+- 如果有失败，说明失败原因和下一步。
+
+### 验收样例
+- direction 输出摘要：...
+- worldbuilding 输出摘要：...
 ```
 
----
-
-## 28. 后续 v2 方向
-
-v1 完成后再考虑：
-
-```text
-- 向量检索。
-- 本地 embedding 模型。
-- 更强的中文分词。
-- 更复杂的场景识别。
-- 多语种小说库。
-- Craft Profile 可视化。
-- 交互式选择参考作品。
-- 按用户评分强化 Project Craft Memory。
-- 自动生成类型写作报告。
-```
-
-v1 的重点永远是：
-
-```text
-稳定、可解释、可控、不复刻、能真正接入现有工作流。
-```
+不要只回复“已完成”。
