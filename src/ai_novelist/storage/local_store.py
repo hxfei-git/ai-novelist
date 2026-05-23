@@ -127,6 +127,9 @@ class LocalStore:
     def chapter_summary_path(self, project_id: str, chapter: int) -> Path:
         return self.chapter_artifact_dir(project_id, chapter) / "summary.md"
 
+    def pacing_report_path(self, project_id: str, chapter: int) -> Path:
+        return self.chapter_artifact_dir(project_id, chapter) / "pacing_report.json"
+
     def exports_dir(self, project_id: str) -> Path:
         return self.project_dir(project_id) / "exports"
 

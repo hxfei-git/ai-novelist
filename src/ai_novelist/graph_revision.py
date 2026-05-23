@@ -170,6 +170,7 @@ def revision_self_check_node(data: dict, adapter: AgentAdapter, store: LocalStor
         store.save_state(state)
         return state.to_dict()
     state.director_task_args["revision_self_check"] = output.strip()
+    state.director_task_args["pacing_self_check"] = extract_pacing_self_check(output)
     state.active_stage = "revision_self_check"
     state.last_agent_reports = append_agent_report(state.last_agent_reports, "revision_self_check", "ok", {"chars": len(output)})
     store.save_state(state)
@@ -230,6 +231,45 @@ def maybe_review_again_node(data: dict, store: LocalStore) -> dict:
     return state.to_dict()
 
 
+def filter_revision_review(report: dict[str, Any]) -> dict[str, Any]:
+    blocking = normalize_str_list(report.get("blocking_fixes") or report.get("blocking_issues"))
+    safe = normalize_str_list(report.get("pacing_safe_fixes") or report.get("rewrite_tasks"))
+    backlog = normalize_str_list(report.get("backlog_suggestions"))
+    rejected = normalize_str_list(report.get("rejected_suggestions"))
+    return {
+        "decision": report.get("decision", "revise"),
+        "score": report.get("score", 0),
+        "blocking_fixes": blocking,
+        "pacing_safe_fixes": safe,
+        "backlog_suggestions": backlog,
+        "rejected_suggestions": rejected,
+        "rewrite_tasks": blocking + safe,
+    }
+
+
+def normalize_str_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value] if value.strip() else []
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def extract_pacing_self_check(raw: str) -> dict[str, Any]:
+    try:
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            decision = str(data.get("decision") or "pass")
+            return {
+                "decision": decision,
+                "ok": decision in {"pass", "safe", "approved"},
+                "summary": "修订未破坏节奏目标。" if decision in {"pass", "safe", "approved"} else "修订可能导致节奏偏移。",
+            }
+    except Exception:
+        pass
+    return {"decision": "unknown", "ok": True, "summary": "未提供结构化节奏自检。"}
+
+
 def build_revision_prompt(state: NovelState, prompt_name: str) -> str:
     template = load_prompt(prompt_name)
     review = json.dumps(state.director_task_args.get("revision_review_json", {}), ensure_ascii=False, indent=2)
@@ -241,6 +281,7 @@ def build_revision_prompt(state: NovelState, prompt_name: str) -> str:
         f"REVISION_COUNT: {state.revision_count}\n\n"
         f"## Revision Context\n{state.director_task_args.get('revision_context') or '暂无'}\n\n"
         f"## Review JSON\n{review}\n\n"
+        f"## Revision Rule\n只执行 blocking_fixes 和 pacing_safe_fixes；不得执行 backlog_suggestions/rejected_suggestions。\n\n"
         f"## Revision Plan\n{state.current_revision_plan or '暂无'}\n\n"
         f"## Current Draft\n{state.chapter_draft or '暂无'}\n"
     )

@@ -7,6 +7,7 @@ from typing import Protocol
 from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
 from ai_novelist.artifacts import ArtifactRecord, get_latest_artifact, load_artifact_text, load_artifacts, register_artifact
 from ai_novelist.context_builder import build_context
+from ai_novelist.pacing import parse_pacing_target_from_card, scene_required_fields
 from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, run_with_progress, run_with_progress, with_agent_metadata
 from ai_novelist.prompts import load_prompt
 from ai_novelist.state import NovelState
@@ -142,9 +143,16 @@ def scene_synthesizer_node(data: dict, adapter: AgentAdapter, store: LocalStore)
 
 def validate_scene_cards_node(data: dict, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
-    missing = [field for field in SCENE_FIELDS if field not in state.current_scene_cards]
     scene_count = count_scenes(state.current_scene_cards)
-    state.director_task_args["scene_cards_validation"] = {"missing_fields": missing, "scene_count": scene_count}
+    pacing = parse_pacing_target_from_card(state.active_chapter or state.current_chapter or 1, state.current_chapter_card or "")
+    required_fields = scene_required_fields(pacing)
+    missing = [field for field in required_fields if field not in state.current_scene_cards]
+    state.director_task_args["scene_cards_validation"] = {
+        "missing_fields": missing,
+        "required_fields": required_fields,
+        "scene_count": scene_count,
+        "pacing_target": pacing.to_dict(),
+    }
     if scene_count < 2 or missing:
         state.current_scene_cards = add_missing_scene_validation(state.current_scene_cards, missing, scene_count)
     state.active_stage = "validate_scene_cards"

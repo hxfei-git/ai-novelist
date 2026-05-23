@@ -73,3 +73,16 @@ def test_chapter_plan_parallel_path_records_three_reports(tmp_path, monkeypatch)
     text = trace_path.read_text(encoding="utf-8")
     assert "chapter_goal_agent" in text
     assert "chapter_card_synthesizer" in text
+
+
+def test_chapter_plan_sets_pacing_target(tmp_path):
+    store = LocalStore(tmp_path)
+    state = make_ready_state(store)
+
+    result = build_chapter_plan_graph(CodexCLIAdapter(mock=True), store).invoke(state.to_dict())
+
+    pacing = result["director_task_args"].get("pacing_target", {})
+    assert pacing.get("chapter") == 1
+    assert 1 <= int(pacing.get("intensity", 0)) <= 5
+    validation = result["director_task_args"].get("chapter_card_validation", {})
+    assert "required_sections" in validation

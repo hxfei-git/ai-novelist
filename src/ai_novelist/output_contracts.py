@@ -68,13 +68,23 @@ def normalize_review_synthesis(raw: object, fallback_text: str = "") -> dict[str
     issues = normalize_string_list(data.get("issues"), max_items=6, max_item_chars=90)
     if not issues and str(fallback).strip():
         issues = extract_fallback_bullets(str(fallback), max_items=5, max_chars=90)
+    blocking_issues = normalize_string_list(data.get("blocking_issues"), max_items=3, max_item_chars=90)
+    rewrite_tasks = normalize_string_list(data.get("rewrite_tasks"), max_items=8, max_item_chars=90)
+    blocking_fixes = normalize_string_list(data.get("blocking_fixes"), max_items=6, max_item_chars=90) or list(blocking_issues)
+    pacing_safe_fixes = normalize_string_list(data.get("pacing_safe_fixes"), max_items=6, max_item_chars=90) or list(rewrite_tasks)
+    backlog_suggestions = normalize_string_list(data.get("backlog_suggestions"), max_items=6, max_item_chars=90)
+    rejected_suggestions = normalize_string_list(data.get("rejected_suggestions"), max_items=6, max_item_chars=90)
     return {
         "decision": decision,
         "score": max(0, min(score, 100)),
-        "blocking_issues": normalize_string_list(data.get("blocking_issues"), max_items=3, max_item_chars=90),
+        "blocking_issues": blocking_issues,
         "issues": issues,
-        "rewrite_tasks": normalize_string_list(data.get("rewrite_tasks"), max_items=8, max_item_chars=90),
+        "rewrite_tasks": rewrite_tasks,
         "do_not_change": normalize_string_list(data.get("do_not_change"), max_items=5, max_item_chars=80),
+        "blocking_fixes": blocking_fixes,
+        "pacing_safe_fixes": pacing_safe_fixes,
+        "backlog_suggestions": backlog_suggestions,
+        "rejected_suggestions": rejected_suggestions,
     }
 
 

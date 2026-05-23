@@ -25,7 +25,8 @@ def test_review_generates_markdown_json_and_legacy_notes(tmp_path):
     assert store.review_report_path("demo", 1, 1).exists()
     assert store.review_json_path("demo", 1, 1).exists()
     payload = json.loads(store.review_json_path("demo", 1, 1).read_text(encoding="utf-8"))
-    assert set(payload) == {"decision", "score", "blocking_issues", "issues", "rewrite_tasks", "do_not_change"}
+    assert {"decision", "score", "blocking_issues", "issues", "rewrite_tasks", "do_not_change"}.issubset(set(payload))
+    assert {"blocking_fixes", "pacing_safe_fixes", "backlog_suggestions", "rejected_suggestions"}.issubset(set(payload))
     assert payload["decision"] == "revise"
     assert "STATUS:" in result.editor_notes
     assert "QUALITY_SCORE:" in result.editor_notes
@@ -81,7 +82,7 @@ def test_review_parallel_path_records_all_editor_reports(tmp_path, monkeypatch):
 
     result = NovelState.from_dict(build_review_graph(CodexCLIAdapter(mock=True), store).invoke(state.to_dict()))
 
-    for key in ["continuity_review", "structure_review", "character_arc_review", "style_review", "simulated_reader_review"]:
+    for key in ["continuity_review", "structure_review", "character_arc_review", "style_review", "simulated_reader_review", "pacing_guard_review"]:
         assert isinstance(result.director_task_args[key], dict)
     trace_path = store.project_dir("demo") / "debug" / "agent_runs.jsonl"
     assert trace_path.exists()

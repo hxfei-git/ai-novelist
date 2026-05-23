@@ -1,2062 +1,2352 @@
-# AI Novelist LangGraph 节奏控制改造计划
+# AI Novelist「真实作者构思方法库」完整实现计划书
 
-> 版本：v1.0  
-> 日期：2026-05-23  
+> 目标版本：Author Craft Layer v1.0  
 > 目标项目：`hxfei-git/ai-novelist`  
-> 核心目标：让小说从“每章都被冲突、钩子、转折强化”改造成“服从卷级节奏曲线，允许铺垫、低谷、余波、蓄势、高潮交替出现”。
+> 日期：2026-05-23  
+> 核心目标：让 AI Novelist 在大纲、章节规划、场景规划、正文写作、审稿、修订、定稿各阶段，能够参考本地小说库中真实作者的“构思方法”，而不是只依赖大模型凭空生成。  
+> 核心边界：不复刻原文，不模仿具体作者表达，不搬运设定，只抽象叙事结构、冲突机制、人物弧线、场景推进、章节钩子、节奏控制和修订策略。
 
 ---
 
-## 0. 一句话结论
+## 0. 当前仓库基线判断
 
-当前流程的问题不是“多 Agent 没用”，而是**多个 Agent 在不同层级重复强化同一类指标：冲突、钩子、转折、发展**。  
+当前项目已经具备接入 Author Craft Layer 的基础：
 
-改造重点不应是简单删除 Agent，而是引入一个上位约束：
+1. 主入口是 `chat`，由 Director Agent 调度 outline、worldbuilding、chapter planning、scene planning、drafting、review、revision、finalize、export 等工作流。
+2. 当前已有阶段化写作流水线：
+   - Outline Collaboration Graph
+   - Chapter Planning Graph
+   - Scene Planning Graph
+   - Drafting Graph
+   - Review Graph
+   - Revision Graph
+   - Finalize Graph
+3. 当前已有 `ContextBuilder`，负责给不同阶段组装任务上下文。
+4. 当前已有 `Artifact Registry`，可以保存并版本化阶段产物。
+5. 当前已有 `state.json`，但不应继续塞入大文本。
+6. 当前已有 research 搜索体系，支持本地轻量 RAG 和网络搜索，但它主要解决“参考资料/事实/同人资料检索”，不是“真实作者构思方法学习”。
+7. 最新 `plan.md` 已经引入 Pacing Target / 章节节奏目标改造方向。Author Craft Layer 必须兼容 Pacing Target，不能再把每章都推向高冲突、高钩子、高转折。
 
-> **Pacing Target / 章节节奏目标**：每章先确定自己在整卷中的功能、强度、张力来源、结尾方式和禁止升级项，然后所有大纲、章节卡、场景卡、写作、审稿、修订流程都必须服从它。
-
-换句话说，系统判断标准要从：
+因此，本计划不是另起一套写作系统，而是在现有流程中新增一个独立的“真实作者构思方法库”层：
 
 ```text
-这一章冲突够不够？
-这一章钩子够不够？
-这一章转折够不够？
-```
-
-改成：
-
-```text
-这一章是否完成了它在整卷节奏曲线中的功能？
+本地真实小说 txt/md
+  -> Corpus Ingest
+  -> Chunk / Chapter / Scene Index
+  -> Craft Profile Extraction
+  -> Craft Retrieval
+  -> Stage Craft Brief
+  -> ContextBuilder 注入
+  -> 各阶段 Agent 使用
+  -> Similarity Guard 防复刻
+  -> Finalize 后沉淀 Project Craft Memory
 ```
 
 ---
 
-## 1. 当前流程关系梳理
+## 1. 一句话结论
 
-根据当前项目结构，主入口是 `chat`，由 Director Agent 根据用户意图调度各子图。整体关系可以整理为：
+Author Craft Layer 要做的不是“把小说原文塞进 prompt”，而是：
+
+> 把本地小说库中的真实作品，离线提炼成可检索、可解释、可控的“创作方法库”，并在每个创作阶段只注入当前阶段真正需要的构思方法。
+
+例如：
+
+```text
+不要：
+某本小说原文片段 -> 直接塞给 chapter_writer -> 模仿作者写法
+
+要：
+某本小说章节
+  -> 分析：这一章如何开场、如何制造压力、如何延迟解释、如何软钩子收尾
+  -> 保存：ChapterCraftProfile
+  -> 当前项目写第 1 章时检索到该方法
+  -> 注入：StageCraftBrief
+  -> Agent 用这个方法生成当前项目自己的原创章节方案
+```
+
+---
+
+## 2. 总体原则
+
+### 2.1 数据边界
+
+必须区分四类数据：
+
+| 类型 | 内容 | 是否可进入最终 prompt | 是否可长期保存 |
+|---|---|---:|---:|
+| `RawText` | 本地小说原文 | 否 | 可以，只在本地索引中 |
+| `RetrievalChunk` | 原文切块，带 offset 和 metadata | 否 | 可以，只在本地 JSONL |
+| `CraftProfile` | 从原文抽象出的创作方法 | 可以 | 可以 |
+| `StageCraftBrief` | 当前阶段可用的作者构思参考 | 可以 | 可以，作为项目 artifact |
+
+第一版要求：
+
+```text
+StageCraftBrief 不携带长原文。
+CraftEvidence 不保存长原文，只保存 source id、位置、分析摘要、标签。
+所有创作 Agent 只能看到“方法”，不能看到可复刻的长段原文。
+```
+
+### 2.2 优先级
+
+在所有 prompt 和 resolver 中明确优先级：
+
+```text
+用户明确要求
+  > 锁定约束 locked_constraints
+  > Novel Bible / 项目已定设定
+  > Pacing Target / 节奏目标
+  > 当前章节卡 / 场景卡 / 审稿任务
+  > Project Craft Memory / 本项目已形成的方法
+  > External Author Craft / 外部小说库构思参考
+  > 大模型自由发挥
+```
+
+Author Craft 永远不能覆盖用户锁定约束、小说圣经和 Pacing Target。
+
+### 2.3 与 Pacing Target 的关系
+
+最新 `plan.md` 已经指出当前系统容易过度强化冲突、钩子和转折。Author Craft Layer 必须服务于 Pacing Target。
+
+例如：
+
+```text
+如果当前章 function=aftermath, intensity=1, hook_strength=none：
+  Author Craft 应检索“余波章、低压张力、情绪沉淀、软收束”方法。
+  不应检索“强反转、强对抗、硬 cliffhanger”方法。
+
+如果当前章 function=twist, intensity=4, hook_strength=hard：
+  Author Craft 才可以检索“认知反转、信息重释、强钩子”方法。
+```
+
+StageCraftBrief 必须包含：
+
+```text
+## 与 Pacing Target 的对齐
+- 本章功能：
+- 目标强度：
+- 本次采用的作者构思方法为何不破坏节奏目标：
+- 本阶段禁止使用的方法：
+```
+
+### 2.4 第一版不做的事
+
+第一版明确不做：
+
+```text
+不引入数据库。
+不引入向量库。
+不做 fine-tuning。
+不做自动下载小说。
+不在 prompt 中注入长原文。
+不让模型模仿某个具体作者风格。
+不把本地小说设定直接迁移到当前项目。
+不要求一次性处理所有历史文件，先支持增量。
+```
+
+---
+
+## 3. 最终目标架构
 
 ```mermaid
 flowchart TD
-    U[用户 / chat] --> D[Director Agent]
+    A[本地小说库 txt/md] --> B[Corpus Ingest]
+    B --> C[章节/场景/Chunk 切分]
+    C --> D[corpus_index JSONL]
+    D --> E[Craft Profile Extractor]
+    E --> F[Work/Chapter/Scene/Genre Craft Profiles]
 
-    D --> O[Outline Collaboration Graph]
-    O --> O1[direction]
-    O1 --> O2[concept]
-    O2 --> O3[worldbuilding]
-    O3 --> O4[characters]
-    O4 --> O5[story_flow]
-    O5 --> O6[volume_outline]
-    O6 --> O7[chapter_outline]
-    O7 --> O8[review_lock]
-    O8 --> B[Novel Bible / Locked Outline]
-
-    D --> CP[Chapter Planning Graph]
-    CP --> CP1[select_chapter]
-    CP1 --> CP2[load_chapter_context]
-    CP2 --> CP3[chapter_goal_agent]
-    CP2 --> CP4[chapter_conflict_agent]
-    CP2 --> CP5[chapter_hook_agent]
-    CP3 --> CP6[chapter_card_synthesizer]
-    CP4 --> CP6
-    CP5 --> CP6
-    CP6 --> CP7[validate_chapter_card]
-    CP7 --> CP8[save_chapter_card]
-
-    D --> SP[Scene Planning Graph]
-    SP --> SP1[load_chapter_card]
-    SP1 --> SP2[scene_breakdown_agent]
-    SP2 --> SP3[conflict_check_agent]
-    SP3 --> SP4[scene_synthesizer]
-    SP4 --> SP5[validate_scene_cards]
-    SP5 --> SP6[save_scene_cards]
-
-    D --> DR[Drafting Graph]
-    DR --> DR1[load_drafting_context]
-    DR1 --> DR2[draft_scene_batch]
-    DR2 --> DR3[merge_scenes]
-    DR3 --> DR4[dialogue_enhance]
-    DR4 --> DR5[atmosphere_enhance]
-    DR5 --> DR6[hook_enhance]
-    DR6 --> DR7[style_normalize]
-    DR7 --> DR8[save_draft]
-
-    D --> RV[Review Graph]
-    RV --> RV1[continuity_editor]
-    RV --> RV2[structure_editor]
-    RV --> RV3[character_arc_editor]
-    RV --> RV4[style_editor]
-    RV --> RV5[simulated_reader]
-    RV1 --> RV6[review_synthesizer]
-    RV2 --> RV6
-    RV3 --> RV6
-    RV4 --> RV6
-    RV5 --> RV6
-    RV6 --> RV7[pass / revise decision]
-
-    D --> RE[Revision Graph]
-    RE --> RE1[revision_planner]
-    RE1 --> RE2[targeted_reviser]
-    RE2 --> RE3[merge_revision]
-    RE3 --> RE4[revision_self_check]
-    RE4 --> RE5[save_revised_draft]
-    RE5 --> RE6[maybe_review_again]
-
-    D --> F[Finalize Graph]
-    F --> F1[load_latest_draft]
-    F1 --> F2[save_final_chapter]
-    F2 --> F3[summarize_chapter]
-    F3 --> F4[extract_bible_updates_from_final]
-    F4 --> F5[update_bible]
+    U[用户请求] --> DIR[Director]
+    DIR --> G[当前 Graph load_context 节点]
+    G --> PT[读取 Pacing Target]
+    G --> QP[Craft Query Planner]
+    PT --> QP
+    QP --> R[Craft Retriever]
+    F --> R
+    R --> S[Stage Craft Brief Synthesizer]
+    S --> ART[projects/<project>/craft/stage_briefs/*.md]
+    ART --> CB[ContextBuilder]
+    CB --> AG[阶段 Agent]
+    AG --> OUT[章节卡/场景卡/正文/审稿/修订]
+    OUT --> SG[Similarity Guard]
+    SG --> SAVE[保存 Artifact]
+    SAVE --> PM[Project Craft Memory]
 ```
 
-这个架构总体是合理的：
+核心组件职责：
 
-- Outline Graph 负责全局设定、故事流、卷纲、章纲。
-- Chapter Planning Graph 负责单章目标和章节卡。
-- Scene Planning Graph 负责把章节拆成可写场景。
-- Drafting Graph 负责生成正文并做语言增强。
-- Review Graph 负责多角度审稿。
-- Revision Graph 负责按审稿任务定向修订。
-- Finalize Graph 负责定稿、摘要和 Bible 回写。
-
-真正的问题在于：**这些层级都在独立强化“冲突、钩子、转折”，但没有共同服从一个卷级节奏曲线。**
-
----
-
-## 2. 当前冗余与副作用诊断
-
-### 2.1 冲突、钩子、转折被多层重复强化
-
-当前至少有五层会推高章节强度：
-
-| 层级 | 当前强化点 | 可能副作用 |
-|---|---|---|
-| 大纲阶段 | 关系冲突、节奏悬念、卷内高潮、章节钩子 | 从全局设定阶段就倾向高密度事件 |
-| 章节规划 | `chapter_conflict_agent`、`chapter_hook_agent`、`关键冲突`、`结尾钩子` | 每章都被迫拥有冲突和钩子 |
-| 场景规划 | `conflict_check_agent`、`冲突对象`、`场景转折` | 每个场景都像小型冲突单元 |
-| 写作增强 | `hook_enhance` 固定执行 | 低谷章、余波章也被改成悬念结尾 |
-| 审稿修订 | structure/editor/reader 可能要求“更抓人” | 安静章节被误判为“不够推进” |
-
-最终小说节奏容易变成：
-
-```text
-强冲突 → 强冲突 → 强冲突 → 强冲突 → 强冲突
-```
-
-而不是：
-
-```text
-铺垫 → 升压 → 小爆发 → 余波 → 低谷 → 蓄势 → 反转 → 高潮 → 缓冲 → 终局爆发
-```
-
-### 2.2 Schema 把“高潮型章节”的字段套给所有章节
-
-当前章节卡固定要求类似字段：
-
-```text
-章节目标
-场景列表
-关键冲突
-人物变化
-结尾钩子
-连续性约束
-本章写作输入
-自检
-```
-
-当前场景卡固定要求类似字段：
-
-```text
-地点
-出场人物
-场景目的
-人物目标
-冲突对象
-关键信息
-情绪变化
-场景转折
-退出状态
-```
-
-这些字段对商业高推进章节有效，但不适合所有章节。比如：
-
-- 战后余波章不一定要有新冲突。
-- 关系铺垫章不一定要有强转折。
-- 低谷章不应该马上制造新爆点。
-- 过渡章的作用可能只是移动位置、整理信息、重置目标。
-- 蓄势章的价值是压住不爆，而不是提前高潮。
-
-### 2.3 Synthesizer 容易变成“会议纪要员”
-
-当前常见结构是：
-
-```text
-多个 Agent 给建议
-  ↓
-Synthesizer 汇总
-  ↓
-产物进入下游
-```
-
-如果 Synthesizer 没有“只采纳少量核心建议、拒绝不合节奏的建议、把过早信息延后”的约束，它会天然倾向于把所有 Agent 的信息都保留一点。
-
-对小说来说，这很危险。因为主编的职责不是“合并所有建议”，而是：
-
-```text
-决定本章只完成什么。
-决定哪些冲突压住。
-决定哪些信息延后。
-决定哪些建议不采纳。
-决定本章不能发生什么。
-```
-
-### 2.4 审稿和修订缺少“节奏守门”
-
-如果 Review Graph 不知道本章是低谷章、余波章还是铺垫章，它可能会把“安静但有效”误判为：
-
-```text
-冲突不足
-不够抓人
-缺少爆点
-结尾不够有悬念
-人物变化不明显
-```
-
-随后 Revision Graph 会把这些建议执行掉，导致原本应当降压的章节被修成升压章节。
-
----
-
-## 3. 改造目标
-
-### 3.1 总目标
-
-建立一个贯穿全流程的节奏控制系统，让每章具有明确的章节功能和强度边界。
-
-### 3.2 具体目标
-
-1. 在大纲或章纲阶段生成卷级节奏曲线。
-2. 每章拥有独立的 `PacingTarget`。
-3. Chapter Plan、Scene Plan、Drafting、Review、Revision 都读取并服从 `PacingTarget`。
-4. 冲突、钩子、转折类 Agent 改为条件运行。
-5. Synthesizer 必须区分：采纳、拒绝、延后。
-6. Review 只把真正阻塞逻辑的问题送入 Revision。
-7. Revision 不执行会破坏本章节奏目标的建议。
-8. Finalize 时记录实际强度，作为后续章节节奏回调依据。
-
-### 3.3 不做的事情
-
-本轮改造不建议一开始就做以下事情：
-
-- 不直接删除所有多 Agent 结构。
-- 不把所有图重写成一个大图。
-- 不把所有 Prompt 全部推倒重来。
-- 不引入复杂机器学习模型评估节奏。
-- 不把“冲突”完全移除，而是让冲突服从章节功能。
-
----
-
-## 4. 新核心概念：Pacing Target
-
-### 4.1 定义
-
-`PacingTarget` 是每章的节奏合同。它决定本章：
-
-- 在整卷中的功能。
-- 允许的强度上限。
-- 张力来源。
-- 是否允许强冲突。
-- 是否允许硬钩子。
-- 最多揭示多少关键信息。
-- 不允许发生什么。
-- 哪些建议应该延后。
-
-### 4.2 推荐字段
-
-```json
-{
-  "chapter": 12,
-  "function": "aftermath",
-  "intensity": 2,
-  "conflict_mode": "latent",
-  "hook_strength": "soft",
-  "reveal_quota": 1,
-  "setback_level": 1,
-  "emotional_curve": "down_then_stable",
-  "primary_progress": "character_state",
-  "tension_source": "上一章失败后的沉默、未说出口的愧疚、队伍信任裂缝",
-  "ending_mode": "soft_resonance",
-  "must_have": [
-    "呈现上一章代价",
-    "让主角从麻木过渡到重新行动",
-    "保留一个轻微不安的细节"
-  ],
-  "must_not": [
-    "不要新增外部袭击",
-    "不要制造重大背叛",
-    "不要硬结尾钩子",
-    "不要提前揭示核心秘密"
-  ],
-  "defer_to_later": [
-    "敌方真正计划",
-    "主角身世真相",
-    "队友正面决裂"
-  ]
-}
-```
-
-### 4.3 字段说明
-
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `chapter` | int | 章节序号 |
-| `function` | enum | 本章功能，如 setup/build/breather/aftermath/twist/climax/resolution |
-| `intensity` | int 1-5 | 本章目标强度 |
-| `conflict_mode` | enum | none/latent/internal/external/mixed |
-| `hook_strength` | enum | none/soft/medium/hard |
-| `reveal_quota` | int | 本章最多揭示几个关键新信息 |
-| `setback_level` | int 0-5 | 主角受挫程度 |
-| `emotional_curve` | string | 情绪曲线，如 rise/fall/down_then_stable |
-| `primary_progress` | enum | 情节、人物、关系、信息、氛围、位置转移等 |
-| `tension_source` | string | 本章张力来源，不等同于显性冲突 |
-| `ending_mode` | enum | soft_resonance/question/hard_hook/cliffhanger/closure |
-| `must_have` | list[str] | 本章必须完成的功能 |
-| `must_not` | list[str] | 本章禁止出现的升级行为 |
-| `defer_to_later` | list[str] | 有价值但应延后的信息或冲突 |
-
-### 4.4 强度定义
-
-| 强度 | 功能定位 | 允许内容 | 禁止内容 |
-|---|---|---|---|
-| 1 | 静态余波 / 情绪沉淀 | 情绪变化、关系微变、信息整理 | 新危机、强反转、硬钩子 |
-| 2 | 铺垫 / 低压过渡 | 暗示、软悬念、目标转移 | 正面对抗升级、重大揭示 |
-| 3 | 常规推进 | 局部冲突、中等转折、明确目标变化 | 卷级高潮、连续强爆点 |
-| 4 | 小高潮 / 强转折 | 明显冲突、代价、反转 | 把终局秘密全部揭完 |
-| 5 | 高潮 / 摊牌 / 终局爆发 | 强对抗、重大代价、硬钩子 | 过多解释、无代价胜利 |
-
----
-
-## 5. 目标架构
-
-### 5.1 改造后整体流程
-
-```mermaid
-flowchart TD
-    D[Director Agent] --> O[Outline Graph]
-    O --> PC[生成卷级 Pacing Curve]
-    PC --> CP[Chapter Planning]
-
-    CP --> PT[读取 / 生成 Pacing Target]
-    PT --> CG[chapter_goal_agent]
-    PT --> CA{是否需要冲突 Agent?}
-    CA -- intensity >= 3 --> CC[chapter_conflict_agent]
-    CA -- intensity < 3 --> CR[restraint_agent]
-
-    PT --> HA{是否需要钩子 Agent?}
-    HA -- medium/hard --> CH[chapter_hook_agent]
-    HA -- none/soft --> CE[ending_resonance_agent]
-
-    CG --> CS[chapter_card_synthesizer]
-    CC --> CS
-    CR --> CS
-    CH --> CS
-    CE --> CS
-    CS --> VCC[节奏感知章节卡校验]
-
-    VCC --> SP[Scene Planning]
-    SP --> PSG[节奏感知场景拆分]
-    PSG --> PG[pacing_guard_check]
-    PG --> SS[scene_synthesizer]
-
-    SS --> DR[Drafting]
-    DR --> DE[基础正文生成]
-    DE --> POL{按 Pacing Target 选择增强器}
-    POL -- hard hook allowed --> HE[hook_enhance]
-    POL -- quiet chapter --> RP[restraint / emotional_resonance polish]
-    POL --> SN[style_normalize]
-
-    SN --> RV[Review]
-    RV --> RVE{按强度选择审稿配置}
-    RVE --> RS[review_synthesizer]
-    RS --> RISK{是否违反节奏目标?}
-    RISK -- 是 --> BG[放入 backlog / rejected]
-    RISK -- 否且 P0/P1 --> RE[Revision]
-    RISK -- 否且 P2/P3 --> BG
-
-    RE --> RP2[revision_plan 分类]
-    RP2 --> TR[targeted_reviser 只执行安全任务]
-    TR --> F[Finalize]
-    F --> ACT[记录实际强度 / 更新 Bible / 回调后续节奏]
-```
-
-### 5.2 新增关键机制
-
-| 机制 | 作用 |
+| 组件 | 职责 |
 |---|---|
-| Pacing Curve | 卷级章节强度曲线 |
-| Pacing Target | 单章节奏合同 |
-| Conditional Agent Routing | 冲突/钩子/审稿 Agent 条件运行 |
-| Pacing-aware Validation | 校验字段按章节功能变化 |
-| Rejected Suggestions | 正式记录不采纳建议 |
-| Backlog Suggestions | 有价值但延后的建议 |
-| Pacing Guard Review | 检查是否过度升压 |
-| Actual Intensity Tracking | 定稿后记录实际强度，反馈给后续章节 |
+| `corpus/ingest.py` | 扫描本地小说文件，识别编码、元数据、文件指纹 |
+| `corpus/chunker.py` | 按章节、场景、段落、长度切分 |
+| `corpus/index.py` | 读写 `manifest.json`、`works.jsonl`、`chapters.jsonl`、`scenes.jsonl`、`chunks.jsonl` |
+| `corpus/craft_schema.py` | 定义 Craft 数据结构 |
+| `corpus/craft_extractor.py` | 从 chunk / chapter / scene 提炼创作方法 |
+| `corpus/craft_query_planner.py` | 根据当前阶段、题材、Pacing Target 生成检索意图 |
+| `corpus/craft_retriever.py` | 从 profiles 中检索适合当前阶段的方法 |
+| `corpus/craft_brief.py` | 合成 StageCraftBrief |
+| `corpus/craft_resolver.py` | 在图节点中统一生成并保存 brief |
+| `corpus/similarity_guard.py` | 检测过度相似和原文复刻风险 |
+| `corpus/project_memory.py` | 从已定稿章节沉淀本项目自己的 craft memory |
+| `context_builder.py` | 只负责注入已生成的 craft brief，不负责检索和生成 |
+| `artifacts.py` | 注册 craft 相关项目产物 |
+| `state.py` | 只保存 craft 轻量状态，不保存大文本 |
 
 ---
 
-## 6. 各流程改造方案
+## 4. 新增目录与文件
 
-## 6.1 Outline Graph 改造
-
-### 当前问题
-
-Outline 阶段已经包含故事流、卷纲、章纲，但缺少一个明确的“章节节奏曲线”产物。后续章节规划只能看到“这一章要发生什么”，却不知道“这一章应该有多强”。
-
-### 改造目标
-
-在 `story_flow` 或 `chapter_outline` 阶段生成 `Pacing Curve`。
-
-### 推荐新增产物
-
-文件建议：
+### 4.1 新增源码目录
 
 ```text
-projects/<project>/outline/pacing_curve.json
-projects/<project>/outline/pacing_curve.md
+src/ai_novelist/corpus/
+  __init__.py
+  encoding.py
+  models.py
+  ingest.py
+  chunker.py
+  index.py
+  craft_schema.py
+  craft_extractor.py
+  craft_query_planner.py
+  craft_retriever.py
+  craft_brief.py
+  craft_resolver.py
+  similarity_guard.py
+  project_memory.py
+  quality_report.py
+  mock.py
 ```
 
-或写入已有 outline artifact：
+说明：
 
 ```text
-outline_stage_artifacts["pacing_curve"]
+models.py              低层 corpus 数据结构：Work、Chapter、Scene、Chunk。
+craft_schema.py        高层 craft 数据结构：CraftProfile、CraftEvidence、StageCraftBrief。
+mock.py                mock extractor / mock resolver，保证测试不依赖真实模型。
+quality_report.py      输出索引质量报告和异常文件报告。
 ```
 
-### Pacing Curve 示例
-
-```json
-{
-  "volume": 1,
-  "chapters": [
-    {
-      "chapter": 1,
-      "function": "setup",
-      "intensity": 2,
-      "primary_progress": "world_and_character",
-      "hook_strength": "soft",
-      "notes": "建立主角处境和核心缺口，不制造大爆点"
-    },
-    {
-      "chapter": 2,
-      "function": "build",
-      "intensity": 3,
-      "primary_progress": "plot",
-      "hook_strength": "medium",
-      "notes": "引入外部压力，但不进入正面摊牌"
-    },
-    {
-      "chapter": 3,
-      "function": "breather",
-      "intensity": 2,
-      "primary_progress": "relationship",
-      "hook_strength": "soft",
-      "notes": "降低事件压力，推进人物关系和暗线"
-    },
-    {
-      "chapter": 4,
-      "function": "twist",
-      "intensity": 4,
-      "primary_progress": "reveal",
-      "hook_strength": "hard",
-      "notes": "第一次认知反转"
-    },
-    {
-      "chapter": 5,
-      "function": "aftermath",
-      "intensity": 1,
-      "primary_progress": "emotion",
-      "hook_strength": "none",
-      "notes": "呈现上一章代价，不新增危机"
-    }
-  ]
-}
-```
-
-### Prompt 修改规则
-
-在 `story_flow` 或 `chapter_outline` 的 synthesizer prompt 中加入：
+### 4.2 新增 prompt
 
 ```text
-必须输出卷级节奏曲线。
-每章必须标注：function、intensity、primary_progress、hook_strength、conflict_mode。
-不允许连续三章 intensity >= 4，除非用户明确要求高压快节奏。
-每个高潮或反转后，至少规划一个 aftermath/breather/resolution 类型章节或场景段落。
-低强度章节的成功标准不是冲突强，而是情绪、关系、信息或氛围推进有效。
+src/ai_novelist/prompts/craft_profile_extractor.md
+src/ai_novelist/prompts/stage_craft_brief_synthesizer.md
+src/ai_novelist/prompts/project_craft_memory_extractor.md
+src/ai_novelist/prompts/partials/author_craft_policy.md
 ```
 
-### 验收标准
+如果当前 prompt loader 暂不支持 partial，第一版可以先在核心 prompt 中复制 policy，但最终目标是支持统一注入。
 
-- `chapter_outline` 之后能查到每章 `function` 和 `intensity`。
-- 后续 `plan_chapter` 可以读取对应章节的 Pacing Target。
-- 章纲里不再只有“事件列表”，而有“节奏功能”。
+### 4.3 新增测试
+
+```text
+tests/fixtures/corpus/mock_novel_a.txt
+tests/fixtures/corpus/mock_novel_b.txt
+tests/fixtures/corpus/mock_novel_a.meta.json
+
+tests/test_corpus_encoding.py
+tests/test_corpus_ingest.py
+tests/test_corpus_chunker.py
+tests/test_corpus_index.py
+tests/test_craft_schema.py
+tests/test_craft_extractor_mock.py
+tests/test_craft_query_planner.py
+tests/test_craft_retriever.py
+tests/test_craft_resolver.py
+tests/test_craft_context_builder.py
+tests/test_similarity_guard.py
+tests/test_project_craft_memory.py
+tests/test_cli_craft.py
+tests/smoke_author_craft_mock.py
+```
+
+测试 fixture 必须是自造短篇，不使用真实版权文本。
 
 ---
 
-## 6.2 Chapter Planning Graph 改造
+## 5. 数据产物目录
 
-### 当前问题
+### 5.1 全局 corpus index
 
-当前章节规划固定运行：
-
-```text
-chapter_goal_agent
-chapter_conflict_agent
-chapter_hook_agent
-chapter_card_synthesizer
-```
-
-这会让所有章节都被强制考虑冲突和钩子。
-
-### 改造目标
-
-章节规划先读取或生成 `PacingTarget`，再决定运行哪些 Agent。
-
-### 新流程
-
-```mermaid
-flowchart TD
-    A[select_chapter] --> B[load_chapter_context]
-    B --> C[load_pacing_target]
-    C --> D[chapter_goal_agent]
-    C --> E{intensity >= 3 或 conflict_mode 为 external/mixed?}
-    E -- 是 --> F[chapter_conflict_agent]
-    E -- 否 --> G[restraint_agent]
-    C --> H{hook_strength 为 medium/hard?}
-    H -- 是 --> I[chapter_hook_agent]
-    H -- 否 --> J[ending_resonance_agent]
-    D --> K[chapter_card_synthesizer]
-    F --> K
-    G --> K
-    I --> K
-    J --> K
-    K --> L[validate_chapter_card]
-    L --> M[save_chapter_card]
-```
-
-### 推荐新增 Agent
-
-#### `chapter_pacing_agent`
-
-职责：如果大纲里没有明确节奏目标，则根据章纲和前后章节推断本章 Pacing Target。
-
-输出：只输出 JSON。
-
-```json
-{
-  "chapter": 3,
-  "function": "breather",
-  "intensity": 2,
-  "conflict_mode": "latent",
-  "hook_strength": "soft",
-  "primary_progress": "relationship",
-  "must_not": ["不要新增外部危机", "不要硬钩子"]
-}
-```
-
-#### `restraint_agent`
-
-职责：当本章是低强度、余波、铺垫或蓄势时，检查哪些建议不应该执行。
-
-输出示例：
-
-```json
-{
-  "advice": [
-    "本章应避免正面冲突升级",
-    "可用人物沉默、误解、旧物件来制造低压张力",
-    "结尾宜软收束，不要 cliffhanger"
-  ],
-  "must_not": [
-    "不要让反派直接登场袭击",
-    "不要让主角立刻发现核心真相"
-  ]
-}
-```
-
-#### `ending_resonance_agent`
-
-职责：为不需要硬钩子的章节设计“余味式结尾”。
-
-结尾类型可以是：
+默认路径：
 
 ```text
-soft_resonance：情绪余味
-quiet_question：轻微疑问
-image_echo：意象回环
-relationship_shift：关系微变
-decision_seed：微小决定
+corpus_index/
+  manifest.json
+  works.jsonl
+  chapters.jsonl
+  scenes.jsonl
+  chunks.jsonl
+  craft_units.jsonl
+  quality_report.md
+  errors.jsonl
+  pending_jobs.jsonl
+  craft_profiles/
+    works/
+      <work_id>.json
+    chapters/
+      <work_id>.jsonl
+    scenes/
+      <work_id>.jsonl
+    genres/
+      <genre>.json
 ```
 
-### Chapter Card 新 Schema
-
-建议替换原固定字段：
+环境变量可覆盖：
 
 ```text
-章节目标
-场景列表
-关键冲突
-人物变化
-结尾钩子
-连续性约束
-本章写作输入
-自检
+AI_NOVELIST_AUTHOR_CORPUS_DIR=/path/to/novels
+AI_NOVELIST_CORPUS_INDEX_DIR=corpus_index
 ```
 
-改为：
+### 5.2 项目内 craft 产物
 
 ```text
-本章功能
-目标强度
-节奏位置
-主要推进
-张力来源
-信息增量
-人物状态变化
-情绪曲线
-结尾方式
-连续性约束
-禁止升级项
-延后信息
-本章写作输入
-自检
+projects/<project>/craft/
+  stage_briefs/
+    outline_stage_direction.md
+    chapter_001_chapter_planning.md
+    chapter_001_scene_design.md
+    chapter_001_drafting.md
+    chapter_001_review.md
+    chapter_001_revision.md
+  stage_sources/
+    chapter_001_chapter_planning.sources.json
+  project_craft_memory.json
+  similarity_reports/
+    chapter_001_draft_v1.json
+    chapter_001_final.json
 ```
 
-### 字段说明
+### 5.3 Artifact 类型
 
-| 字段 | 是否必填 | 说明 |
-|---|---|---|
-| 本章功能 | 必填 | setup/build/breather/aftermath/twist/climax 等 |
-| 目标强度 | 必填 | 1-5 |
-| 节奏位置 | 必填 | 上升、下降、蓄势、爆发、余波等 |
-| 主要推进 | 必填 | 情节、人物、关系、信息、氛围、位置转移等 |
-| 张力来源 | 必填 | 可以是冲突、秘密、误解、压力、倒计时、沉默等 |
-| 信息增量 | 必填 | 本章新增或重释的信息 |
-| 人物状态变化 | 必填 | 不要求爆发式成长，可以是微变 |
-| 情绪曲线 | 必填 | 本章读者情绪走向 |
-| 结尾方式 | 必填 | 不等于钩子，可为软收束 |
-| 连续性约束 | 必填 | 与前后文、Bible、设定的约束 |
-| 禁止升级项 | 必填 | 不允许本章发生的内容 |
-| 延后信息 | 必填 | 有价值但不在本章揭示的信息 |
-| 本章写作输入 | 必填 | 给正文写作的指令 |
-| 自检 | 必填 | 本章是否遵守 pacing target |
-
-### 条件字段
-
-仅当 `intensity >= 3` 时要求：
+新增 artifact type：
 
 ```text
-关键冲突
-显性对抗
+stage_craft_brief
+stage_craft_sources
+work_craft_profile
+chapter_craft_profile
+scene_craft_profile
+genre_craft_profile
+project_craft_memory
+craft_similarity_report
+craft_quality_report
 ```
 
-仅当 `hook_strength in ["medium", "hard"]` 时要求：
+---
 
-```text
-结尾钩子
-悬念设计
-```
+## 6. 数据模型设计
 
-仅当 `function in ["aftermath", "breather", "setup"]` 时要求：
+### 6.1 Corpus 低层模型
 
-```text
-降压策略
-余味设计
-禁止升级项
-```
-
-### `validate_chapter_card` 修改思路
-
-当前校验逻辑是固定检查 `CHAPTER_CARD_SECTIONS`。建议改为动态：
+建议放在 `src/ai_novelist/corpus/models.py`。
 
 ```python
-def required_chapter_sections(pacing: PacingTarget) -> list[str]:
-    base = [
-        "本章功能",
-        "目标强度",
-        "节奏位置",
-        "主要推进",
-        "张力来源",
-        "信息增量",
-        "人物状态变化",
-        "情绪曲线",
-        "结尾方式",
-        "连续性约束",
-        "禁止升级项",
-        "延后信息",
-        "本章写作输入",
-        "自检",
-    ]
-
-    if pacing.intensity >= 3:
-        base.append("关键冲突")
-
-    if pacing.hook_strength in {"medium", "hard"}:
-        base.append("结尾钩子")
-
-    if pacing.function in {"breather", "aftermath", "setup"}:
-        base.append("降压策略")
-
-    return base
-```
-
-### Chapter Card Synthesizer Prompt 核心规则
-
-```text
-你不是会议纪要员，而是主编。
-不要汇总所有 Agent 建议。
-只采纳最符合 Pacing Target 的 1-3 个核心建议。
-
-必须输出：
-1. adopted_suggestions：采纳的建议。
-2. rejected_suggestions：不采纳的建议，并说明违反了哪条 pacing 约束。
-3. deferred_suggestions：有价值但延后到后续章节的建议。
-4. must_not：本章禁止出现的升级项。
-
-如果 Agent 建议会让章节强度超过目标强度，必须拒绝或延后。
-低强度章节不应因为缺少硬冲突而被补硬冲突。
-```
-
----
-
-## 6.3 Scene Planning Graph 改造
-
-### 当前问题
-
-场景字段固定包含：
-
-```text
-冲突对象
-场景转折
-```
-
-这会让每个场景都被设计成冲突单元，不利于低谷、过渡、余波和氛围场景。
-
-### 改造目标
-
-把“冲突对象 / 场景转折”降级为条件字段，把“张力来源 / 微变化”提升为基础字段。
-
-### 新 Scene Card Schema
-
-```text
-场景编号
-地点
-出场人物
-场景目的
-人物目标
-张力来源
-关键信息
-情绪变化
-微变化 / 转折
-退出状态
-节奏约束
-禁止升级项
-```
-
-### 条件字段
-
-```python
-def required_scene_fields(pacing: PacingTarget) -> list[str]:
-    fields = [
-        "场景编号",
-        "地点",
-        "出场人物",
-        "场景目的",
-        "人物目标",
-        "张力来源",
-        "关键信息",
-        "情绪变化",
-        "微变化 / 转折",
-        "退出状态",
-        "节奏约束",
-        "禁止升级项",
-    ]
-
-    if pacing.intensity >= 3:
-        fields.extend(["冲突对象", "显性阻力"])
-
-    if pacing.function in {"twist", "climax"}:
-        fields.append("强转折")
-
-    return fields
-```
-
-### `conflict_check_agent` 改造
-
-把 `conflict_check_agent` 改成 `tension_check_agent` 或 `pacing_guard_agent`。
-
-职责从：
-
-```text
-检查场景冲突是否足够。
-```
-
-改为：
-
-```text
-检查场景张力是否符合本章 Pacing Target。
-高强度章节：检查冲突是否足够。
-低强度章节：检查是否过度冲突、过早爆发、硬造转折。
-```
-
-### 低强度场景示例
-
-```markdown
-## 场景 2
-
-- 地点：废弃观测站走廊
-- 出场人物：主角、队友 A
-- 场景目的：呈现上一章失败后的沉默代价
-- 人物目标：主角想避免谈论牺牲者，队友 A 想确认他是否还能继续行动
-- 张力来源：双方都知道问题存在，但都不说破
-- 关键信息：牺牲者留下的记录器仍在闪烁
-- 情绪变化：压抑 → 短暂接近 → 再次退开
-- 微变化：主角第一次没有把记录器扔掉，而是收进衣袋
-- 退出状态：队友 A 不再追问，但信任尚未恢复
-- 节奏约束：保持低压，不新增敌袭
-- 禁止升级项：不揭示记录器内容，不爆发争吵
-```
-
-### Scene Synthesizer Prompt 核心规则
-
-```text
-不要把每个场景都写成正面对抗。
-低强度章节的场景必须有“微变化”，但不要求强转折。
-张力可以来自沉默、误解、时间压力、信息不对称、旧伤、未完成承诺。
-如果本章 intensity <= 2，禁止新增袭击、背叛、爆炸、摊牌、重大秘密揭示。
-```
-
----
-
-## 6.4 Drafting Graph 改造
-
-### 当前问题
-
-当前写作增强链路类似：
-
-```text
-merge_scenes
-  ↓
-dialogue_enhance
-  ↓
-atmosphere_enhance
-  ↓
-hook_enhance
-  ↓
-style_normalize
-```
-
-`hook_enhance` 固定执行，会把不需要硬钩子的章节也推向悬念结尾。
-
-### 改造目标
-
-按 `PacingTarget` 动态选择增强器。
-
-### 新流程
-
-```mermaid
-flowchart TD
-    A[load_drafting_context] --> B[draft_scene_batch]
-    B --> C[merge_scenes]
-    C --> D[dialogue_enhance]
-    D --> E[atmosphere_enhance]
-    E --> F{hook_strength?}
-    F -- medium/hard --> G[hook_enhance]
-    F -- none/soft --> H[emotional_resonance_polish]
-    G --> I[style_normalize]
-    H --> I
-    I --> J[save_draft]
-```
-
-### 推荐新增增强器
-
-#### `restraint_polisher`
-
-用于低谷、余波、铺垫章。
-
-职责：
-
-```text
-压住过度解释、过度冲突、过度爆点。
-保留情绪余味和人物微变化。
-不新增重大事件。
-```
-
-#### `emotional_resonance_polisher`
-
-用于低强度但需要读者有余味的章节。
-
-职责：
-
-```text
-强化意象回环、情绪尾音、人物潜台词。
-不制造硬悬念。
-```
-
-#### `quiet_tension_polisher`
-
-用于蓄势章节。
-
-职责：
-
-```text
-让压力存在但不爆发。
-增强信息不对称、倒计时、环境暗示。
-不提前揭示核心秘密。
-```
-
-### Enhancer 通用硬约束
-
-所有 Enhancer Prompt 都应加入：
-
-```text
-必须服从 Pacing Target。
-不得新增 Pacing Target 未允许的重大冲突、反转、揭示、袭击、背叛、死亡、爆炸或硬钩子。
-不得让章节强度超过目标强度。
-如果发现原文已经过度升压，应优先降压，而不是继续增强。
-```
-
-### 建议改进：从整章覆盖改为 Patch 输出
-
-当前增强器如果每轮都覆盖整章，容易造成漂移。建议中期改成 Patch 模式。
-
-Patch 输出示例：
-
-```json
-{
-  "patches": [
-    {
-      "target": "结尾后三段",
-      "operation": "replace",
-      "reason": "原结尾制造了硬悬念，违反 hook_strength=soft",
-      "new_text": "……"
-    }
-  ],
-  "pacing_check": {
-    "target_intensity": 2,
-    "estimated_intensity_after_patch": 2,
-    "violations": []
-  }
-}
-```
-
-第一阶段可以先保留整章覆盖，但必须加强 Prompt 约束；第二阶段再做 Patch 化。
-
----
-
-## 6.5 Review Graph 改造
-
-### 当前问题
-
-当前多编辑审稿固定运行：
-
-```text
-continuity_editor
-structure_editor
-character_arc_editor
-style_editor
-simulated_reader
-```
-
-这对高强度章节有效，但对低谷和余波章节容易误判。
-
-### 改造目标
-
-按章节强度选择审稿配置，并加入 `pacing_guard_editor`。
-
-### 审稿配置建议
-
-| 章节类型 | intensity | 推荐审稿 Agent |
-|---|---:|---|
-| setup / breather / aftermath | 1-2 | continuity_editor、style_editor、pacing_guard_editor、emotional_resonance_editor |
-| build / investigation / transition | 3 | continuity_editor、structure_editor、character_arc_editor、style_editor、pacing_guard_editor |
-| twist / climax / finale | 4-5 | continuity_editor、structure_editor、character_arc_editor、style_editor、simulated_reader、pacing_guard_editor |
-
-### 新增 `pacing_guard_editor`
-
-职责：
-
-```text
-检查章节是否违反 Pacing Target。
-如果章节过度升压，指出哪些段落制造了不该有的冲突、转折或钩子。
-如果章节强度不足，也只在目标强度允许范围内提出建议。
-```
-
-输出示例：
-
-```json
-{
-  "estimated_actual_intensity": 4,
-  "target_intensity": 2,
-  "violations": [
-    {
-      "type": "over_escalation",
-      "evidence": "结尾新增反派袭击，违反 must_not: 不新增外部危机",
-      "severity": "P1",
-      "fix": "删除袭击，改为记录器闪烁的软悬念"
-    }
-  ],
-  "safe_suggestions": [
-    "保留主角收起记录器的动作作为微变化"
-  ]
-}
-```
-
-### Review Synthesizer 修改规则
-
-审稿汇总必须分级：
-
-| 级别 | 定义 | 是否进入 Revision |
-|---|---|---|
-| P0 | 逻辑断裂、设定冲突、人物行为严重不成立 | 是 |
-| P1 | 明显影响读者理解或破坏 Pacing Target | 是 |
-| P2 | 可改善但非阻塞 | 默认否，进入可选 |
-| P3 | 主观偏好或风格建议 | 否，进入 backlog |
-
-必须新增三类输出：
-
-```json
-{
-  "blocking_fixes": [],
-  "pacing_safe_fixes": [],
-  "backlog_suggestions": [],
-  "rejected_suggestions": []
-}
-```
-
-### 关键规则
-
-```text
-低强度章节不能因为“没有强冲突”被判失败。
-只有当低强度章节缺少情绪变化、信息增量、人物状态变化或节奏功能时，才算结构问题。
-任何会让章节超过 target_intensity 的建议，必须进入 backlog 或 rejected_suggestions。
-review_synthesizer 不得新增五个 editor 未提出的问题。
-```
-
----
-
-## 6.6 Revision Graph 改造
-
-### 当前问题
-
-Revision Graph 会根据 review report 生成修订计划并执行。如果 review report 把“增强冲突、加强钩子”作为任务传入，修订流程就会执行，导致节奏漂移。
-
-### 改造目标
-
-修订计划必须分为：
-
-```text
-blocking_fixes
-pacing_safe_fixes
-backlog_suggestions
-rejected_suggestions
-```
-
-只有前两类允许进入正文修订。
-
-### 新 Revision Plan Schema
-
-```json
-{
-  "chapter": 5,
-  "pacing_target": {
-    "function": "aftermath",
-    "intensity": 1,
-    "hook_strength": "none"
-  },
-  "blocking_fixes": [
-    {
-      "id": "fix-001",
-      "severity": "P0",
-      "target": "第三场",
-      "problem": "角色知道了自己不该知道的信息",
-      "instruction": "删除这句台词，改为模糊猜测"
-    }
-  ],
-  "pacing_safe_fixes": [
-    {
-      "id": "fix-002",
-      "severity": "P1",
-      "target": "结尾",
-      "problem": "结尾硬造敌袭，超过目标强度",
-      "instruction": "改为安静的不安细节，不出现敌人"
-    }
-  ],
-  "backlog_suggestions": [
-    {
-      "id": "backlog-001",
-      "reason": "增强反派正面威胁适合第 7 章小高潮，不适合本章余波"
-    }
-  ],
-  "rejected_suggestions": [
-    {
-      "id": "reject-001",
-      "reason": "让队友当场背叛违反 must_not"
-    }
-  ]
-}
-```
-
-### Targeted Reviser 约束
-
-```text
-只执行 blocking_fixes 和 pacing_safe_fixes。
-不得执行 backlog_suggestions。
-不得执行 rejected_suggestions。
-不得自行新增冲突、钩子、反转、死亡、背叛、秘密揭示。
-修订后必须输出 pacing_self_check。
-```
-
-### Revision Self Check 增强
-
-新增检查：
-
-```json
-{
-  "pacing_self_check": {
-    "target_intensity": 2,
-    "estimated_actual_intensity": 2,
-    "hook_strength_target": "soft",
-    "hook_strength_actual": "soft",
-    "violations": [],
-    "notes": "修订未新增外部危机"
-  }
-}
-```
-
----
-
-## 6.7 Finalize Graph 改造
-
-### 当前问题
-
-Finalize 目前主要负责保存定稿、摘要和更新 Bible。建议额外记录“实际节奏结果”。
-
-### 改造目标
-
-定稿后提取：
-
-```text
-actual_intensity
-actual_function
-actual_hook_strength
-actual_reveals
-unresolved_threads
-pacing_deviation
-```
-
-### 新增产物
-
-```text
-projects/<project>/chapters/chapter_005/pacing_report.json
-```
-
-示例：
-
-```json
-{
-  "chapter": 5,
-  "target": {
-    "function": "aftermath",
-    "intensity": 1,
-    "hook_strength": "none"
-  },
-  "actual": {
-    "function": "aftermath",
-    "intensity": 2,
-    "hook_strength": "soft"
-  },
-  "deviation": {
-    "intensity_delta": 1,
-    "acceptable": true,
-    "reason": "结尾保留轻微不安细节，但未制造硬钩子"
-  },
-  "carry_forward": [
-    "记录器内容未揭示",
-    "队友 A 对主角信任降低"
-  ]
-}
-```
-
-### 后续节奏回调
-
-如果连续章节实际强度高于目标，应提醒 Director：
-
-```text
-最近 3 章实际强度均高于目标，建议下一章改为 breather/aftermath，或降低 hook_strength。
-```
-
-如果连续章节强度过低，也可以提醒：
-
-```text
-最近 3 章实际强度偏低，建议下一章进入 build/twist，增加显性目标或局部冲突。
-```
-
----
-
-## 7. 代码改动清单
-
-## 7.1 新增文件：`src/ai_novelist/pacing.py`
-
-建议职责：
-
-```text
-定义 PacingTarget。
-定义 PacingCurve。
-从 chapter_card 中解析 pacing 信息。
-从 outline artifacts 中读取 pacing curve。
-提供 fallback 推断。
-提供章节强度和 hook 规则判断。
-```
-
-示例骨架：
-
-```python
-from __future__ import annotations
-
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any
 
-ChapterFunction = Literal[
-    "setup",
-    "build",
-    "breather",
-    "aftermath",
-    "transition",
-    "twist",
-    "climax",
-    "resolution",
+@dataclass(frozen=True)
+class CorpusWork:
+    work_id: str
+    title: str
+    author: str = ""
+    genre: list[str] = field(default_factory=list)
+    source_path: str = ""
+    sha256: str = ""
+    char_count: int = 0
+    encoding: str = "utf-8"
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+@dataclass(frozen=True)
+class CorpusChapter:
+    chapter_id: str
+    work_id: str
+    chapter_index: int
+    title: str
+    char_start: int
+    char_end: int
+    role_hint: str = ""  # opening/setup/escalation/midpoint/climax/aftermath/resolution
+
+@dataclass(frozen=True)
+class CorpusScene:
+    scene_id: str
+    work_id: str
+    chapter_id: str
+    scene_index: int
+    char_start: int
+    char_end: int
+    position: str = ""  # scene_opening/scene_middle/scene_ending
+
+@dataclass(frozen=True)
+class RetrievalChunk:
+    chunk_id: str
+    work_id: str
+    chapter_id: str
+    scene_id: str
+    chunk_index: int
+    text: str
+    char_start: int
+    char_end: int
+    chapter_index: int
+    chapter_title: str
+    position: str
+    tags: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+```
+
+### 6.2 Craft 高层模型
+
+建议放在 `src/ai_novelist/corpus/craft_schema.py`。
+
+```python
+from dataclasses import dataclass, field
+from typing import Any, Literal
+
+CraftFacet = Literal[
+    "premise",
+    "conflict",
+    "character_arc",
+    "relationship",
+    "scene_turn",
+    "chapter_hook",
+    "foreshadowing",
+    "information_release",
+    "pacing",
+    "restraint",
+    "narrative_distance",
+    "dialogue",
+    "atmosphere",
+    "revision_strategy",
 ]
 
-ConflictMode = Literal["none", "latent", "internal", "external", "mixed"]
-HookStrength = Literal["none", "soft", "medium", "hard"]
+ProfileScope = Literal["work", "chapter", "scene", "genre", "project"]
 
-@dataclass
-class PacingTarget:
-    chapter: int
-    function: ChapterFunction = "build"
-    intensity: int = 3
-    conflict_mode: ConflictMode = "mixed"
-    hook_strength: HookStrength = "soft"
-    reveal_quota: int = 1
-    setback_level: int = 1
-    emotional_curve: str = "neutral_to_forward"
-    primary_progress: str = "plot"
-    tension_source: str = ""
-    ending_mode: str = "soft_resonance"
-    must_have: list[str] = field(default_factory=list)
-    must_not: list[str] = field(default_factory=list)
-    defer_to_later: list[str] = field(default_factory=list)
+@dataclass(frozen=True)
+class CraftEvidence:
+    source_id: str
+    work_id: str
+    chapter_id: str = ""
+    scene_id: str = ""
+    chunk_id: str = ""
+    location_label: str = ""
+    summary: str = ""
+    # 第一版禁止保存长原文；quote 默认为空，最多允许短句，且不进入 StageCraftBrief
+    short_quote: str = ""
 
-    @property
-    def allows_hard_conflict(self) -> bool:
-        return self.intensity >= 3 and self.conflict_mode in {"external", "mixed"}
+@dataclass(frozen=True)
+class CraftNote:
+    note_id: str
+    scope: ProfileScope
+    facet: CraftFacet
+    title: str
+    pattern: str
+    why_it_works: str
+    use_when: list[str]
+    avoid_when: list[str]
+    pacing_functions: list[str]
+    intensity_range: tuple[int, int] = (1, 5)
+    evidence: list[CraftEvidence] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
+    score: float = 0.0
 
-    @property
-    def allows_hook_enhance(self) -> bool:
-        return self.hook_strength in {"medium", "hard"}
+@dataclass(frozen=True)
+class CraftProfile:
+    profile_id: str
+    scope: ProfileScope
+    work_id: str = ""
+    title: str = ""
+    author: str = ""
+    genre: list[str] = field(default_factory=list)
+    notes: list[CraftNote] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    @property
-    def is_quiet_chapter(self) -> bool:
-        return self.intensity <= 2 or self.function in {"breather", "aftermath", "setup"}
+@dataclass(frozen=True)
+class CraftContext:
+    purpose: str
+    chapter: int | None
+    stage: str
+    query_terms: list[str]
+    selected_notes: list[CraftNote]
+    sources: list[CraftEvidence]
+    max_chars: int
 
-
-def clamp_intensity(value: int) -> int:
-    return max(1, min(5, value))
-```
-
-## 7.2 修改 `NovelState`
-
-建议增加字段：
-
-```python
-current_pacing_target: dict = field(default_factory=dict)
-pacing_curve: dict = field(default_factory=dict)
-pacing_backlog: list[dict] = field(default_factory=list)
-actual_intensity_history: list[dict] = field(default_factory=list)
-```
-
-如果不想立即改 State，也可以先放在：
-
-```python
-state.director_task_args["pacing_target"]
-state.director_task_args["pacing_curve"]
-```
-
-但长期建议进入 `NovelState`。
-
-## 7.3 修改 `graph_outline.py`
-
-任务：
-
-- 在 `story_flow` 或 `chapter_outline` 阶段要求输出 pacing curve。
-- 保存 `pacing_curve.json`。
-- 将 pacing curve 注册到 artifact registry。
-
-建议新增函数：
-
-```python
-def extract_pacing_curve_from_outline(synthesis: str) -> dict:
-    ...
-
-
-def save_pacing_curve_node(data: dict, store: LocalStore) -> dict:
-    ...
-```
-
-## 7.4 修改 `graph_chapter_plan.py`
-
-任务：
-
-- 新增 `load_pacing_target_node`。
-- `run_chapter_planning_agents_node` 按 pacing target 动态选择 Agent。
-- 替换固定 `CHAPTER_CARD_SECTIONS` 为动态函数。
-- `format_reports` 增加 restraint/ending resonance 报告。
-- synthesizer prompt 注入 pacing target。
-
-建议伪代码：
-
-```python
-def select_chapter_agent_specs(pacing: PacingTarget) -> list[tuple[str, str]]:
-    specs = [("chapter_goal_report", "chapter_goal_agent")]
-
-    if pacing.allows_hard_conflict:
-        specs.append(("chapter_conflict_report", "chapter_conflict_agent"))
-    else:
-        specs.append(("chapter_restraint_report", "restraint_agent"))
-
-    if pacing.allows_hook_enhance:
-        specs.append(("chapter_hook_report", "chapter_hook_agent"))
-    else:
-        specs.append(("chapter_ending_report", "ending_resonance_agent"))
-
-    return specs
-```
-
-## 7.5 修改 `graph_scene.py`
-
-任务：
-
-- 将固定 `SCENE_FIELDS` 改为动态字段。
-- 将 `conflict_check_agent` 改成 `tension_check_agent` 或 `pacing_guard_agent`。
-- 场景合成 Prompt 注入 pacing target。
-- 低强度章节校验“是否过度冲突”，而不是“冲突是否不足”。
-
-## 7.6 修改 `graph_drafting.py`
-
-任务：
-
-- `hook_enhance` 改为条件执行。
-- 新增 `restraint_polisher`、`emotional_resonance_polisher`、`quiet_tension_polisher`。
-- Enhancer Prompt 注入 pacing target 和 must_not。
-- 中期改成 Patch 输出，减少整章重写漂移。
-
-伪代码：
-
-```python
-def route_after_atmosphere(state: dict) -> str:
-    pacing = get_pacing_target(state)
-    if pacing.allows_hook_enhance:
-        return "hook_enhance"
-    if pacing.function == "aftermath":
-        return "emotional_resonance_polish"
-    if pacing.function in {"setup", "breather"}:
-        return "restraint_polish"
-    return "style_normalize"
-```
-
-## 7.7 修改 `graph_review.py`
-
-任务：
-
-- 审稿 Agent 按 pacing target 动态选择。
-- 新增 `pacing_guard_editor`。
-- review_synthesizer 输出 severity、blocking_fixes、pacing_safe_fixes、backlog_suggestions、rejected_suggestions。
-- 低强度章节不因缺少硬冲突失败。
-
-伪代码：
-
-```python
-def select_review_agents(pacing: PacingTarget) -> list[str]:
-    if pacing.intensity <= 2:
-        return [
-            "continuity_editor",
-            "style_editor",
-            "pacing_guard_editor",
-            "emotional_resonance_editor",
-        ]
-
-    if pacing.intensity == 3:
-        return [
-            "continuity_editor",
-            "structure_editor",
-            "character_arc_editor",
-            "style_editor",
-            "pacing_guard_editor",
-        ]
-
-    return [
-        "continuity_editor",
-        "structure_editor",
-        "character_arc_editor",
-        "style_editor",
-        "simulated_reader",
-        "pacing_guard_editor",
-    ]
-```
-
-## 7.8 修改 `graph_revision.py`
-
-任务：
-
-- Revision Plan 分类。
-- Targeted Reviser 只执行 blocking_fixes 和 pacing_safe_fixes。
-- Revision Self Check 增加 pacing_self_check。
-- backlog_suggestions 写入 state 或 artifact，但不进入正文。
-
-## 7.9 修改 Prompt 文件
-
-需要新增或修改的 Prompt：
-
-```text
-prompts/chapter_pacing_agent.md
-prompts/restraint_agent.md
-prompts/ending_resonance_agent.md
-prompts/pacing_guard_editor.md
-prompts/emotional_resonance_editor.md
-prompts/restraint_polisher.md
-prompts/emotional_resonance_polisher.md
-prompts/quiet_tension_polisher.md
-
-prompts/chapter_card_synthesizer.md
-prompts/scene_synthesizer.md
-prompts/review_synthesizer.md
-prompts/revision_planner.md
-prompts/targeted_reviser.md
-prompts/hook_enhancer.md
+@dataclass(frozen=True)
+class StageCraftBrief:
+    project_id: str
+    purpose: str
+    chapter: int | None
+    stage: str
+    content: str
+    source_profile_ids: list[str]
+    source_note_ids: list[str]
+    source_evidence: list[CraftEvidence]
+    digest: str
+    metadata: dict[str, Any] = field(default_factory=dict)
 ```
 
 ---
 
-## 8. 全局 Prompt 片段
+## 7. Phase 0：Author Craft Contract
 
-## 8.1 Pacing Discipline
+### 7.1 目标
 
-建议所有综合、写作、审稿、修订类 Agent 都加入：
+先定义系统边界，避免后续实现变成“本地小说模仿器”。
+
+### 7.2 要做的改动
+
+新增：
 
 ```text
-## Pacing Discipline
-
-你必须服从 Pacing Target。
-Pacing Target 的优先级高于局部 Agent 建议。
-
-如果本章 intensity <= 2：
-- 禁止新增重大外部危机。
-- 禁止新增硬反转。
-- 禁止制造 cliffhanger 式硬钩子。
-- 禁止让人物关系立即爆炸，除非 Pacing Target 明确允许。
-- 可以通过沉默、误解、旧伤、信息不对称、意象回环、关系微变制造张力。
-
-如果本章 intensity == 3：
-- 允许局部冲突和中等转折。
-- 不允许升级为卷级高潮。
-
-如果本章 intensity >= 4：
-- 允许强冲突、明显代价、强转折。
-- 仍不得提前揭示 defer_to_later 中的信息。
+docs/author_craft_contract.md
+src/ai_novelist/prompts/partials/author_craft_policy.md
+tests/test_author_craft_contract.py
 ```
 
-## 8.2 Synthesizer Rule
+`author_craft_policy.md` 内容必须包含：
 
 ```text
-## Synthesizer Rule
+你可能会收到“作者构思参考”。这些内容来自本地小说库的结构化分析。
 
-你不是会议纪要员，而是主编。
-不要合并所有 Agent 建议。
-你必须做取舍。
+你应该：
+- 学习真实作者的构思方法、结构策略、冲突组织、场景推进、信息释放、节奏控制和修订策略。
+- 将其转化为当前项目自己的原创方案。
+- 优先遵守用户要求、锁定约束、小说圣经、Pacing Target 和当前阶段产物。
 
-输出必须包含：
-1. adopted_suggestions：采纳的 1-3 个核心建议。
-2. rejected_suggestions：拒绝的建议，并说明原因。
-3. deferred_suggestions：有价值但延后的建议。
-4. pacing_rationale：为什么这样安排符合 Pacing Target。
-
-任何违反 Pacing Target 的建议，不得进入正文任务。
+你不能：
+- 复刻本地小说原文。
+- 模仿某个具体作者的独特表达。
+- 搬运原作品人物、设定、情节。
+- 输出与语料高度相似的连续段落。
+- 为了贴近参考作品而覆盖本项目设定。
 ```
 
-## 8.3 Review Gate Rule
+### 7.3 验收标准
 
 ```text
-## Review Gate Rule
-
-审稿时必须先判断章节是否完成 Pacing Target。
-不要用高强度章节的标准评价低强度章节。
-
-低强度章节的成功标准：
-- 是否有情绪变化。
-- 是否有信息增量或旧信息重释。
-- 是否有人物状态微变。
-- 是否产生余味或蓄势。
-- 是否没有提前爆发。
-
-只有 P0/P1 问题可以进入修订任务。
-P2/P3 建议进入 backlog。
-```
-
-## 8.4 Revision Safety Rule
-
-```text
-## Revision Safety Rule
-
-只执行 blocking_fixes 和 pacing_safe_fixes。
-不得执行 backlog_suggestions。
-不得执行 rejected_suggestions。
-不得自行新增冲突、钩子、反转、背叛、死亡、秘密揭示。
-修订后必须给出 pacing_self_check。
+- docs/author_craft_contract.md 存在。
+- author_craft_policy.md 存在。
+- 测试能检查 policy 中包含“不复刻”“不模仿”“Pacing Target 优先”等关键短语。
 ```
 
 ---
 
-## 9. 分阶段实施计划
+## 8. Phase A：Corpus 基础设施
 
-## Phase 0：基线记录与回归样本
+### 8.1 目标
 
-### 目标
+把本地 `.txt/.md` 小说库稳定转换为 JSONL 索引。第一版不引入数据库、不引入向量库。
 
-在改造前固定现有行为，避免改完后无法判断效果。
+### 8.2 编码识别
 
-### 任务
-
-1. 选择 1 个 mock 项目和 1 个真实模型项目作为样本。
-2. 生成至少 6 章或 1 卷章节卡。
-3. 保存当前 chapter_card、scene_cards、draft、review、revision_plan。
-4. 人工标记每章实际强度。
-
-### 产物
+新增 `encoding.py`：
 
 ```text
-baseline/pacing_baseline_report.md
-baseline/chapter_intensity_table.csv
+read_text_with_fallback(path: Path) -> tuple[str, str]
 ```
 
-### 验收
-
-有一份表格记录：
+支持顺序：
 
 ```text
-章节 | 当前功能 | 当前实际强度 | 是否硬钩子 | 是否新增冲突 | 人工评价
+utf-8
+utf-8-sig
+gb18030
+gbk
 ```
 
----
+失败时写入 `errors.jsonl`，不要让整个索引流程崩溃。
 
-## Phase 1：先改 Prompt 和章节卡 Schema
+### 8.3 文件扫描
 
-### 目标
-
-用最小代码变更解决 50% 的问题。
-
-### 任务
-
-1. 修改 `CHAPTER_CARD_SECTIONS`。
-2. 新增章节卡字段：本章功能、目标强度、张力来源、结尾方式、禁止升级项、延后信息。
-3. 修改 chapter_card_synthesizer prompt，加入 Synthesizer Rule。
-4. 修改 scene_synthesizer prompt，加入“张力来源不等于冲突”。
-5. 修改 hook_enhancer prompt，加入“不得新增硬钩子”的约束。
-6. 修改 review_synthesizer prompt，加入 P0/P1/P2/P3 分级。
-
-### 代码改动少的原因
-
-这一阶段可以暂时不做动态路由，只先让现有 Agent 在输出时服从节奏字段。
-
-### 验收
-
-- 章节卡不再固定只有“关键冲突、结尾钩子”。
-- Synthesizer 会输出 rejected/deferred suggestions。
-- 低强度章不会被 prompt 主动补硬冲突。
-
----
-
-## Phase 2：引入 Pacing Target 和动态章节规划
-
-### 目标
-
-让章节规划先有节奏目标，再选择 Agent。
-
-### 任务
-
-1. 新增 `pacing.py`。
-2. 新增 `PacingTarget` 数据结构。
-3. 新增 `load_pacing_target_node`。
-4. 新增 `chapter_pacing_agent`。
-5. 新增 `restraint_agent` 和 `ending_resonance_agent`。
-6. `run_chapter_planning_agents_node` 改为动态选择 Agent。
-7. `validate_chapter_card_node` 改为动态字段校验。
-
-### 验收
-
-- `intensity <= 2` 时不运行 `chapter_conflict_agent`，或其职责变为“避免过度冲突”。
-- `hook_strength in [none, soft]` 时不运行 `chapter_hook_agent`，改运行 `ending_resonance_agent`。
-- chapter_card 明确写出 `must_not` 和 `defer_to_later`。
-
----
-
-## Phase 3：改造场景规划和写作增强
-
-### 目标
-
-阻断“场景层”和“写作增强层”的自动升压。
-
-### 任务
-
-1. `SCENE_FIELDS` 改为动态字段。
-2. `conflict_check_agent` 改为 `pacing_guard_agent` 或 `tension_check_agent`。
-3. 低强度章节要求“微变化”，不要求“强转折”。
-4. `hook_enhance` 改成条件执行。
-5. 新增低强度章节增强器：`restraint_polisher`、`emotional_resonance_polisher`。
-6. 所有 drafting enhancer 注入 pacing target。
-
-### 验收
-
-- aftermath/breather 章节不会自动生成外部袭击或硬钩子。
-- 场景卡允许“张力来源：沉默/误解/信息不对称”。
-- 低强度章节正文结尾可以软收束。
-
----
-
-## Phase 4：改造审稿和修订
-
-### 目标
-
-防止审稿和修订把低强度章节修成高强度章节。
-
-### 任务
-
-1. 新增 `pacing_guard_editor`。
-2. Review Agent 按 `PacingTarget` 动态选择。
-3. Review Synthesizer 输出 `blocking_fixes`、`pacing_safe_fixes`、`backlog_suggestions`、`rejected_suggestions`。
-4. Revision Planner 只接收 P0/P1。
-5. Targeted Reviser 只执行允许任务。
-6. Revision Self Check 增加 pacing_self_check。
-
-### 验收
-
-- 低强度章节不会因“冲突不足”直接 fail。
-- “增强钩子 / 增强冲突 / 增加反转”类建议在不合节奏时进入 backlog。
-- 修订后实际强度不超过目标强度 + 1。
-
----
-
-## Phase 5：Finalize 回写与长期节奏调度
-
-### 目标
-
-让系统具备“整卷节奏记忆”。
-
-### 任务
-
-1. Finalize 生成 `pacing_report.json`。
-2. 记录 `actual_intensity`、`actual_hook_strength`、`actual_reveals`。
-3. 将偏差信息写回 Novel Bible 或 state。
-4. Director 在下一章规划时读取最近 3 章实际强度。
-5. 如果连续升压，建议下一章降压；如果连续低压，建议进入 build/twist。
-
-### 验收
-
-- 连续三章强度偏高时，系统能主动建议 breather/aftermath。
-- 连续三章强度偏低时，系统能主动建议 build/twist。
-- 导出的 novel_bible 能看到章节节奏轨迹。
-
----
-
-## 10. 测试计划
-
-## 10.1 单元测试
-
-建议新增测试文件：
+新增 `ingest.py`：
 
 ```text
-tests/test_pacing_target.py
-tests/test_chapter_plan_pacing.py
-tests/test_scene_pacing.py
-tests/test_review_pacing.py
-tests/test_revision_pacing.py
+scan_corpus(corpus_dir: Path) -> list[CorpusFile]
 ```
-
-### 测试 1：低强度章不运行冲突 Agent
-
-```python
-def test_quiet_chapter_uses_restraint_agent():
-    pacing = PacingTarget(chapter=3, function="breather", intensity=2, hook_strength="soft")
-    specs = select_chapter_agent_specs(pacing)
-    agent_names = [name for _, name in specs]
-
-    assert "chapter_conflict_agent" not in agent_names
-    assert "restraint_agent" in agent_names
-    assert "chapter_hook_agent" not in agent_names
-    assert "ending_resonance_agent" in agent_names
-```
-
-### 测试 2：高潮章运行冲突和钩子 Agent
-
-```python
-def test_climax_chapter_uses_conflict_and_hook_agents():
-    pacing = PacingTarget(chapter=10, function="climax", intensity=5, hook_strength="hard", conflict_mode="external")
-    specs = select_chapter_agent_specs(pacing)
-    agent_names = [name for _, name in specs]
-
-    assert "chapter_conflict_agent" in agent_names
-    assert "chapter_hook_agent" in agent_names
-```
-
-### 测试 3：低强度章节卡不强制关键冲突
-
-```python
-def test_required_sections_for_aftermath_do_not_require_key_conflict():
-    pacing = PacingTarget(chapter=5, function="aftermath", intensity=1, hook_strength="none")
-    sections = required_chapter_sections(pacing)
-
-    assert "关键冲突" not in sections
-    assert "结尾钩子" not in sections
-    assert "降压策略" in sections
-```
-
-### 测试 4：Review Synthesizer 不把 P2/P3 送入修订
-
-```python
-def test_review_only_blocks_p0_p1():
-    report = synthesize_review_reports(mock_editor_reports)
-
-    assert all(item["severity"] in {"P0", "P1"} for item in report["blocking_fixes"])
-    assert all(item["severity"] in {"P2", "P3"} for item in report["backlog_suggestions"])
-```
-
-### 测试 5：Revision 不执行 backlog
-
-```python
-def test_revision_ignores_backlog_suggestions():
-    plan = build_revision_plan(review_report_with_backlog)
-    executable = get_executable_revision_tasks(plan)
-
-    assert all(task["id"].startswith("fix-") for task in executable)
-    assert not any(task["id"].startswith("backlog-") for task in executable)
-```
-
-## 10.2 集成测试
-
-### 场景 A：余波章
-
-输入：
-
-```text
-第 5 章是上一章失败后的余波，强度 1，不要新增危机。
-```
-
-期望：
-
-- chapter_card 标注 `function=aftermath`。
-- 不出现硬钩子。
-- scene_cards 以情绪和关系变化为主。
-- review 不因冲突不足 fail。
-- revision 不新增敌袭。
-
-### 场景 B：蓄势章
-
-输入：
-
-```text
-第 7 章是大战前蓄势，强度 3，压力上升但不能爆发。
-```
-
-期望：
-
-- 有张力，但不提前高潮。
-- 可以有倒计时和信息不对称。
-- 结尾是中等悬念，不是 cliffhanger。
-
-### 场景 C：高潮章
-
-输入：
-
-```text
-第 10 章是卷末高潮，强度 5。
-```
-
-期望：
-
-- 运行 conflict/hook Agent。
-- 场景卡有正面对抗和代价。
-- review 使用完整编辑组。
-- 修订允许强化冲突，但不允许无代价胜利。
-
----
-
-## 11. 验收指标
-
-## 11.1 结构指标
-
-| 指标 | 目标 |
-|---|---:|
-| 每章拥有 Pacing Target | 100% |
-| 章节卡包含 must_not/defer_to_later | 100% |
-| 低强度章跳过硬钩子增强 | 90%+ |
-| Review 输出 severity 分级 | 100% |
-| Revision 不执行 backlog | 100% |
-
-## 11.2 内容指标
-
-| 指标 | 目标 |
-|---|---:|
-| 连续三章 intensity >= 4 的情况 | 除非用户要求，否则 0 |
-| 低强度章出现新增袭击/背叛/硬反转 | 低于 10% |
-| 每章都硬 cliffhanger 的情况 | 明显下降 |
-| 人工评价“节奏有起伏” | 明显上升 |
-| 人工评价“章节都像高潮” | 明显下降 |
-
-## 11.3 调试指标
-
-建议在 artifact 或日志中记录：
-
-```text
-chapter
-function
-intensity_target
-intensity_actual
-hook_target
-hook_actual
-agents_run
-agents_skipped
-adopted_suggestions_count
-rejected_suggestions_count
-backlog_suggestions_count
-```
-
----
-
-## 12. 风险与应对
-
-| 风险 | 表现 | 应对 |
-|---|---|---|
-| 低强度章变无聊 | 没冲突也没推进 | 强制要求信息增量、人物微变、情绪曲线 |
-| Agent 不遵守 pacing | 仍然硬造钩子 | 在 Synthesizer、Review、Revision 三层拦截 |
-| Schema 过复杂 | 产物变冗长 | 低强度章节简化字段，高强度章节增加字段 |
-| 动态路由导致漏审 | 低强度章缺少结构检查 | 保留 pacing_guard_editor 和 continuity_editor |
-| Backlog 堆积 | 建议被延后但没人处理 | Finalize 或下一章 planning 读取 backlog |
-| Prompt 与代码重复约束 | 维护成本高 | 把通用规则放到 shared prompt snippet |
-| 实际强度难判断 | LLM 判断不稳定 | 使用 1-5 粗粒度，允许 ±1 偏差 |
-
----
-
-## 13. 推荐落地顺序
-
-最推荐的执行顺序：
-
-```text
-1. 修改 chapter_card schema
-2. 给 synthesizer 加 adopted / rejected / deferred
-3. 引入 PacingTarget
-4. chapter_conflict_agent 和 chapter_hook_agent 条件运行
-5. hook_enhance 条件执行
-6. review_synthesizer 加 severity 和 backlog
-7. revision 只执行 P0/P1 + pacing_safe_fixes
-8. finalize 记录 actual_intensity
-```
-
-其中最值得优先做的是前三项：
-
-```text
-章节卡 schema + PacingTarget + Synthesizer 做取舍
-```
-
-这三项能最快改变“每章都冲突、每章都钩子”的倾向。
-
----
-
-## 14. 最小可行版本 MVP
-
-如果只想用最小改动先验证效果，做以下 5 件事：
-
-### MVP-1：章节卡新增 5 个字段
-
-```text
-本章功能
-目标强度
-张力来源
-禁止升级项
-延后信息
-```
-
-### MVP-2：把 `关键冲突` 和 `结尾钩子` 从必填改成条件项
 
 规则：
 
 ```text
-intensity >= 3 才要求关键冲突。
-hook_strength in [medium, hard] 才要求结尾钩子。
+- 递归扫描 .txt/.md。
+- 跳过隐藏目录、__MACOSX、.git、corpus_index、projects。
+- 支持同名 .meta.json。
+- 计算 sha256、size、mtime、char_count。
+- 生成稳定 work_id。
 ```
 
-### MVP-3：Synthesizer 必须输出 rejected/deferred
-
-```text
-采纳建议
-拒绝建议
-延后建议
-```
-
-### MVP-4：Hook Enhancer 加硬约束
-
-```text
-如果 hook_strength 是 none/soft，不得制造 hard hook 或 cliffhanger。
-```
-
-### MVP-5：Review 不因低强度章缺少硬冲突 fail
-
-```text
-低强度章只检查：情绪变化、信息增量、人物微变、余味或蓄势。
-```
-
-MVP 完成后，就可以先生成一卷样章对比改造前后的节奏曲线。
-
----
-
-## 15. 示例：改造后的章节卡
-
-```markdown
-# 第 5 章章节卡
-
-## 本章功能
-余波章 / aftermath。承接第 4 章失败后的代价，让读者感到主角团队受损，但不新增外部危机。
-
-## 目标强度
-1/5。
-
-## 节奏位置
-第 4 章小高潮之后的降压段。功能是沉淀、后果呈现、关系裂缝，而不是继续升级。
-
-## 主要推进
-人物状态与关系推进。
-
-## 张力来源
-主角对牺牲者的愧疚、队友未说出口的不信任、记录器仍在闪烁的信息不对称。
-
-## 信息增量
-读者知道牺牲者留下了记录器，但不知道内容。主角也暂时不打开。
-
-## 人物状态变化
-主角从麻木回避，转为愿意把记录器收起来。这是微小但明确的重新行动。
-
-## 情绪曲线
-压抑 → 短暂接近 → 安静的不安。
-
-## 结尾方式
-soft_resonance。以记录器在衣袋中轻微震动收束，不出现敌袭，不制造 cliffhanger。
-
-## 连续性约束
-上一章失败的代价必须存在。队友 A 的不信任不能在本章完全解决。
-
-## 禁止升级项
-- 不新增反派袭击。
-- 不让队友 A 当场背叛。
-- 不揭示记录器内容。
-- 不让主角立刻振作并宣战。
-
-## 延后信息
-- 记录器真正内容延后到第 7 章。
-- 队友 A 的正面爆发延后到第 6 或第 7 章。
-- 反派真正计划延后到第 8 章。
-
-## 本章写作输入
-写成安静、克制、有余味的一章。重点是动作、沉默、空间感和潜台词。不要用大段解释替代情绪。
-
-## 自检
-- 是否完成余波功能：是。
-- 是否超过目标强度：否。
-- 是否新增硬冲突：否。
-- 是否保留后续期待：是，以记录器和关系裂缝保留软期待。
-```
-
----
-
-## 16. 示例：改造后的审稿输出
+`.meta.json` 示例：
 
 ```json
 {
-  "chapter": 5,
-  "target_intensity": 1,
-  "estimated_actual_intensity": 2,
-  "pass": true,
-  "blocking_fixes": [],
-  "pacing_safe_fixes": [
-    {
-      "severity": "P1",
-      "target": "结尾",
-      "problem": "最后一句暗示敌人已到门外，接近 hard hook",
-      "instruction": "改为记录器轻微震动，保留不安但不制造外部危机"
-    }
-  ],
-  "backlog_suggestions": [
-    {
-      "severity": "P2",
-      "suggestion": "让队友 A 与主角爆发争吵",
-      "reason": "适合后续 build 章节，不适合本章余波"
-    }
-  ],
-  "rejected_suggestions": [
-    {
-      "severity": "P3",
-      "suggestion": "结尾安排反派袭击",
-      "reason": "违反 must_not: 不新增外部危机"
-    }
-  ]
+  "title": "示例小说A",
+  "author": "mock_author",
+  "genre": ["悬疑", "科幻"],
+  "permission": "user_provided"
 }
+```
+
+### 8.4 中文章节识别
+
+新增 `chunker.py`：
+
+```text
+split_chapters(text: str) -> list[ChapterSpan]
+split_scenes(chapter_text: str) -> list[SceneSpan]
+chunk_scene(scene_text: str, target_chars=2400, overlap_chars=300) -> list[ChunkSpan]
+```
+
+章节正则：
+
+```python
+CHAPTER_PATTERNS = [
+    r"^\s*第[一二三四五六七八九十百千万零〇两\d]+[章节回卷部].*$",
+    r"^\s*(序章|楔子|引子|尾声|终章|番外.*).*$",
+    r"^\s*Chapter\s+\d+.*$",
+]
+```
+
+切块参数：
+
+```text
+target_chunk_chars = 2400
+min_chunk_chars = 800
+max_chunk_chars = 3600
+overlap_chars = 300
+```
+
+切分优先级：
+
+```text
+章节标题
+  -> 场景分隔符（***、——、时间/地点跳转）
+  -> 空行
+  -> 段落
+  -> 固定长度硬切
+```
+
+### 8.5 双层切块
+
+必须同时生成：
+
+```text
+chapters.jsonl      章节级分析单元
+scenes.jsonl        场景级分析单元
+chunks.jsonl        检索用 chunk
+```
+
+原因：
+
+```text
+RetrievalChunk 用于检索。
+Chapter/Scene CraftUnit 用于提炼真实作者的构思方法。
+```
+
+### 8.6 Index 读写
+
+新增 `index.py`：
+
+```text
+build_corpus_index(corpus_dir, index_dir, incremental=True) -> CorpusIndexResult
+load_chunks(index_dir) -> Iterator[RetrievalChunk]
+load_profiles(index_dir) -> Iterator[CraftProfile]
+```
+
+写入：
+
+```text
+manifest.json
+works.jsonl
+chapters.jsonl
+scenes.jsonl
+chunks.jsonl
+quality_report.md
+errors.jsonl
+```
+
+### 8.7 增量索引
+
+`manifest.json` 记录：
+
+```json
+{
+  "version": 1,
+  "created_at": "...",
+  "updated_at": "...",
+  "corpus_dir": "/path/to/novels",
+  "files": {
+    "relative/path/a.txt": {
+      "work_id": "work_xxx",
+      "sha256": "...",
+      "mtime": 123456789,
+      "size": 10240000,
+      "status": "indexed"
+    }
+  }
+}
+```
+
+规则：
+
+```text
+sha256 未变：跳过。
+sha256 变化：重建该 work 的 works/chapters/scenes/chunks/profile。
+文件删除：清理对应 work 的索引记录。
+```
+
+### 8.8 验收标准
+
+```text
+.venv/bin/ai-novelist index-corpus --corpus-dir tests/fixtures/corpus --index-dir /tmp/corpus_index
+
+必须生成：
+- manifest.json
+- works.jsonl
+- chapters.jsonl
+- scenes.jsonl
+- chunks.jsonl
+- quality_report.md
+
+测试：
+.venv/bin/python -m pytest tests/test_corpus_encoding.py tests/test_corpus_ingest.py tests/test_corpus_chunker.py tests/test_corpus_index.py
 ```
 
 ---
 
-## 17. 最终建议
+## 9. Phase B：Craft Profile 提炼
 
-你的项目已经有比较完整的 LangGraph 创作流水线。现在最重要的不是继续增加更多 Agent，而是让所有 Agent 服从同一个“节奏主编”。
+### 9.1 目标
 
-建议把系统核心从：
+从本地小说原文中提炼“创作方法”，而不是保存原文。
 
-```text
-多 Agent 发现问题 → 汇总所有问题 → 修掉所有问题
-```
+### 9.2 Profile 分层
 
-改成：
+必须实现四层 profile：
 
 ```text
-Pacing Target 定义本章功能
-  ↓
-多 Agent 只在本章功能内提出建议
-  ↓
-Synthesizer 采纳少量建议，拒绝或延后不合节奏的建议
-  ↓
-Drafting 不越界增强
-  ↓
-Review 不用高潮章标准审低谷章
-  ↓
-Revision 只修 P0/P1 和节奏安全问题
-  ↓
-Finalize 记录实际强度并反馈后续章节
+WorkCraftProfile       一本小说整体结构方法
+ChapterCraftProfile    每章开场、推进、转折、结尾方法
+SceneCraftProfile      场景目标、阻碍、转折、退出状态
+GenreCraftProfile      多作品聚合出的类型策略
 ```
 
-这样你的小说就能形成更自然的曲线：
+第一版可以先实现 work/chapter/scene，genre aggregation 可在 Phase B 后半段完成。
+
+### 9.3 提炼维度
+
+Craft facet 至少包含：
 
 ```text
-铺垫 → 升压 → 缓冲 → 小高潮 → 余波 → 低谷 → 蓄势 → 反转 → 高潮 → 尾声
+premise
+conflict
+character_arc
+relationship
+scene_turn
+chapter_hook
+foreshadowing
+information_release
+pacing
+restraint
+narrative_distance
+dialogue
+atmosphere
+revision_strategy
 ```
 
-而不是每一章都被系统推成：
+每个 CraftNote 必须回答：
 
 ```text
-冲突 → 钩子 → 转折 → 冲突 → 钩子 → 转折
+- pattern：作者用了什么方法？
+- why_it_works：为什么有效？
+- use_when：适合什么时候使用？
+- avoid_when：什么时候不能用？
+- pacing_functions：适合哪些章节功能？
+- intensity_range：适合强度范围？
+- evidence：证据摘要，不含长原文。
 ```
 
-这也是本次改造的核心价值。
+### 9.4 Mock Extractor
+
+`--mock` 下不调用真实模型，必须稳定输出。
+
+新增：
+
+```text
+src/ai_novelist/corpus/mock.py
+```
+
+Mock 规则示例：
+
+```text
+- chapter_index == 1 -> opening / premise / hook notes
+- scene_position == ending -> chapter_hook / scene_turn notes
+- 出现“但是/然而/忽然/沉默/门/信/名单”等词 -> 生成对应标签
+```
+
+Mock 输出要稳定，不依赖随机数。
+
+### 9.5 Real Extractor
+
+真实模式使用现有 `AgentAdapter` 机制调用模型。
+
+新增 prompt：
+
+```text
+src/ai_novelist/prompts/craft_profile_extractor.md
+```
+
+Prompt 要求：
+
+```text
+- 只输出 JSON。
+- 不复述原文。
+- 不模仿作者。
+- 每条 note 最多 120 中文字。
+- evidence.summary 是分析摘要，不是原文。
+- short_quote 默认空；如必须使用，不超过 30 中文字，且不进入 StageCraftBrief。
+```
+
+### 9.6 输出文件
+
+```text
+corpus_index/craft_profiles/works/<work_id>.json
+corpus_index/craft_profiles/chapters/<work_id>.jsonl
+corpus_index/craft_profiles/scenes/<work_id>.jsonl
+corpus_index/craft_profiles/genres/<genre>.json
+```
+
+### 9.7 验收标准
+
+```text
+.venv/bin/ai-novelist extract-craft --index-dir /tmp/corpus_index --mock
+
+必须生成：
+- craft_profiles/works/*.json
+- craft_profiles/chapters/*.jsonl
+- craft_profiles/scenes/*.jsonl
+
+测试：
+.venv/bin/python -m pytest tests/test_craft_schema.py tests/test_craft_extractor_mock.py
+```
+
+---
+
+## 10. Phase C：阶段化检索与 Query Planner
+
+### 10.1 目标
+
+根据当前创作阶段、当前题材、Pacing Target、章节位置、当前项目状态，检索最相关的作者构思方法。
+
+### 10.2 Purpose -> Facet 映射
+
+新增 `craft_query_planner.py`。
+
+基础映射：
+
+```python
+PURPOSE_TO_FACETS = {
+    "outline_stage": [
+        "premise",
+        "conflict",
+        "character_arc",
+        "information_release",
+        "pacing",
+    ],
+    "chapter_planning": [
+        "chapter_hook",
+        "conflict",
+        "character_arc",
+        "information_release",
+        "pacing",
+        "restraint",
+    ],
+    "scene_design": [
+        "scene_turn",
+        "conflict",
+        "relationship",
+        "information_release",
+        "atmosphere",
+    ],
+    "drafting": [
+        "narrative_distance",
+        "dialogue",
+        "atmosphere",
+        "information_release",
+        "pacing",
+    ],
+    "review": [
+        "conflict",
+        "character_arc",
+        "chapter_hook",
+        "pacing",
+        "restraint",
+    ],
+    "revision": [
+        "revision_strategy",
+        "character_arc",
+        "information_release",
+        "foreshadowing",
+        "pacing",
+    ],
+}
+```
+
+### 10.3 Pacing Target 对检索的影响
+
+新增：
+
+```text
+plan_craft_query(state, store, purpose, chapter, stage, pacing_target) -> CraftQuery
+```
+
+如果 `pacing_target` 存在：
+
+```text
+function=breather/aftermath/setup:
+  boost facets: restraint, atmosphere, relationship, emotional pacing
+  suppress facets: hard_hook, major_reveal, external_conflict
+
+function=twist/climax:
+  boost facets: chapter_hook, reveal, conflict, information_release
+  suppress facets: over-exposition
+
+intensity <= 2:
+  只允许检索 intensity_range 覆盖 1-2 的 notes
+
+intensity >= 4:
+  可以检索 high-intensity notes，但仍必须遵守 reveal_quota
+```
+
+如果 Pacing Target 尚未实现，则使用中性默认值：
+
+```json
+{
+  "function": "unknown",
+  "intensity": 3,
+  "hook_strength": "medium",
+  "conflict_mode": "mixed"
+}
+```
+
+### 10.4 Retriever
+
+新增 `craft_retriever.py`：
+
+```text
+retrieve_craft_context(index_dir, query, max_notes=8) -> CraftContext
+```
+
+第一版检索策略：
+
+```text
+score =
+  facet_match * 3
+  + genre_match * 2
+  + stage_match * 2
+  + pacing_function_match * 2
+  + intensity_match * 2
+  + keyword_match
+  + diversity_bonus
+```
+
+不要引入向量库。中文关键词可先用字符 bigram + 简单词表。
+
+### 10.5 Source Diversity
+
+同一次 StageCraftBrief 中：
+
+```text
+- 同一本作品最多 3 条 note。
+- 同一章节最多 2 条 note。
+- 至少优先混合 work/chapter/scene 三种 scope。
+- 如果 Project Craft Memory 存在，优先插入 1-3 条本项目 notes。
+```
+
+### 10.6 验收标准
+
+```text
+- chapter_planning 检索不到 drafting-only notes。
+- breather/aftermath 不检索 hard hook 作为主建议。
+- craft_mode=off 时不检索。
+- 查询结果不包含 raw text。
+```
+
+测试：
+
+```text
+.venv/bin/python -m pytest tests/test_craft_query_planner.py tests/test_craft_retriever.py
+```
+
+---
+
+## 11. Phase D：Stage Craft Brief 合成
+
+### 11.1 目标
+
+把检索到的 CraftNotes 合成为当前阶段能直接注入 prompt 的 Markdown 简报。
+
+### 11.2 新增 `craft_brief.py`
+
+```text
+build_stage_craft_brief(context: CraftContext, pacing_target: dict | None, max_chars: int) -> StageCraftBrief
+```
+
+### 11.3 StageCraftBrief 模板
+
+```markdown
+# 作者构思参考
+
+## 使用规则
+- 只学习构思方法，不复刻原文。
+- 只学习结构策略，不模仿具体作者表达。
+- 当前项目的锁定约束、小说圣经、Pacing Target 优先级更高。
+- 如果参考方法与本章节奏目标冲突，必须放弃该参考方法。
+
+## 当前阶段
+- purpose:
+- chapter:
+- stage:
+- craft_mode:
+
+## 与 Pacing Target 的对齐
+- 本章功能：
+- 目标强度：
+- 钩子强度：
+- 冲突模式：
+- 本次可用方法：
+- 本次禁止方法：
+
+## 可采用的真实作者构思方法
+1. 方法名：
+   - 方法：
+   - 为什么有效：
+   - 适用条件：
+   - 当前项目可如何转化：
+   - 避免事项：
+
+## 本阶段应用建议
+- 对当前任务的 3-6 条具体建议。
+
+## 不应采纳的方向
+- 与 Pacing Target 或当前项目设定冲突的方向。
+
+## 来源摘要
+- work_id / profile_id / note_id / location_label / summary
+```
+
+### 11.4 字符限制
+
+配置：
+
+```text
+AI_NOVELIST_CRAFT_MAX_CHARS=3000
+```
+
+规则：
+
+```text
+- 默认最多 3000 字符。
+- strict 模式最多 4500。
+- assist 模式最多 3000。
+- review/revision 可到 4000。
+- 超限时优先保留 Pacing 对齐、应用建议、禁止方向。
+```
+
+### 11.5 验收标准
+
+```text
+- StageCraftBrief 不含长原文。
+- 生成内容包含“使用规则”“与 Pacing Target 的对齐”“可采用方法”“不应采纳方向”。
+- max_chars 生效。
+- source ids 写入 sources.json。
+```
+
+测试：
+
+```text
+.venv/bin/python -m pytest tests/test_craft_resolver.py
+```
+
+---
+
+## 12. Phase E：AuthorCraftResolver 接入
+
+### 12.1 目标
+
+不要让 `ContextBuilder` 负责检索和生成，只让它注入。新增 Resolver 在各 graph 的 load_context 节点中执行。
+
+### 12.2 新增 `craft_resolver.py`
+
+```python
+def resolve_author_craft(
+    state: NovelState,
+    store: LocalStore,
+    purpose: str,
+    chapter: int | None = None,
+    stage: str | None = None,
+    adapter: AgentAdapter | None = None,
+    max_chars: int | None = None,
+) -> NovelState:
+    ...
+```
+
+职责：
+
+```text
+1. 检查 craft_mode。
+2. 读取 corpus_index。
+3. 读取 Pacing Target。
+4. 生成 CraftQuery。
+5. 检索 CraftContext。
+6. 合成 StageCraftBrief。
+7. 保存 projects/<project>/craft/stage_briefs/*.md。
+8. 保存 projects/<project>/craft/stage_sources/*.json。
+9. 注册 artifact。
+10. 更新 state 中的轻量字段。
+```
+
+### 12.3 Graph 接入点
+
+#### 12.3.1 Chapter Planning
+
+在 `graph_chapter_plan.py` 的 `load_chapter_context_node` 中：
+
+```text
+当前：
+context = build_context(state, store, "chapter_planning", chapter=state.active_chapter, max_chars=14000)
+
+改为：
+state = resolve_author_craft(state, store, "chapter_planning", chapter=state.active_chapter)
+context = build_context(state, store, "chapter_planning", chapter=state.active_chapter, max_chars=14000)
+```
+
+#### 12.3.2 Scene Design
+
+在 `graph_scene.py` 构建 `scene_design_context` 前：
+
+```text
+state = resolve_author_craft(state, store, "scene_design", chapter=state.active_chapter)
+context = build_context(state, store, "scene_design", chapter=state.active_chapter, max_chars=14000)
+```
+
+#### 12.3.3 Drafting
+
+在 `graph_drafting.py` 构建 `drafting_context` 前：
+
+```text
+state = resolve_author_craft(state, store, "drafting", chapter=state.active_chapter)
+context = build_context(state, store, "drafting", chapter=state.active_chapter, max_chars=18000)
+```
+
+#### 12.3.4 Review
+
+在 `graph_review.py` 构建 `review_context` 前：
+
+```text
+state = resolve_author_craft(state, store, "review", chapter=state.active_chapter)
+context = build_context(state, store, "review", chapter=state.active_chapter, max_chars=18000)
+```
+
+#### 12.3.5 Revision
+
+在 `graph_revision.py` 构建 `revision_context` 前：
+
+```text
+state = resolve_author_craft(state, store, "revision", chapter=state.active_chapter)
+context = build_context(state, store, "revision", chapter=state.active_chapter, max_chars=18000)
+```
+
+#### 12.3.6 Outline Stage
+
+如果 outline graph 当前使用 `build_context(..., "outline_stage")`，在各 stage agent 前调用：
+
+```text
+state = resolve_author_craft(state, store, "outline_stage", stage=state.outline_stage)
+```
+
+第一版可以先覆盖：
+
+```text
+chapter_planning
+scene_design
+drafting
+review
+revision
+```
+
+outline_stage 可作为 Phase E 后半段。
+
+### 12.4 验收标准
+
+```text
+- 执行 plan_chapter 时生成 chapter_001_chapter_planning.md。
+- 执行 plan_scenes 时生成 chapter_001_scene_design.md。
+- 执行 write_chapter 时生成 chapter_001_drafting.md。
+- craft_mode=off 不生成 brief。
+- Resolver 失败不应中断主写作流程，应降级为“不注入作者构思参考”，并在 state.error 或 debug report 记录轻量警告。
+```
+
+---
+
+## 13. Phase F：ContextBuilder 注入
+
+### 13.1 目标
+
+`ContextBuilder` 在上下文中加入“作者构思参考”小节。
+
+### 13.2 修改 `context_builder.py`
+
+新增 profile section key：
+
+```text
+author_craft
+```
+
+新增函数：
+
+```python
+def build_author_craft_section(state: NovelState, store: LocalStore, mode: str = "brief") -> str:
+    ...
+```
+
+读取优先级：
+
+```text
+1. state.active_craft_brief_path 指向的 artifact 文件
+2. get_latest_artifact(project_dir, "stage_craft_brief", chapter=chapter, stage=purpose/stage)
+3. state.craft_context_digest
+4. 暂无
+```
+
+### 13.3 注入位置
+
+在所有创作类 profile 中，放在：
+
+```text
+锁定约束之后
+小说圣经 / chapter artifacts 之前
+```
+
+例如：
+
+```python
+"chapter_planning": ContextProfile(
+    sections=(
+        "user_request",
+        "task",
+        "locked_constraints",
+        "author_craft",
+        "chapter_outline_slice",
+        "previous_chapter_summaries",
+        "bible_digest",
+    ),
+)
+```
+
+需要修改的 profiles：
+
+```text
+director：可选，第一版不强制
+outline_role
+outline_synthesizer
+chapter_planning
+review_context
+review_editor
+review_synthesizer
+revision
+fallback build_context
+```
+
+如果当前没有 `scene_design` / `drafting` / `review` 明确 profile，要添加 profile，避免 fallback 上下文过大和不可控。
+
+### 13.4 验收标准
+
+```text
+- build_context(..., "chapter_planning") 中出现“作者构思参考”。
+- “作者构思参考”位于“锁定约束”之后。
+- craft_mode=off 时不出现该小节或显示“暂无”。
+- 不影响原有 section。
+```
+
+测试：
+
+```text
+.venv/bin/python -m pytest tests/test_craft_context_builder.py
+```
+
+---
+
+## 14. Phase G：State、Artifact、Storage
+
+### 14.1 修改 `state.py`
+
+新增轻量字段：
+
+```python
+craft_mode: str = "off"  # off / assist / strict
+active_craft_brief_path: str = ""
+craft_profile_ids: list[str] = field(default_factory=list)
+craft_sources: list[dict[str, Any]] = field(default_factory=list)
+craft_context_digest: str = ""
+craft_updated_at: str = ""
+project_craft_memory_path: str = ""
+craft_options: dict[str, Any] = field(default_factory=dict)
+```
+
+`from_dict()` 必须兼容旧 state。
+
+### 14.2 State 禁止保存
+
+不要在 state 中保存：
+
+```text
+- raw text
+- RetrievalChunk.text
+- 完整 StageCraftBrief
+- 大量 evidence
+- 大量 profiles
+```
+
+### 14.3 Artifact Registry
+
+`artifacts.py` 不需要强制改数据结构，但要在调用处注册新类型：
+
+```text
+stage_craft_brief
+stage_craft_sources
+project_craft_memory
+craft_similarity_report
+```
+
+如果需要，可以新增 helper：
+
+```python
+def save_craft_markdown_artifact(...)
+def save_craft_json_artifact(...)
+```
+
+但不要破坏现有 `save_markdown_artifact` / `save_json_artifact`。
+
+### 14.4 LocalStore
+
+如果 `LocalStore` 已有 path helper，可新增：
+
+```python
+def craft_dir(project_id: str) -> Path
+def stage_craft_brief_path(project_id: str, purpose: str, chapter: int | None, stage: str | None) -> Path
+def stage_craft_sources_path(...)
+def project_craft_memory_path(project_id: str) -> Path
+```
+
+如果不想改 `LocalStore`，resolver 也可以用 `store.project_dir(project_id) / "craft"`。
+
+### 14.5 验收标准
+
+```text
+- 旧 state.json 能正常加载。
+- 新 state 保存后包含 craft 轻量字段。
+- artifacts.json 中能看到 stage_craft_brief 记录。
+```
+
+---
+
+## 15. Phase H：CLI 与配置
+
+### 15.1 修改 `config.py`
+
+新增 Settings 字段：
+
+```python
+author_corpus_dir: str = ""
+corpus_index_dir: str = "corpus_index"
+craft_mode: str = "off"
+craft_max_chars: int = 3000
+craft_similarity_guard: bool = True
+craft_extract_mock: bool = False
+```
+
+新增环境变量：
+
+```text
+AI_NOVELIST_AUTHOR_CORPUS_DIR
+AI_NOVELIST_CORPUS_INDEX_DIR
+AI_NOVELIST_CRAFT_MODE
+AI_NOVELIST_CRAFT_MAX_CHARS
+AI_NOVELIST_CRAFT_SIMILARITY_GUARD
+AI_NOVELIST_CRAFT_EXTRACT_MOCK
+```
+
+注意：保留现有 `AI_NOVELIST_LOCAL_CORPUS_DIR` 和 `--local-corpus-dir`，不破坏 research 流程。
+
+### 15.2 新增 CLI 命令
+
+```bash
+ai-novelist index-corpus \
+  --corpus-dir /path/to/novels \
+  --index-dir corpus_index
+
+ai-novelist extract-craft \
+  --index-dir corpus_index \
+  --mock
+
+ai-novelist craft-status \
+  --project demo \
+  --index-dir corpus_index
+
+ai-novelist craft-profiles \
+  --index-dir corpus_index \
+  --limit 20
+
+ai-novelist craft-brief \
+  --project demo \
+  --purpose chapter_planning \
+  --chapter 1 \
+  --index-dir corpus_index \
+  --craft-mode assist
+
+ai-novelist craft-similarity-check \
+  --project demo \
+  --chapter 1 \
+  --draft projects/demo/chapters/chapter_001/draft_v1.md \
+  --index-dir corpus_index
+```
+
+### 15.3 扩展现有命令参数
+
+给这些命令添加：
+
+```text
+chat
+feishu
+compose
+write-chapter
+review
+finalize-chapter 可选
+```
+
+参数：
+
+```text
+--author-corpus-dir
+--corpus-index-dir
+--craft-mode off|assist|strict
+--craft-max-chars
+--craft-profile
+--craft-genre
+--craft-exclude-work
+```
+
+第一版至少给 `chat` 和 `feishu` 增加：
+
+```text
+--author-corpus-dir
+--corpus-index-dir
+--craft-mode
+```
+
+### 15.4 craft_mode 语义
+
+```text
+off：
+  完全不使用 Author Craft Layer。
+
+assist：
+  注入简短 StageCraftBrief，作为参考，不强制。
+
+strict：
+  注入更完整 brief，并要求 synthesizer 解释采用/拒绝哪些方法。
+  仍然不得覆盖锁定约束、Novel Bible、Pacing Target。
+```
+
+### 15.5 验收标准
+
+```text
+.venv/bin/ai-novelist --help 能看到新命令。
+.venv/bin/ai-novelist chat --help 能看到 --author-corpus-dir / --craft-mode。
+--local-corpus-dir 仍然存在且语义不变。
+```
+
+测试：
+
+```text
+.venv/bin/python -m pytest tests/test_cli_craft.py
+```
+
+---
+
+## 16. Phase I：Prompt Policy 统一接入
+
+### 16.1 目标
+
+所有创作类 prompt 明确如何使用作者构思参考。
+
+### 16.2 核心规则
+
+在以下 prompt 中加入或自动注入 `author_craft_policy.md`：
+
+```text
+director.md
+direction_proposer.md
+outline_planner.md
+world_builder.md
+chapter_goal_agent.md
+chapter_conflict_agent.md
+chapter_hook_agent.md
+chapter_card_synthesizer.md
+scene_breakdown_agent.md
+scene_conflict_check_agent.md
+scene_synthesizer.md
+chapter_writer.md
+dialogue_enhancer.md
+atmosphere_enhancer.md
+hook_enhancer.md
+style_normalizer.md
+continuity_editor.md
+structure_editor.md
+character_arc_editor.md
+style_editor.md
+simulated_reader.md
+review_synthesizer.md
+revision_planner.md
+targeted_reviser.md
+revision_self_check.md
+```
+
+如果 prompt 文件名和当前仓库不完全一致，Codex 应以实际 `src/ai_novelist/prompts/` 目录为准。
+
+### 16.3 Synthesizer 特别规则
+
+对 synthesizer 类 prompt 增加：
+
+```text
+你不是会议纪要员，而是主编。
+不要机械合并所有 Author Craft 建议。
+只采纳符合当前项目、锁定约束、Novel Bible、Pacing Target 的方法。
+必须区分：
+- adopted_craft_methods
+- rejected_craft_methods
+- deferred_craft_methods
+```
+
+### 16.4 Review / Revision 特别规则
+
+Review：
+
+```text
+审稿时判断当前输出是否正确使用了作者构思参考。
+如果输出为了追求真实作者感而破坏 Pacing Target，应指出。
+如果输出与本地语料过度相似，应标记 originality_risk。
+```
+
+Revision：
+
+```text
+修订只能执行不破坏 Pacing Target、不复刻本地语料的方法。
+对 originality_risk 必须做原创化重写。
+```
+
+### 16.5 验收标准
+
+```text
+- 核心 prompt 中包含“不复刻原文、不模仿具体作者表达、Pacing Target 优先”。
+- Synthesizer 能输出采纳/拒绝/延后。
+```
+
+---
+
+## 17. Phase J：Similarity Guard 防复刻
+
+### 17.1 目标
+
+不能只靠 prompt 防复刻。必须做后置检查。
+
+### 17.2 新增 `similarity_guard.py`
+
+第一版实现：
+
+```text
+1. normalize_text(text)
+2. char_ngrams(text, n=8)
+3. longest_common_substring(a, b, max_scan_chars)
+4. overlap_score(generated, source_chunk)
+5. check_similarity(generated, candidate_chunks) -> SimilarityReport
+```
+
+不要对全库所有 chunks 暴力比对。候选来源：
+
+```text
+- 本次 StageCraftBrief 使用过的 source chunks。
+- 检索得分最高的前 N 个 chunks。
+- 同一 work/chapter 的相邻 chunks。
+```
+
+### 17.3 阈值建议
+
+```text
+longest_common_substring > 120 中文字符：高风险
+8-gram overlap > 0.22：中高风险
+连续相似句式多处出现：中风险
+```
+
+第一版阈值可配置：
+
+```text
+AI_NOVELIST_CRAFT_MAX_COMMON_SUBSTRING=120
+AI_NOVELIST_CRAFT_NGRAM_OVERLAP_THRESHOLD=0.22
+```
+
+### 17.4 接入点
+
+第一版只在保存正文后运行：
+
+```text
+drafting save_draft 后
+revision save_revised_draft 后
+finalize save_final_chapter 前或后
+```
+
+如果高风险：
+
+```text
+assist 模式：记录报告 + review 中提示 originality_risk。
+strict 模式：设置 review_status=revision_requested 或追加修订任务。
+```
+
+### 17.5 输出
+
+```text
+projects/<project>/craft/similarity_reports/chapter_001_draft_v1.json
+```
+
+报告结构：
+
+```json
+{
+  "project_id": "demo",
+  "chapter": 1,
+  "artifact": "draft_v1",
+  "risk": "low|medium|high",
+  "max_common_substring": 0,
+  "max_ngram_overlap": 0.0,
+  "matched_sources": [
+    {
+      "chunk_id": "...",
+      "work_id": "...",
+      "score": 0.0,
+      "reason": "..."
+    }
+  ],
+  "recommendations": []
+}
+```
+
+### 17.6 验收标准
+
+```text
+- 明显复制 fixture 原文时能判 high risk。
+- 原创文本时 low risk。
+- 报告注册为 craft_similarity_report artifact。
+```
+
+测试：
+
+```text
+.venv/bin/python -m pytest tests/test_similarity_guard.py
+```
+
+---
+
+## 18. Phase K：Project Craft Memory
+
+### 18.1 目标
+
+系统不应永远只学外部小说库，也要学习当前项目已经定稿的章节，从而保持长篇写作的一致性。
+
+### 18.2 新增 `project_memory.py`
+
+```text
+extract_project_craft_memory(state, store, chapter, adapter=None) -> ProjectCraftMemory
+load_project_craft_memory(project_id) -> CraftProfile
+```
+
+定稿后，从以下材料提炼：
+
+```text
+final.md
+summary.md
+review_v*.json
+revision_plan_v*.md
+Novel Bible
+Pacing Target 实际达成情况
+```
+
+提炼内容：
+
+```text
+- 本项目已确立的章节开法
+- 本项目已确立的场景节奏
+- 主角内心推进方式
+- 对白边界
+- 信息释放边界
+- 本项目禁用套路
+- 容易偏离的风险
+```
+
+### 18.3 接入点
+
+在 `finalize_chapter` 流程中：
+
+```text
+save_final_chapter
+summarize_chapter
+extract_bible_updates_from_final
+update_bible
+extract_project_craft_memory
+```
+
+如果不想改 finalize graph 的顺序，第一版可在 finalize 结束后调用。
+
+### 18.4 Project Memory 优先级
+
+在 `craft_retriever` 中：
+
+```text
+Project Craft Memory notes 优先级高于外部 Author Craft notes。
+每次 StageCraftBrief 至少尝试注入 1 条 project note。
+```
+
+### 18.5 验收标准
+
+```text
+- 定稿第 1 章后生成 projects/<project>/craft/project_craft_memory.json。
+- 写第 2 章时 StageCraftBrief 中出现“本项目已确立方法”。
+```
+
+测试：
+
+```text
+.venv/bin/python -m pytest tests/test_project_craft_memory.py
+```
+
+---
+
+## 19. Phase L：效果评测与回归
+
+### 19.1 目标
+
+证明 Author Craft Layer 真的有用，而不是只是多塞了一段上下文。
+
+### 19.2 新增 eval cases
+
+```text
+tests/evals/author_craft_cases.jsonl
+```
+
+每行：
+
+```json
+{
+  "case_id": "chapter_opening_identity_crisis",
+  "purpose": "chapter_planning",
+  "genre": ["悬疑", "科幻"],
+  "chapter": 1,
+  "pacing_target": {
+    "function": "setup",
+    "intensity": 2,
+    "hook_strength": "soft"
+  },
+  "user_request": "月球城市失忆工程师醒来后发现自己可能参与事故",
+  "expected_facets": ["premise", "information_release", "pacing", "chapter_hook"],
+  "forbidden_facets": ["hard_cliffhanger", "major_reveal"],
+  "forbidden_phrases": ["模仿", "照着", "复刻"]
+}
+```
+
+### 19.3 自动检查
+
+```text
+- StageCraftBrief 是否包含 expected_facets。
+- 是否没有 forbidden_facets。
+- 是否没有长原文。
+- 是否没有“模仿某作者”的措辞。
+- 是否遵守 max_chars。
+- craft_mode=off 时是否不注入。
+- Pacing Target 低强度时是否不建议强钩子。
+```
+
+### 19.4 人工评分维度
+
+为真实模型输出留人工评估表：
+
+```text
+1. 真实作者构思感：1-5
+2. 原创性：1-5
+3. 阶段相关性：1-5
+4. Pacing Target 对齐：1-5
+5. 冲突质量：1-5
+6. 人物动机质量：1-5
+7. 信息释放质量：1-5
+8. 是否有复刻风险：low/medium/high
+```
+
+### 19.5 验收标准
+
+```text
+.venv/bin/python tests/smoke_author_craft_mock.py
+
+必须完成：
+- index-corpus
+- extract-craft --mock
+- craft-brief
+- chat --mock --craft-mode assist
+- pytest 全通过
+```
+
+---
+
+## 20. Phase M：文档与用户体验
+
+### 20.1 README 更新
+
+新增章节：
+
+```text
+## 真实作者构思方法库 Author Craft Layer
+```
+
+包含：
+
+```bash
+export AI_NOVELIST_AUTHOR_CORPUS_DIR=/path/to/novels
+export AI_NOVELIST_CORPUS_INDEX_DIR=corpus_index
+export AI_NOVELIST_CRAFT_MODE=assist
+
+.venv/bin/ai-novelist index-corpus --corpus-dir "$AI_NOVELIST_AUTHOR_CORPUS_DIR"
+.venv/bin/ai-novelist extract-craft --index-dir "$AI_NOVELIST_CORPUS_INDEX_DIR" --mock
+.venv/bin/ai-novelist chat --project demo --mock --craft-mode assist
+```
+
+### 20.2 docs 新增
+
+```text
+docs/author_craft_layer.md
+docs/author_craft_contract.md
+docs/corpus_format.md
+docs/craft_eval.md
+```
+
+### 20.3 用户命令说明
+
+在 chat 中逐步支持自然语言：
+
+```text
+开启作者构思参考
+关闭作者构思参考
+查看本章作者构思参考
+本章不要使用本地小说库
+只参考悬疑类作品
+不要参考某本作品
+```
+
+第一版可以只支持 CLI，不必马上支持自然语言 Director intent。
+
+---
+
+## 21. Phase N：性能与成本控制
+
+### 21.1 成本原则
+
+```text
+- Runtime 阶段只读 profiles，不临时分析原文。
+- 原文分析只在 index/extract 阶段做。
+- 文件未变化不重建。
+- profiles 已存在且 hash 未变不重提炼。
+```
+
+### 21.2 批处理
+
+`extract-craft` 支持：
+
+```text
+--limit-files
+--limit-chunks
+--work-id
+--resume
+--dry-run
+--mock
+```
+
+`--dry-run` 输出：
+
+```text
+- 将处理多少 work
+- 将处理多少 chapter
+- 将处理多少 scene
+- 预计 profile 数
+- 预计调用模型次数
+```
+
+### 21.3 失败恢复
+
+写入：
+
+```text
+pending_jobs.jsonl
+errors.jsonl
+```
+
+失败不影响已完成 profile。
+
+### 21.4 验收标准
+
+```text
+- 重复运行 index-corpus 时未变化文件被跳过。
+- extract-craft 中断后可以 resume。
+- --dry-run 不写 profile。
+```
+
+---
+
+## 22. 端到端执行脚本
+
+新增：
+
+```text
+tests/smoke_author_craft_mock.py
+```
+
+内容应覆盖：
+
+```python
+def test_author_craft_mock_flow(tmp_path):
+    # 1. 创建 mock corpus
+    # 2. index-corpus
+    # 3. extract-craft --mock
+    # 4. 创建项目
+    # 5. craft-brief chapter_planning
+    # 6. chat/write-chapter --mock --craft-mode assist
+    # 7. 断言 stage_craft_brief artifact 存在
+    # 8. 断言 ContextBuilder 中有“作者构思参考”
+    # 9. 断言 brief 不含长原文
+```
+
+CLI 手工验收命令：
+
+```bash
+.venv/bin/python -m pytest
+
+.venv/bin/ai-novelist index-corpus \
+  --corpus-dir tests/fixtures/corpus \
+  --index-dir /tmp/ai_novelist_corpus_index
+
+.venv/bin/ai-novelist extract-craft \
+  --index-dir /tmp/ai_novelist_corpus_index \
+  --mock
+
+.venv/bin/ai-novelist craft-brief \
+  --project craft-demo \
+  --purpose chapter_planning \
+  --chapter 1 \
+  --index-dir /tmp/ai_novelist_corpus_index \
+  --craft-mode assist \
+  --mock
+
+.venv/bin/ai-novelist chat \
+  --project craft-demo \
+  --mock \
+  --corpus-index-dir /tmp/ai_novelist_corpus_index \
+  --craft-mode assist
+```
+
+---
+
+## 23. Codex CLI 推荐迭代顺序
+
+### 23.1 总体执行原则
+
+每次交给 Codex CLI 只做一个 phase，避免一次性大改。
+
+推荐每个 phase 的固定提示：
+
+```text
+你正在实现 AI Novelist 的 Author Craft Layer。请只实现 Phase X，不要提前实现后续 phase。
+必须保持现有测试通过。
+不得破坏现有 --local-corpus-dir research 流程。
+不得引入数据库或向量库。
+mock 模式必须稳定，不依赖真实模型。
+实现后运行相关 pytest，并修复失败。
+```
+
+### 23.2 迭代 1：Phase 0 + Phase A 最小版
+
+交给 Codex：
+
+```text
+实现 Author Craft Layer Phase 0 和 Phase A 最小版：
+- 新增 docs/author_craft_contract.md
+- 新增 prompts/partials/author_craft_policy.md
+- 新增 src/ai_novelist/corpus/encoding.py / models.py / ingest.py / chunker.py / index.py
+- 新增 index-corpus CLI
+- 生成 manifest.json / works.jsonl / chapters.jsonl / scenes.jsonl / chunks.jsonl / quality_report.md
+- 新增 tests/test_corpus_encoding.py / test_corpus_ingest.py / test_corpus_chunker.py / test_corpus_index.py
+- 不引入数据库，不引入向量库
+- 不改现有 research 的 --local-corpus-dir 语义
+```
+
+验收：
+
+```bash
+.venv/bin/python -m pytest tests/test_corpus_encoding.py tests/test_corpus_ingest.py tests/test_corpus_chunker.py tests/test_corpus_index.py
+```
+
+### 23.3 迭代 2：Phase B Mock Craft Profile
+
+交给 Codex：
+
+```text
+实现 Phase B 的 mock craft profile 提炼：
+- 新增 craft_schema.py / craft_extractor.py / mock.py
+- 新增 craft_profile_extractor.md
+- 新增 extract-craft CLI，支持 --mock
+- 从 chunks/chapters/scenes 中生成 work/chapter/scene profiles
+- 输出 craft_profiles/works/*.json、chapters/*.jsonl、scenes/*.jsonl
+- 不调用真实模型
+- 不保存长原文到 profile
+```
+
+验收：
+
+```bash
+.venv/bin/python -m pytest tests/test_craft_schema.py tests/test_craft_extractor_mock.py
+```
+
+### 23.4 迭代 3：Phase C + D 检索和 Brief
+
+交给 Codex：
+
+```text
+实现 Phase C 和 Phase D：
+- 新增 craft_query_planner.py / craft_retriever.py / craft_brief.py
+- 新增 craft-brief CLI
+- 根据 purpose 和可选 pacing_target 检索 notes
+- 生成 StageCraftBrief Markdown 和 sources JSON
+- brief 必须包含使用规则、Pacing Target 对齐、可采用方法、不应采纳方向、来源摘要
+- 不输出长原文
+```
+
+验收：
+
+```bash
+.venv/bin/python -m pytest tests/test_craft_query_planner.py tests/test_craft_retriever.py tests/test_craft_resolver.py
+```
+
+### 23.5 迭代 4：Phase E + F 接入 ContextBuilder
+
+交给 Codex：
+
+```text
+实现 AuthorCraftResolver 和 ContextBuilder 注入：
+- 新增 craft_resolver.py
+- 修改 state.py 添加 craft 轻量字段并兼容旧 state
+- 修改 context_builder.py 添加 author_craft section
+- 在 chapter_plan/scene/drafting/review/revision 的 load_context 节点前调用 resolver
+- craft_mode=off 时完全不注入
+- resolver 失败时降级，不中断主工作流
+```
+
+验收：
+
+```bash
+.venv/bin/python -m pytest tests/test_craft_context_builder.py tests/test_craft_resolver.py
+.venv/bin/python -m pytest
+```
+
+### 23.6 迭代 5：Phase H CLI + Prompt Policy
+
+交给 Codex：
+
+```text
+实现 CLI/config/prompt policy：
+- config.py 新增 Author Craft 设置
+- chat/feishu 增加 --author-corpus-dir、--corpus-index-dir、--craft-mode、--craft-max-chars
+- 新增 craft-status / craft-profiles
+- 核心创作 prompt 加入 author_craft_policy
+- 不破坏现有 CLI
+```
+
+验收：
+
+```bash
+.venv/bin/ai-novelist --help
+.venv/bin/ai-novelist chat --help
+.venv/bin/python -m pytest tests/test_cli_craft.py
+```
+
+### 23.7 迭代 6：Phase J Similarity Guard
+
+交给 Codex：
+
+```text
+实现 Similarity Guard：
+- 新增 similarity_guard.py
+- 支持 ngram overlap 和 longest common substring
+- 在 drafting/revision/finalize 保存后生成 similarity_report
+- high risk 在 strict 模式进入 revision_requested
+- assist 模式只记录 report
+```
+
+验收：
+
+```bash
+.venv/bin/python -m pytest tests/test_similarity_guard.py
+```
+
+### 23.8 迭代 7：Phase K Project Craft Memory
+
+交给 Codex：
+
+```text
+实现 Project Craft Memory：
+- 新增 project_memory.py
+- finalize 后从 final chapter / summary / review report 提炼项目自身 craft notes
+- 保存 projects/<project>/craft/project_craft_memory.json
+- retriever 优先使用 project memory
+```
+
+验收：
+
+```bash
+.venv/bin/python -m pytest tests/test_project_craft_memory.py
+```
+
+### 23.9 迭代 8：Phase L/M/N 完整闭环
+
+交给 Codex：
+
+```text
+实现 Author Craft Layer 端到端验收：
+- 新增 tests/evals/author_craft_cases.jsonl
+- 新增 tests/smoke_author_craft_mock.py
+- README 和 docs 更新
+- dry-run/resume/quality report 完善
+- 确保 .venv/bin/python -m pytest 全通过
+```
+
+验收：
+
+```bash
+.venv/bin/python -m pytest
+.venv/bin/python tests/smoke_author_craft_mock.py
+```
+
+---
+
+## 24. 关键验收清单
+
+最终完成后，应满足：
+
+```text
+[ ] 可以索引 tests/fixtures/corpus/*.txt。
+[ ] 可以处理单本 10MB 中文小说。
+[ ] 可以增量跳过未变化文件。
+[ ] 可以生成 work/chapter/scene craft profiles。
+[ ] mock 模式不调用真实模型。
+[ ] chat --craft-mode off 不注入作者构思参考。
+[ ] chat --craft-mode assist 注入 StageCraftBrief。
+[ ] StageCraftBrief 不含长原文。
+[ ] StageCraftBrief 与 Pacing Target 对齐。
+[ ] Chapter Planning 能使用作者构思方法生成更真实的章节卡。
+[ ] Scene Design 能使用场景推进方法。
+[ ] Drafting 能使用叙述距离、对白、氛围、信息释放方法。
+[ ] Review 能检查是否滥用或误用作者构思参考。
+[ ] Revision 能执行原创化修订。
+[ ] Similarity Guard 能发现明显复刻。
+[ ] Finalize 后能沉淀 Project Craft Memory。
+[ ] Project Craft Memory 在后续章节优先于外部 craft。
+[ ] artifacts.json 记录 stage_craft_brief / similarity_report / project_craft_memory。
+[ ] state.json 不保存原文或大文本。
+[ ] 现有 --local-corpus-dir research 流程不受影响。
+[ ] .venv/bin/python -m pytest 通过。
+```
+
+---
+
+## 25. 风险与规避
+
+### 25.1 复刻风险
+
+风险：
+
+```text
+模型看到过多原文后，可能复刻句式或桥段。
+```
+
+规避：
+
+```text
+- StageCraftBrief 不注入长原文。
+- Evidence 只保存摘要和 source id。
+- Similarity Guard 后置检查。
+- Prompt policy 明确禁止复刻。
+```
+
+### 25.2 过度套路化
+
+风险：
+
+```text
+CraftProfile 全是“冲突升级、结尾钩子”，导致每章更套路。
+```
+
+规避：
+
+```text
+- Query Planner 必须使用 Pacing Target。
+- 低强度章节 boost restraint / atmosphere / relationship。
+- Synthesizer 必须输出 rejected/deferred methods。
+```
+
+### 25.3 Context 过载
+
+风险：
+
+```text
+每阶段塞太多 craft，影响主任务。
+```
+
+规避：
+
+```text
+- 默认 craft_max_chars=3000。
+- 每次最多 6-8 条 CraftNote。
+- Project Craft Memory 优先，外部 craft 精简。
+```
+
+### 25.4 与 Research 混淆
+
+风险：
+
+```text
+AI_NOVELIST_LOCAL_CORPUS_DIR 和 AI_NOVELIST_AUTHOR_CORPUS_DIR 职责混乱。
+```
+
+规避：
+
+```text
+- local-corpus-dir 继续用于 research 检索资料。
+- author-corpus-dir 专用于 Author Craft Layer。
+- 两套配置、两套索引、两套产物，不互相污染。
+```
+
+### 25.5 Pacing Target 尚未完全实现
+
+风险：
+
+```text
+Author Craft Layer 依赖 Pacing Target，但 Pacing Target 可能未全部落地。
+```
+
+规避：
+
+```text
+- resolver 读取 pacing target 时必须容错。
+- 不存在则使用 neutral pacing target。
+- 后续 Pacing Target 落地后，替换 reader 即可。
+```
+
+---
+
+## 26. 最终效果示例
+
+### 26.1 输入
+
+```text
+写第 1 章。
+题材：月球城市失忆工程师的悬疑科幻。
+主角醒来后发现自己可能参与了一场城市级事故。
+```
+
+### 26.2 StageCraftBrief 输出片段
+
+```markdown
+# 作者构思参考
+
+## 与 Pacing Target 的对齐
+- 本章功能：setup
+- 目标强度：2
+- 钩子强度：soft
+- 冲突模式：latent
+- 可用方法：异常事实开场、规则压力、身份疑问、延迟解释
+- 禁止方法：强反转、重大真相揭示、硬 cliffhanger
+
+## 可采用的真实作者构思方法
+1. 用“异常事实”代替“世界观说明”
+   - 方法：开篇先让世界规则否定主角认知。
+   - 为什么有效：读者先进入问题，而不是先听设定。
+   - 当前项目转化：主角醒来时，城市系统显示他已死亡。
+   - 避免事项：不要立刻解释月球城市历史。
+
+2. 失忆必须绑定外部压力
+   - 方法：主角不是单纯追问“我是谁”，而是在权限、氧气、时间限制下行动。
+   - 当前项目转化：身份权限将在 30 分钟后注销，必须进入维修区。
+```
+
+### 26.3 Chapter Goal Agent 输出变好
+
+从：
+
+```text
+主角醒来，发现失忆，开始调查事故。
+```
+
+变成：
+
+```text
+本章目标：让主角在“系统判定自己已死亡”的异常事实中醒来，并通过氧气权限、门禁、维修区封锁三个规则压力，建立月球城市的生存逻辑。主角本章不是直接找到真相，而是从“事故受害者”转向“可能参与事故流程的人”这一危险疑问。
+```
+
+这就是 Author Craft Layer 的目标效果。
+
+---
+
+## 27. 最终 Definition of Done
+
+Author Craft Layer v1.0 完成的标准：
+
+```text
+1. 用户可以把本地小说 txt/md 放进一个目录。
+2. index-corpus 能稳定生成 JSONL 索引。
+3. extract-craft 能生成不含长原文的 CraftProfiles。
+4. chat/write/review/revision 能通过 craft_mode 控制是否注入作者构思参考。
+5. StageCraftBrief 能按 purpose 和 Pacing Target 精准变化。
+6. 所有创作 prompt 明确禁止复刻和模仿。
+7. Similarity Guard 能发现明显复制。
+8. 定稿后能形成 Project Craft Memory。
+9. 所有新增功能有 mock 测试。
+10. 全量 pytest 通过。
+```
+
+---
+
+## 28. 后续 v2 方向
+
+v1 完成后再考虑：
+
+```text
+- 向量检索。
+- 本地 embedding 模型。
+- 更强的中文分词。
+- 更复杂的场景识别。
+- 多语种小说库。
+- Craft Profile 可视化。
+- 交互式选择参考作品。
+- 按用户评分强化 Project Craft Memory。
+- 自动生成类型写作报告。
+```
+
+v1 的重点永远是：
+
+```text
+稳定、可解释、可控、不复刻、能真正接入现有工作流。
+```

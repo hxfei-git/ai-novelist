@@ -9,6 +9,9 @@ AGENT: revision_planner
 - 只列定向修订目标、涉及场景、保留内容和禁止触碰约束。
 - 如果 review_v1.json 信息不足，写入 `open_questions`，不要补造任务。
 
+- 只接收 P0/P1 与节奏安全修复（blocking_fixes、pacing_safe_fixes）。
+- backlog_suggestions 与 rejected_suggestions 不得进入 tasks。
+
 输出严格 JSON，不要 Markdown。
 
 JSON schema：

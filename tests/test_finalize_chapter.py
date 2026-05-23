@@ -28,6 +28,7 @@ def test_finalize_chapter_saves_final_summary_and_updates_bible(tmp_path):
 
     assert store.final_chapter_path("demo", 1).exists()
     assert store.chapter_summary_path("demo", 1).exists()
+    assert store.pacing_report_path("demo", 1).exists()
     assert result.current_final_chapter.strip()
     assert result.chapter_summaries["1"]
     assert len(result.chapter_summaries["1"]) <= 180

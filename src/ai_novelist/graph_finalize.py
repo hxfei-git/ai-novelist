@@ -11,6 +11,7 @@ from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
 from ai_novelist.artifacts import ArtifactRecord, get_latest_artifact, load_artifact_text, load_artifacts, register_artifact
 from ai_novelist.bible import bible_to_dict, load_bible, merge_bible_updates, save_bible
 from ai_novelist.context_builder import build_context
+from ai_novelist.pacing import infer_hook_strength, infer_function, parse_pacing_target_from_card
 from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, run_with_progress, with_agent_metadata
 from ai_novelist.prompts import load_prompt
 from ai_novelist.state import NovelState
@@ -209,6 +210,12 @@ def update_bible_from_final_node(data: dict, store: LocalStore) -> dict:
             metadata={"bible_version": merged.version},
         ),
     )
+    pacing_report = build_pacing_report(state)
+    pacing_path = store.pacing_report_path(state.project_id, state.active_chapter)
+    pacing_path.parent.mkdir(parents=True, exist_ok=True)
+    pacing_path.write_text(json.dumps(pacing_report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    state.director_task_args["pacing_report"] = pacing_report
+
     state.bible_version = merged.version
     state.bible_updated_at = bible_record.updated_at or datetime.now(UTC).isoformat(timespec="seconds")
     state.review_status = "approved"
@@ -222,6 +229,7 @@ def update_bible_from_final_node(data: dict, store: LocalStore) -> dict:
     state.director_message = (
         f"第 {state.active_chapter} 章已定稿：{final_path}\n"
         f"章节摘要已保存：{summary_path}\n"
+        f"节奏报告已保存：{pacing_path}\n"
         f"小说圣经已更新到版本 {state.bible_version}。下一步可以说：导出小说。"
     )
     state.artifact_registry = [item.to_dict() for item in load_artifacts(project_dir)][-20:]
@@ -266,6 +274,33 @@ def explicit_finalize_requested(state: NovelState) -> bool:
     if state.director_task_args.get("explicit_finalize") is True:
         return True
     return any(marker in state.user_request for marker in ("定稿", "最终稿", "finalize"))
+
+
+def build_pacing_report(state: NovelState) -> dict[str, Any]:
+    chapter = state.active_chapter or state.current_chapter
+    card_target = parse_pacing_target_from_card(chapter, state.current_chapter_card or "")
+    summary = state.chapter_summaries.get(str(chapter), "")
+    actual_intensity = card_target.intensity
+    if any(key in summary for key in ("爆", "决战", "大战", "崩溃", "死亡")):
+        actual_intensity = min(5, actual_intensity + 1)
+    if any(key in summary for key in ("余波", "回响", "收束", "静默")):
+        actual_intensity = max(1, actual_intensity - 1)
+    actual_hook_strength = infer_hook_strength(card_target.ending_mode, card_target.function, actual_intensity)
+    reveals = []
+    for marker in ("真相", "揭示", "身份", "秘密"):
+        if marker in summary:
+            reveals.append(marker)
+    return {
+        "chapter": chapter,
+        "target": card_target.to_dict(),
+        "actual_intensity": actual_intensity,
+        "actual_hook_strength": actual_hook_strength,
+        "actual_reveals": reveals,
+        "deviation": {
+            "intensity_delta": actual_intensity - card_target.intensity,
+            "hook_changed": actual_hook_strength != card_target.hook_strength,
+        },
+    }
 
 
 def parse_json_object(output: str) -> dict[str, Any]:

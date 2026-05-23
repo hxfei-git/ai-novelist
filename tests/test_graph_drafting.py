@@ -60,6 +60,19 @@ def test_drafting_reports_progress_events(tmp_path):
 
     assert result.active_graph == "drafting"
     assert any(stage == "Drafting 1/8" for stage, _message in events)
-    assert any(stage == "ChapterPlan 1/8" for stage, _message in events)
+    assert any(stage == "ChapterPlan 1/9" for stage, _message in events)
     assert any(stage == "SceneDesign 1/6" for stage, _message in events)
     assert any(stage == "Drafting 8/8" for stage, _message in events)
+
+
+def test_drafting_uses_low_intensity_polishers_when_no_hard_hook(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.current_chapter = 1
+    store.save_state(state)
+
+    result = NovelState.from_dict(build_drafting_graph(CodexCLIAdapter(mock=True), store).invoke(state.to_dict()))
+
+    agents = [item.get("agent") for item in result.last_agent_reports]
+    assert "restraint_polisher" in agents
+    assert "emotional_resonance_polisher" in agents

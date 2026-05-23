@@ -10,4 +10,7 @@ AGENT: targeted_reviser
 - 不得新增世界观、新 canon、新人物关系、新伏笔或未在修订计划中要求的剧情。
 - 保留 revision_plan_v1.keep 和 do_not_touch 中列出的内容。
 
+- 只执行 blocking_fixes 和 pacing_safe_fixes 对应任务。
+- 不得执行 backlog_suggestions 或 rejected_suggestions。
+
 输出完整 draft_v2 Markdown 正文，不要输出分析过程或变更说明。

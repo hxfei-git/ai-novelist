@@ -9,6 +9,7 @@ from ai_novelist.agent_metrics import complete_with_metrics
 from ai_novelist.agent_parallel import AgentJob, run_agent_jobs
 from ai_novelist.artifacts import ArtifactRecord, load_artifacts, register_artifact
 from ai_novelist.context_builder import build_context
+from ai_novelist.pacing import PacingTarget, infer_pacing_target_from_outline, parse_pacing_target_from_card, required_chapter_card_sections, select_chapter_agent_specs
 from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, run_with_progress, run_with_progress, with_agent_metadata
 from ai_novelist.prompts import load_prompt
 from ai_novelist.state import NovelState
@@ -43,17 +44,19 @@ class ChapterPlanSequentialGraph:
         self.progress = progress
 
     def invoke(self, state: dict) -> dict:
-        emit_progress(self.progress, "ChapterPlan 1/8", "正在选择章节...")
+        emit_progress(self.progress, "ChapterPlan 1/9", "正在选择章节...")
         current = select_chapter_node(state, self.store)
-        emit_progress(self.progress, "ChapterPlan 2/8", "正在读取章节大纲、小说圣经和项目上下文...")
+        emit_progress(self.progress, "ChapterPlan 2/9", "正在读取章节大纲、小说圣经和项目上下文...")
         current = load_chapter_context_node(current, self.store)
-        emit_progress(self.progress, "ChapterPlan 3/8", with_agent_metadata("正在执行章节目标、冲突和钩子 Agent...", self.adapter, "chapter_goal_agent"))
+        emit_progress(self.progress, "ChapterPlan 3/9", with_agent_metadata("正在生成章节节奏目标...", self.adapter, "chapter_pacing_agent"))
+        current = load_pacing_target_node(current, self.adapter, self.store)
+        emit_progress(self.progress, "ChapterPlan 4/9", with_agent_metadata("正在执行动态章节规划 Agent...", self.adapter, "chapter_goal_agent"))
         current = run_chapter_planning_agents_node(current, self.adapter, self.store)
-        emit_progress(self.progress, "ChapterPlan 6/8", with_agent_metadata("正在汇总章节卡...", self.adapter, "chapter_card_synthesizer"))
+        emit_progress(self.progress, "ChapterPlan 7/9", with_agent_metadata("正在汇总章节卡...", self.adapter, "chapter_card_synthesizer"))
         current = chapter_card_synthesizer_node(current, self.adapter, self.store)
-        emit_progress(self.progress, "ChapterPlan 7/8", "正在校验章节卡必需小节...")
+        emit_progress(self.progress, "ChapterPlan 8/9", "正在校验章节卡必需小节...")
         current = validate_chapter_card_node(current, self.store)
-        emit_progress(self.progress, "ChapterPlan 8/8", "正在保存章节卡...")
+        emit_progress(self.progress, "ChapterPlan 9/9", "正在保存章节卡...")
         current = save_chapter_card_node(current, self.store)
         return current
 
@@ -66,15 +69,17 @@ def build_chapter_plan_graph(adapter: AgentAdapter, store: LocalStore, progress:
         return ChapterPlanSequentialGraph(adapter, store, progress_func)
 
     graph = StateGraph(dict)
-    graph.add_node("select_chapter", lambda data: progress_node(progress_func, "ChapterPlan 1/8", "正在选择章节...", lambda: select_chapter_node(data, store)))
-    graph.add_node("load_chapter_context", lambda data: progress_node(progress_func, "ChapterPlan 2/8", "正在读取章节大纲、小说圣经和项目上下文...", lambda: load_chapter_context_node(data, store)))
-    graph.add_node("chapter_planning_agents", lambda data: progress_node(progress_func, "ChapterPlan 3/8", with_agent_metadata("正在执行章节目标、冲突和钩子 Agent...", adapter, "chapter_goal_agent"), lambda: run_chapter_planning_agents_node(data, adapter, store)))
-    graph.add_node("chapter_card_synthesizer", lambda data: progress_node(progress_func, "ChapterPlan 6/8", with_agent_metadata("正在汇总章节卡...", adapter, "chapter_card_synthesizer"), lambda: chapter_card_synthesizer_node(data, adapter, store)))
-    graph.add_node("validate_chapter_card", lambda data: progress_node(progress_func, "ChapterPlan 7/8", "正在校验章节卡必需小节...", lambda: validate_chapter_card_node(data, store)))
-    graph.add_node("save_chapter_card", lambda data: progress_node(progress_func, "ChapterPlan 8/8", "正在保存章节卡...", lambda: save_chapter_card_node(data, store)))
+    graph.add_node("select_chapter", lambda data: progress_node(progress_func, "ChapterPlan 1/9", "正在选择章节...", lambda: select_chapter_node(data, store)))
+    graph.add_node("load_chapter_context", lambda data: progress_node(progress_func, "ChapterPlan 2/9", "正在读取章节大纲、小说圣经和项目上下文...", lambda: load_chapter_context_node(data, store)))
+    graph.add_node("load_pacing_target", lambda data: progress_node(progress_func, "ChapterPlan 3/9", with_agent_metadata("正在生成章节节奏目标...", adapter, "chapter_pacing_agent"), lambda: load_pacing_target_node(data, adapter, store)))
+    graph.add_node("chapter_planning_agents", lambda data: progress_node(progress_func, "ChapterPlan 4/9", with_agent_metadata("正在执行动态章节规划 Agent...", adapter, "chapter_goal_agent"), lambda: run_chapter_planning_agents_node(data, adapter, store)))
+    graph.add_node("chapter_card_synthesizer", lambda data: progress_node(progress_func, "ChapterPlan 7/9", with_agent_metadata("正在汇总章节卡...", adapter, "chapter_card_synthesizer"), lambda: chapter_card_synthesizer_node(data, adapter, store)))
+    graph.add_node("validate_chapter_card", lambda data: progress_node(progress_func, "ChapterPlan 8/9", "正在校验章节卡必需小节...", lambda: validate_chapter_card_node(data, store)))
+    graph.add_node("save_chapter_card", lambda data: progress_node(progress_func, "ChapterPlan 9/9", "正在保存章节卡...", lambda: save_chapter_card_node(data, store)))
     graph.set_entry_point("select_chapter")
     graph.add_edge("select_chapter", "load_chapter_context")
-    graph.add_edge("load_chapter_context", "chapter_planning_agents")
+    graph.add_edge("load_chapter_context", "load_pacing_target")
+    graph.add_edge("load_pacing_target", "chapter_planning_agents")
     graph.add_edge("chapter_planning_agents", "chapter_card_synthesizer")
     graph.add_edge("chapter_card_synthesizer", "validate_chapter_card")
     graph.add_edge("validate_chapter_card", "save_chapter_card")
@@ -110,13 +115,29 @@ def load_chapter_context_node(data: dict, store: LocalStore) -> dict:
     return state.to_dict()
 
 
+def load_pacing_target_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
+    del adapter
+    state = NovelState.from_dict(data)
+    chapter = state.active_chapter or state.current_chapter or 1
+    outline = str(state.director_task_args.get("selected_chapter_outline") or "")
+    pacing = infer_pacing_target_from_outline(chapter, outline)
+    state.director_task_args["pacing_target"] = pacing.to_dict()
+    state.director_task_args["chapter_pacing_report"] = (
+        f"- chapter: {chapter}\n"
+        f"- function: {pacing.function}\n"
+        f"- intensity: {pacing.intensity}\n"
+        f"- hook_strength: {pacing.hook_strength}\n"
+    )
+    state.active_stage = "load_pacing_target"
+    state.last_agent_reports = append_agent_report(state.last_agent_reports, "chapter_pacing_agent", "ok", pacing.to_dict())
+    store.save_state(state)
+    return state.to_dict()
+
+
 def run_chapter_planning_agents_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
-    specs = [
-        ("chapter_goal_report", "chapter_goal_agent"),
-        ("chapter_conflict_report", "chapter_conflict_agent"),
-        ("chapter_hook_report", "chapter_hook_agent"),
-    ]
+    pacing = pacing_from_state(state)
+    specs = select_chapter_agent_specs(pacing)
     jobs = [
         AgentJob(
             key=field,
@@ -180,6 +201,8 @@ def chapter_card_synthesizer_node(data: dict, adapter: AgentAdapter, store: Loca
         store.save_state(state)
         return state.to_dict()
     state.current_chapter_card = output.strip()
+    parsed = parse_pacing_target_from_card(state.active_chapter or state.current_chapter or 1, state.current_chapter_card)
+    state.director_task_args["pacing_target"] = parsed.to_dict()
     state.review_status = "draft"
     state.error = ""
     state.active_graph = "chapter_plan"
@@ -191,8 +214,10 @@ def chapter_card_synthesizer_node(data: dict, adapter: AgentAdapter, store: Loca
 
 def validate_chapter_card_node(data: dict, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
-    missing = [section for section in CHAPTER_CARD_SECTIONS if section not in state.current_chapter_card]
-    state.director_task_args["chapter_card_validation"] = {"missing_sections": missing}
+    pacing = pacing_from_state(state)
+    required = required_chapter_card_sections(pacing)
+    missing = [section for section in required if section not in state.current_chapter_card]
+    state.director_task_args["chapter_card_validation"] = {"missing_sections": missing, "required_sections": required}
     state.active_stage = "validate_chapter_card"
     if missing:
         state.current_chapter_card = add_missing_sections(state.current_chapter_card, missing)
@@ -257,6 +282,7 @@ def build_agent_prompt(state: NovelState, prompt_name: str) -> str:
     template = load_prompt(prompt_name)
     context = str(state.director_task_args.get("chapter_planning_context", ""))
     reports = format_reports(state)
+    pacing = pacing_from_state(state).to_dict()
     report_section = "" if prompt_name in {"chapter_goal_agent", "chapter_conflict_agent", "chapter_hook_agent"} else f"\n\n## Agent Reports\n{reports or '暂无'}"
     contract = ""
     if prompt_name in {"chapter_goal_agent", "chapter_conflict_agent", "chapter_hook_agent"}:
@@ -273,13 +299,15 @@ def build_agent_prompt(state: NovelState, prompt_name: str) -> str:
         f"TITLE: {state.title}\n"
         f"CHAPTER: {state.active_chapter or state.current_chapter}\n\n"
         f"## Task Context\n{context or '暂无'}\n\n"
-        f"## Selected Chapter Outline\n{state.director_task_args.get('selected_chapter_outline') or '暂无'}"
+        f"## Selected Chapter Outline\n{state.director_task_args.get('selected_chapter_outline') or '暂无'}\n\n"
+        f"## Pacing Target\n{pacing}"
         f"{report_section}\n"
     )
 
 
 def format_reports(state: NovelState) -> str:
     fields = [
+        ("chapter_pacing_report", "节奏目标报告"),
         ("chapter_goal_report", "章节目标报告"),
         ("chapter_conflict_report", "冲突报告"),
         ("chapter_hook_report", "钩子报告"),
@@ -290,6 +318,23 @@ def format_reports(state: NovelState) -> str:
         if text:
             parts.append(f"### {label}\n{text}")
     return "\n\n".join(parts)
+
+
+def pacing_from_state(state: NovelState) -> PacingTarget:
+    raw = state.director_task_args.get("pacing_target", {})
+    if isinstance(raw, dict) and raw:
+        return PacingTarget(
+            chapter=int(raw.get("chapter") or state.active_chapter or state.current_chapter or 1),
+            function=str(raw.get("function") or "unknown"),
+            intensity=int(raw.get("intensity") or 3),
+            tension_source=str(raw.get("tension_source") or ""),
+            ending_mode=str(raw.get("ending_mode") or ""),
+            hook_strength=str(raw.get("hook_strength") or "soft"),
+            must_not=list(raw.get("must_not") or []),
+            defer_to_later=list(raw.get("defer_to_later") or []),
+        )
+    outline = str(state.director_task_args.get("selected_chapter_outline") or "")
+    return infer_pacing_target_from_outline(state.active_chapter or state.current_chapter or 1, outline)
 
 
 def collect_chapter_outline(state: NovelState, store: LocalStore | None = None) -> str:

@@ -29,7 +29,8 @@ def test_review_synthesis_falls_back_from_markdown():
 
     assert report["decision"] == "revise"
     assert report["issues"]
-    assert set(report) == {"decision", "score", "blocking_issues", "issues", "rewrite_tasks", "do_not_change"}
+    assert {"decision", "score", "blocking_issues", "issues", "rewrite_tasks", "do_not_change"}.issubset(set(report))
+    assert {"blocking_fixes", "pacing_safe_fixes", "backlog_suggestions", "rejected_suggestions"}.issubset(set(report))
 
 
 def test_review_synthesis_limits_arrays_and_item_lengths():

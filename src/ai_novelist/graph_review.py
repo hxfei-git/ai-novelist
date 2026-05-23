@@ -25,7 +25,7 @@ class CompiledGraph(Protocol):
 
 
 REVIEW_FIELDS = ("decision", "score", "blocking_issues", "issues", "rewrite_tasks", "do_not_change")
-REVIEW_EDITOR_PROMPTS = {"continuity_editor", "structure_editor", "character_arc_editor", "style_editor", "simulated_reader"}
+REVIEW_EDITOR_PROMPTS = {"continuity_editor", "structure_editor", "character_arc_editor", "style_editor", "simulated_reader", "pacing_guard_editor"}
 
 
 class ReviewSequentialGraph:
@@ -39,7 +39,7 @@ class ReviewSequentialGraph:
         current = load_review_context_node(state, self.store)
         if NovelState.from_dict(current).review_status == "error":
             return current
-        emit_progress(self.progress, "Review 2/5", with_agent_metadata("正在执行 5 个编辑审稿 Agent...", self.adapter, "continuity_editor"))
+        emit_progress(self.progress, "Review 2/5", with_agent_metadata("正在执行 6 个编辑审稿 Agent...", self.adapter, "continuity_editor"))
         current = run_review_editors_node(current, self.adapter, self.store)
         if NovelState.from_dict(current).review_status == "error":
             return current
@@ -60,7 +60,7 @@ def build_review_graph(adapter: AgentAdapter, store: LocalStore, progress: Progr
 
     graph = StateGraph(dict)
     graph.add_node("load_review_context", lambda data: progress_node(progress_func, "Review 1/5", "正在读取章节草稿和审稿上下文...", lambda: load_review_context_node(data, store)))
-    graph.add_node("review_editors", lambda data: progress_node(progress_func, "Review 2/5", with_agent_metadata("正在执行 5 个编辑审稿 Agent...", adapter, "continuity_editor"), lambda: run_review_editors_node(data, adapter, store)))
+    graph.add_node("review_editors", lambda data: progress_node(progress_func, "Review 2/5", with_agent_metadata("正在执行 6 个编辑审稿 Agent...", adapter, "continuity_editor"), lambda: run_review_editors_node(data, adapter, store)))
     graph.add_node("review_synthesizer", lambda data: progress_node(progress_func, "Review 3/5", with_agent_metadata("正在汇总审稿结论...", adapter, "review_synthesizer"), lambda: review_synthesizer_node(data, adapter, store)))
     graph.add_node("decide_pass_or_revise", lambda data: decide_pass_or_revise_node(data, store))
     graph.add_node("save_review_report", lambda data: progress_node(progress_func, "Review 5/5", "正在保存审稿报告...", lambda: save_review_report_node(data, store)))
@@ -114,6 +114,7 @@ def run_review_editors_node(data: dict, adapter: AgentAdapter, store: LocalStore
         ("character_arc_review", "character_arc_editor"),
         ("style_review", "style_editor"),
         ("simulated_reader_review", "simulated_reader"),
+        ("pacing_guard_review", "pacing_guard_editor"),
     ]
     jobs = [
         AgentJob(
@@ -203,6 +204,10 @@ def review_synthesizer_node(data: dict, adapter: AgentAdapter, store: LocalStore
         return state.to_dict()
     report = normalize_review_report(output, output)
     state.director_task_args["review_json"] = report
+    state.director_task_args["blocking_fixes"] = list(report.get("blocking_issues", []))
+    state.director_task_args["pacing_safe_fixes"] = list(report.get("rewrite_tasks", []))
+    state.director_task_args["backlog_suggestions"] = [item for item in report.get("issues", []) if "[P2]" in str(item) or "[P3]" in str(item)]
+    state.director_task_args["rejected_suggestions"] = []
     state.current_review_report = render_review_markdown(report)
     state.editor_notes = legacy_editor_notes(report, state.current_review_report)
     state.active_stage = "review_synthesizer"
@@ -323,6 +328,7 @@ def format_review_reports(state: NovelState) -> str:
         ("character_arc_review", "人物弧光审稿"),
         ("style_review", "风格审稿"),
         ("simulated_reader_review", "模拟读者反馈"),
+        ("pacing_guard_review", "节奏守门审稿"),
     ]
     parts = []
     for key, label in fields:
@@ -361,7 +367,12 @@ def parse_review_json(output: str) -> dict[str, Any]:
 
 
 def normalize_review_report(raw: Any, fallback_text: str) -> dict[str, Any]:
-    return normalize_review_synthesis(raw, fallback_text)
+    report = normalize_review_synthesis(raw, fallback_text)
+    report["blocking_fixes"] = list(report.get("blocking_issues", []))
+    report["pacing_safe_fixes"] = list(report.get("rewrite_tasks", []))
+    report["backlog_suggestions"] = [item for item in report.get("issues", []) if "[P2]" in str(item) or "[P3]" in str(item)]
+    report["rejected_suggestions"] = []
+    return report
 
 def normalize_list(value: Any) -> list[str]:
     if isinstance(value, str):
@@ -385,7 +396,11 @@ def render_review_markdown(report: dict[str, Any]) -> str:
         "## 主要问题\n"
         f"{format_list(report['issues'])}\n\n"
         "## 定向改写任务\n"
-        f"{format_list(report['rewrite_tasks'])}\n"
+        f"{format_list(report['rewrite_tasks'])}\n\n"
+        "## 节奏安全修复\n"
+        f"{format_list(report.get('pacing_safe_fixes', []))}\n\n"
+        "## Backlog 建议\n"
+        f"{format_list(report.get('backlog_suggestions', []))}\n"
     )
 
 

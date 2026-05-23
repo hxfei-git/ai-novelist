@@ -1963,3 +1963,37 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - 尚未进入 Phase 2（`PacingTarget` 结构、动态选择 Agent、动态校验字段）。
 - 审稿与修订的结构化分流（blocking/pacing_safe/backlog/rejected）尚未改造，预计在 Phase 4。
 
+## 92. 本轮更新：按 `plan.md` 完成 Phase 2-5
+
+### 代码改动
+
+- 新增 `src/ai_novelist/pacing.py`，提供 `PacingTarget`、章节卡解析、动态 Agent 选择、动态字段要求与 hook 条件。
+- `graph_chapter_plan.py`：新增 `load_pacing_target_node`，章节规划改为节奏驱动动态 Agent 路由与动态章节卡校验。
+- `graph_scene.py`：场景卡字段校验改为基于节奏目标动态必填。
+- `graph_drafting.py`：固定 hook 强化改为节奏感知增强；低强度章走 `restraint_polisher + emotional_resonance_polisher`。
+- `graph_review.py`：新增 `pacing_guard_editor`；审稿结构新增 `blocking_fixes/pacing_safe_fixes/backlog_suggestions/rejected_suggestions`。
+- `graph_revision.py`：修订计划输入过滤为 `blocking_fixes + pacing_safe_fixes`，并写入 `pacing_self_check`。
+- `graph_finalize.py` + `local_store.py`：新增 `pacing_report.json` 持久化与 state 回写。
+- `output_contracts.py`：审稿汇总归一化支持新增四类字段。
+- `codex_cli.py`、`deepseek.py`：新增节奏相关 Agent 适配。
+- 新增 prompts：`chapter_pacing_agent`、`restraint_agent`、`ending_resonance_agent`、`restraint_polisher`、`emotional_resonance_polisher`、`pacing_guard_editor`。
+
+### 测试变更
+
+- 新增 `tests/test_pacing_target.py`，覆盖动态路由与动态字段规则。
+- 更新 `test_graph_chapter_plan.py`、`test_graph_drafting.py`、`test_graph_review.py`、`test_finalize_chapter.py`、`test_output_contracts.py` 以匹配节奏改造后行为。
+
+### 验证结果
+
+```bash
+.venv/bin/python -m pytest
+# 263 passed
+
+.venv/bin/python tests/smoke_chapter_pipeline_mock.py
+# chapter pipeline mock smoke passed
+```
+
+### 已知限制
+
+- Director 读取最近 3 章节奏并主动给“升压/降压建议”的策略还未深度接入决策提示词；当前已具备 `pacing_report.json` 与 state 数据基础。
+

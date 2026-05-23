@@ -2136,3 +2136,70 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - 这是 Phase 1 最小落地，尚未引入动态路由和 `PacingTarget` 数据结构（Phase 2）。
 - 运行时仍会执行既有 Agent 编排，但输出侧已被节奏字段约束。
 
+## 88. 节奏改造 Phase 2-5（完整落地）
+
+目标：按 `plan.md` 持续完成 Phase 2~5，把节奏目标从 Prompt 约束升级为运行时约束。
+
+### Phase 2：PacingTarget + 动态章节规划
+
+已完成：
+- 新增 `src/ai_novelist/pacing.py`：`PacingTarget`、章节卡字段解析、强度/钩子推断、动态字段规则与 Agent 选择规则。
+- `graph_chapter_plan.py` 新增 `load_pacing_target_node`，先推断章节节奏目标再跑章节规划。
+- `run_chapter_planning_agents_node` 改为动态选择：
+  - 低强度章：`restraint_agent` 替代 `chapter_conflict_agent`。
+  - 软/无钩子章：`ending_resonance_agent` 替代 `chapter_hook_agent`。
+- `validate_chapter_card_node` 改为动态必填校验：强度与钩子强度决定是否必须出现“关键冲突/结尾钩子”。
+
+### Phase 3：场景规划与写作增强防升压
+
+已完成：
+- `graph_scene.py` 校验逻辑改为基于 `PacingTarget` 的动态场景字段校验（低强度章不强制冲突对象/场景转折）。
+- `graph_drafting.py` 把固定 `hook_enhance` 改为 `pacing_aware_enhance_node`：
+  - 允许升压时执行 `hook_enhancer`。
+  - 低强度章改走 `restraint_polisher` + `emotional_resonance_polisher`。
+- 新增对应 prompts：`restraint_polisher.md`、`emotional_resonance_polisher.md`。
+
+### Phase 4：审稿/修订节奏守门
+
+已完成：
+- `graph_review.py` 新增 `pacing_guard_editor` 参与并行审稿。
+- `review_synthesizer` 输出与归一化扩展为：
+  - `blocking_fixes`
+  - `pacing_safe_fixes`
+  - `backlog_suggestions`
+  - `rejected_suggestions`
+- `graph_revision.py` 改为只使用 `blocking_fixes + pacing_safe_fixes`，并显式忽略 backlog/rejected。
+- `revision_self_check` 结果额外抽取 `pacing_self_check` 到 state。
+
+### Phase 5：Finalize 节奏回写
+
+已完成：
+- `graph_finalize.py` 新增 `build_pacing_report`。
+- 每章定稿后写出 `chapters/chapter_xxx/pacing_report.json`（通过 `LocalStore.pacing_report_path`）。
+- `state.director_task_args["pacing_report"]` 回写目标/实际强度、钩子强度和偏差。
+
+### 适配与基础设施同步
+
+- `codex_cli` mock 适配新增 Agent：`chapter_pacing_agent/restraint_agent/ending_resonance_agent/restraint_polisher/emotional_resonance_polisher/pacing_guard_editor`。
+- `deepseek` Agent 思考策略清单同步加入上述新 Agent。
+- 新增 prompts：
+  - `chapter_pacing_agent.md`
+  - `restraint_agent.md`
+  - `ending_resonance_agent.md`
+  - `restraint_polisher.md`
+  - `emotional_resonance_polisher.md`
+  - `pacing_guard_editor.md`
+
+### 验证
+
+```bash
+.venv/bin/python -m pytest
+# 263 passed
+
+.venv/bin/python tests/smoke_chapter_pipeline_mock.py
+# chapter pipeline mock smoke passed
+```
+
+当前边界：
+- Phase 5 的“最近三章自动升压/降压建议”已具备数据基础（`pacing_report.json`），但 Director 的主动策略推荐仍是下一步可增强点。
+

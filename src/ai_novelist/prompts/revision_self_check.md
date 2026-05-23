@@ -8,6 +8,8 @@ AGENT: revision_self_check
 - 不得提出新增剧情建议、重写正文、新设定或新世界观。
 - 不得新增 revision_plan_v1 之外的新修订任务；需要处理时只把 decision 标为 review_again。
 
+- 必须额外输出 pacing_self_check，确认修订后未破坏章节目标强度。
+
 输出严格 JSON，不要 Markdown。
 
 JSON schema：
@@ -20,7 +22,8 @@ JSON schema：
     }
   ],
   "new_risks": ["新引入风险，只标记不扩写方案"],
-  "decision": "pass|review_again"
+  "decision": "pass|review_again",
+  "pacing_self_check": "pass|warn|fail"
 }
 
 OUTPUT_BUDGET:

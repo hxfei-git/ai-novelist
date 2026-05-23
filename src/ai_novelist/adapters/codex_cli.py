@@ -132,12 +132,18 @@ class CodexCLIAdapter(AgentAdapter):
             return self._mock_worldbuilding()
         if "AGENT: outline_planner" in prompt:
             return self._mock_outline_plan()
+        if "AGENT: chapter_pacing_agent" in prompt:
+            return self._mock_chapter_pacing_report()
         if "AGENT: chapter_goal_agent" in prompt:
             return self._mock_chapter_goal_report()
         if "AGENT: chapter_conflict_agent" in prompt:
             return self._mock_chapter_conflict_report()
+        if "AGENT: restraint_agent" in prompt:
+            return self._mock_restraint_report()
         if "AGENT: chapter_hook_agent" in prompt:
             return self._mock_chapter_hook_report()
+        if "AGENT: ending_resonance_agent" in prompt:
+            return self._mock_ending_resonance_report()
         if "AGENT: chapter_card_synthesizer" in prompt:
             return self._mock_chapter_card()
         if "AGENT: scene_breakdown_agent" in prompt:
@@ -156,6 +162,10 @@ class CodexCLIAdapter(AgentAdapter):
             return self._mock_chapter(revised=self._is_revised_prompt(prompt))
         if "AGENT: hook_enhancer" in prompt:
             return self._mock_chapter(revised=self._is_revised_prompt(prompt))
+        if "AGENT: restraint_polisher" in prompt:
+            return self._mock_chapter(revised=self._is_revised_prompt(prompt))
+        if "AGENT: emotional_resonance_polisher" in prompt:
+            return self._mock_chapter(revised=self._is_revised_prompt(prompt))
         if "AGENT: style_normalizer" in prompt:
             return self._mock_chapter(revised=self._is_revised_prompt(prompt))
         if "AGENT: continuity_editor" in prompt:
@@ -168,6 +178,8 @@ class CodexCLIAdapter(AgentAdapter):
             return self._mock_review_role("风格", revised=self._is_revised_prompt(prompt))
         if "AGENT: simulated_reader" in prompt:
             return self._mock_review_role("模拟读者", revised=self._is_revised_prompt(prompt))
+        if "AGENT: pacing_guard_editor" in prompt:
+            return self._mock_review_role("节奏守门", revised=self._is_revised_prompt(prompt))
         if "AGENT: review_synthesizer" in prompt:
             return self._mock_review_synthesizer(revised=self._is_revised_prompt(prompt))
         if "AGENT: revision_planner" in prompt:
@@ -624,6 +636,29 @@ class CodexCLIAdapter(AgentAdapter):
             "## 风险自检\n需要控制设定解释密度，保持林澈主动行动，并让每次真相揭露带来现实代价。"
         )
 
+    def _mock_chapter_pacing_report(self) -> str:
+        return (
+            "## 节奏目标报告\n"
+            "- chapter: 1\n"
+            "- function: build\n"
+            "- intensity: 3\n"
+            "- hook_strength: soft\n"
+        )
+
+    def _mock_restraint_report(self) -> str:
+        return (
+            "## 节奏克制报告\n"
+            "- 本章避免新增组织级冲突，保留在规则压力与身份焦虑层。\n"
+            "- 禁止提前揭露终局真相。\n"
+        )
+
+    def _mock_ending_resonance_report(self) -> str:
+        return (
+            "## 结尾余韵报告\n"
+            "- 结尾以行动承诺和未解信息形成软钩子。\n"
+            "- 不新增外部袭击或硬悬崖。\n"
+        )
+
     def _mock_chapter_goal_report(self) -> str:
         return (
             "## 章节目标报告\n"
@@ -761,13 +796,17 @@ class CodexCLIAdapter(AgentAdapter):
                 "blocking_issues": [],
                 "issues": ["后续章节继续补强许岚登场铺垫。"],
                 "rewrite_tasks": [],
+                "blocking_fixes": [],
+                "pacing_safe_fixes": [],
+                "backlog_suggestions": ["[P2] 后续章节继续补强许岚登场铺垫。"],
+                "rejected_suggestions": [],
             }
         else:
             data = {
                 "decision": "revise",
                 "score": 72,
                 "blocking_issues": ["场景压力和规则展示不足。"],
-                "issues": ["主角醒来的环境压力不足。", "纸质手稿为什么危险还不够清楚。", "事故倒计时可以更强。"],
+                "issues": ["[P1] 主角醒来的环境压力不足。", "[P1] 纸质手稿为什么危险还不够清楚。", "[P2] 事故倒计时可以更强。"],
                 "rewrite_tasks": ["增加审计编号查询失败。", "补明纸质文本禁忌。", "强化东七气闸倒计时。"],
             }
         return json.dumps(data, ensure_ascii=False)
