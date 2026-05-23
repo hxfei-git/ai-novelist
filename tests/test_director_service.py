@@ -539,23 +539,32 @@ def test_outline_stage_specific_feedback_reruns_current_stage(tmp_path):
     assert confirmed.state.outline_stage_status == "options_ready"
 
 
-def test_outline_stage_numbered_answers_rerun_current_stage(tmp_path):
+def test_outline_stage_numbered_answers_rerun_current_stage_without_extra_confirmation(tmp_path):
     store = LocalStore(tmp_path)
     make_characters_options_ready_state(store)
     service = DirectorService(store, CodexCLIAdapter(mock=True), MockSearchBackend())
 
     result = service.handle_turn("demo", "1. 心魔誓约 2. 葬魂谷", channel="cli")
 
-    assert result.choices[0].id == "confirm"
-    assert result.state.director_action == "revise_outline"
+    assert not result.choices
+    assert result.state.director_action == "run_outline_stage"
     assert result.state.outline_stage == "characters"
     assert result.decision.intent == "answer_pending_questions"
     assert "心魔誓约" in result.decision.instruction
     assert "葬魂谷" in result.decision.instruction
 
-    confirmed = service.handle_turn("demo", "1", channel="cli")
 
-    assert confirmed.state.director_action == "run_outline_stage"
+def test_outline_stage_plain_answer_reruns_without_confirmation_menu(tmp_path):
+    store = LocalStore(tmp_path)
+    make_characters_options_ready_state(store)
+    service = DirectorService(store, CodexCLIAdapter(mock=True), MockSearchBackend())
+
+    result = service.handle_turn("demo", "回到刚入门", channel="cli")
+
+    assert not result.choices
+    assert result.state.director_action == "run_outline_stage"
+    assert result.decision.intent == "answer_pending_questions"
+    assert "回到刚入门" in result.decision.instruction
 
 
 def test_outline_stage_view_current_does_not_advance(tmp_path):

@@ -799,6 +799,19 @@ def deterministic_outline_stage_pre_model_decision(state: NovelState) -> Directo
     stage_revision = deterministic_cross_stage_revision_decision(state)
     if stage_revision is not None:
         return stage_revision
+    if state.pending_questions and (parse_numbered_answers(text) or looks_like_plain_pending_answer(text)):
+        instruction = build_pending_answer_instruction(state, text)
+        return DirectorDecision(
+            "revise_outline",
+            requires_confirmation=False,
+            user_message="我会吸收你的补充回答，并重跑当前大纲阶段。",
+            confidence=88,
+            task_args={"instruction": instruction},
+            target="outline",
+            intent="answer_pending_questions",
+            instruction=instruction,
+            locked_constraints=[instruction],
+        )
     if asks_outline_next_step(text):
         message = build_outline_next_step_message(state)
         return DirectorDecision(
@@ -874,6 +887,20 @@ def deterministic_outline_stage_decision(state: NovelState) -> DirectorDecision 
             requires_confirmation=False,
             user_message="我会吸收你的补充回答，并重跑当前大纲阶段。",
             confidence=88,
+            task_args={"instruction": instruction},
+            target="outline",
+            intent="answer_pending_questions",
+            instruction=instruction,
+            locked_constraints=[instruction],
+        )
+
+    if state.pending_questions and looks_like_plain_pending_answer(text):
+        instruction = build_pending_answer_instruction(state, text)
+        return DirectorDecision(
+            "revise_outline",
+            requires_confirmation=False,
+            user_message="我会吸收你的补充回答，并重跑当前大纲阶段。",
+            confidence=86,
             task_args={"instruction": instruction},
             target="outline",
             intent="answer_pending_questions",
@@ -1042,6 +1069,23 @@ def answers_pending_outline_questions(text: str) -> bool:
     if re.search(r"(^|[\s，,；;])\d+[.、)]", text):
         return True
     return any(marker in text for marker in ("回答", "补充", "选择", "选", "采用", "接受", "接收", "同意", "设为", "改成"))
+
+
+def looks_like_plain_pending_answer(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+    if asks_outline_next_step(stripped):
+        return False
+    if is_simple_outline_stage_confirmation(stripped) or delegates_outline_stage_decision(stripped):
+        return False
+    if any(marker in stripped for marker in ("查看", "展示", "看一下", "看下", "显示")):
+        return False
+    if negates_stage_advance(stripped):
+        return False
+    if has_explicit_outline_feedback(stripped):
+        return False
+    return len(stripped) <= 80
 
 
 def looks_like_outline_lock_feedback(text: str) -> bool:
@@ -1379,6 +1423,8 @@ def confirmation_choices() -> list[DirectorChoice]:
 
 def should_prompt_for_confirmation(decision: DirectorDecision, state: NovelState) -> bool:
     if decision.action in DIRECT_ACTIONS:
+        return False
+    if state.active_workflow == "outline" and decision.action == "revise_outline" and decision.intent == "answer_pending_questions":
         return False
     return decision.action in MUTATING_ACTIONS or decision.requires_confirmation
 

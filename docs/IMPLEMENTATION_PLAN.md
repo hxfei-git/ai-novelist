@@ -2303,3 +2303,20 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
     .venv/bin/python -m pytest tests/test_prompt_loader.py tests/test_outline_collaboration.py tests/test_outline_stage_controls.py
     # 92 passed
+
+
+## 91. 大纲待确认问题短回答免二次确认
+
+目标：修复用户回答 Director 待确认问题后又出现 确认执行/取消 菜单的问题。
+
+已完成：
+
+- director_service.py：在大纲 active workflow 中，当前阶段存在 pending_questions 时，编号回答和短文本回答会在 pre-model 确定性路由中识别为 answer_pending_questions。
+- director_service.py：answer_pending_questions 类型的 revise_outline 不再触发 CLI 确认菜单，直接吸收回答并重跑当前阶段。
+- 保留原行为：普通大改、跨阶段回修和进入下一阶段仍可继续走确认流程。
+- tests/test_director_service.py：新增 回到刚入门 这类短回答免确认回归，并更新编号回答回归。
+
+验证：
+
+    .venv/bin/python -m pytest tests/test_director_service.py
+    # 33 passed

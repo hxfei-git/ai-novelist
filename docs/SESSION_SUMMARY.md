@@ -2066,3 +2066,16 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
     .venv/bin/python -m pytest tests/test_prompt_loader.py tests/test_outline_collaboration.py tests/test_outline_stage_controls.py
     # 92 passed
+
+
+## 95. 本轮修复：回答待确认问题不再弹确认菜单
+
+- 问题：用户回答 Director 的待确认问题，例如 回到刚入门，系统可能把它包装为可执行动作并显示 确认执行/取消，造成追问和确认菜单混在一起。
+- 修复：大纲阶段存在 pending_questions 时，编号回答和短文本回答会在模型调用前被确定性识别为 answer_pending_questions。
+- 修复：answer_pending_questions 的 revise_outline 在 CLI 中直接执行，不再二次确认。
+- 保留：普通大改、跨阶段重修、进入下一阶段仍按原确认流程处理。
+
+验证：
+
+    .venv/bin/python -m pytest tests/test_director_service.py
+    # 33 passed
