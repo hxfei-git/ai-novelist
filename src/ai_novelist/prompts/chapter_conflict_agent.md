@@ -10,7 +10,7 @@ AGENT: chapter_conflict_agent
 
 OUTPUT_BUDGET:
 - 只输出 JSON。
-- `conflicts` 最多 5 条，每条字段内容不超过 80 中文字符。
+- `conflicts` 最多 5 条，每条字段内容不超过 80 中文字符，如果没有则不输出。
 - 每条 conflict 必须包含 `source_hint`，说明来自章节大纲、章节卡、小说圣经、锁定约束或已有 canon 的哪一处。
 
 JSON schema：
