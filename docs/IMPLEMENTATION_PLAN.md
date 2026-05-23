@@ -2221,3 +2221,60 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 当前边界：
 - Phase 5 的“最近三章自动升压/降压建议”已具备数据基础（`pacing_report.json`），但 Director 的主动策略推荐仍是下一步可增强点。
 
+## 89. 大纲共创链路重构 v3（七阶段 + 三层门）
+
+目标：按 `plan.md` 完整落地七阶段大纲共创重构，移除活跃 `concept` 阶段，建立 Stage Contract + Source Ledger + Quality Gate 的泛化治理体系。
+
+已完成：
+
+- 新增 `src/ai_novelist/outline/`：
+  - `stage_contracts.py`：定义 7 个 active stage 合约（保留 `concept` legacy alias 到 `direction`）。
+  - `legacy_migration.py`：旧项目 `concept` 与 `outline_draft` 兼容迁移。
+  - `source_ledger.py`：来源账本与具体 canon 启发式检测。
+  - `stage_guard.py`：阶段越权、无来源 canon、公式绝对因果、抽象机制语言检测与改写降级。
+  - `question_filter.py`：过滤模型自造二选一确认问题。
+  - `renderers.py`：阶段输出规则统一渲染。
+- `graph_outline.py`：
+  - `OUTLINE_STAGES` 切换为七阶段，`STAGE_ROLES` 删除 `concept`。
+  - `detect_stage_reference` 将“故事概念/核心概念/一句话故事”映射到 `direction`。
+  - `ensure_outline_stage`/legacy 逻辑改为复用新模块。
+  - `run_outline_stage_node` 接入 `guard_stage_output` + `filter_stage_confirmation_questions`。
+  - `outline_stage_synthesizer_output_rule` 改为委托 `build_stage_output_rule`，移除旧世界观模板结构（`世界运行原则/关键边界/冲突资源/代价红线`）。
+  - `sanitize_direction_stage_output` 改为委托统一质量门并做标题/行政词兜底清洗。
+  - 最终锁定文案改为七阶段；最终合并按 active stages 排序，并兼容追加“旧版故事概念参考”。
+- `director_service.py`：修复 `persist_outputs` 高风险逻辑，不再根据 `task_args.stage` 覆盖当前阶段后再锁定；始终锁当前阶段再推进。
+- `context_builder.py`：previous stage memory 顺序改为七阶段。
+- `prompts/world_builder.md`：
+  - 移除“禁止词表中心”策略，改为分类质量规则。
+  - 输出改为题材自适应结构：`世界一句话/题材核心结构/主角所在组织或生活圈/势力资源与日常压力/可持续写作素材/待确认事项/自检`。
+- `prompts/director.md`：阶段说明改为七阶段，并声明 concept 兼容映射到 direction。
+- `adapters/codex_cli.py` mock：
+  - outline stage mock 改为七阶段结构。
+  - 移除活跃 concept 输出。
+  - 世界观 mock 改为新结构，移除公式化绝对因果写法。
+
+测试与回归：
+
+- 新增 `tests/test_outline_stage_controls.py`，覆盖：
+  - active stages 去 concept。
+  - stage contract 可用性。
+  - 方向阶段具体代价降级。
+  - 用户显式代价保留。
+  - 公式化句式模式检测。
+  - 世界观抽象机制语言清洗。
+  - 确认问题过滤。
+  - legacy concept 迁移。
+  - `persist_outputs` 锁当前阶段 bug 回归。
+- 更新 `tests/test_outline_collaboration.py`、`tests/test_director_service.py`、`tests/test_graph_writer.py`、`tests/test_prompt_loader.py`、相关 smoke 断言到七阶段与新模板。
+- 全量验证：
+
+```bash
+.venv/bin/python -m pytest
+# 297 passed
+```
+
+当前边界：
+
+- `concept` 仅保留 legacy artifact 兼容，不参与 active flow。
+- 质量门仍为启发式，后续可继续细化来源匹配与句式改写策略。
+

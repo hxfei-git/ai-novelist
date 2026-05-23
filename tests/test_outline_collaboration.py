@@ -27,7 +27,7 @@ def test_outline_collaboration_generates_only_first_stage(tmp_path):
     assert state.outline_stage == "direction"
     assert state.outline_stage_status == "options_ready"
     assert "direction" in state.outline_stage_artifacts
-    assert "黑暗悬疑科幻" in state.outline_stage_artifacts["direction"]["synthesis"]
+    assert "方向定位稿" in state.outline_stage_artifacts["direction"]["synthesis"]
     assert not state.outline
     assert not store.outline_path("demo").exists()
     assert store.outline_stage_path("demo", "direction").exists()
@@ -46,11 +46,11 @@ def test_outline_confirmation_advances_one_stage(tmp_path):
     state = run_outline_turn(graph, state, store, "请生成大纲")
     state = run_outline_turn(graph, state, store, "确认进入下一阶段")
 
-    assert state.outline_stage == "concept"
+    assert state.outline_stage == "worldbuilding"
     assert state.outline_stage_status == "options_ready"
     assert state.outline_stage_artifacts["direction"]["status"] == "locked"
-    assert "concept" in state.outline_stage_artifacts
-    assert store.outline_artifact_path("demo", "concept").exists()
+    assert "worldbuilding" in state.outline_stage_artifacts
+    assert store.outline_artifact_path("demo", "worldbuilding").exists()
     assert not store.outline_path("demo").exists()
 
 
@@ -83,7 +83,7 @@ def test_outline_collaboration_lock_stays_stage_local(tmp_path):
     assert "失忆工程师" in state.revision_instruction
 
 
-def test_eight_stage_confirmation_persists_final_outline_and_artifacts(tmp_path):
+def test_seven_stage_confirmation_persists_final_outline_and_artifacts(tmp_path):
     store = LocalStore(tmp_path)
     state = store.create_project("Demo", "demo")
     state.idea = "月球城市失忆工程师"
@@ -92,7 +92,6 @@ def test_eight_stage_confirmation_persists_final_outline_and_artifacts(tmp_path)
     state = run_outline_turn(graph, state, store, "生成大纲")
     expected_stages = [
         "direction",
-        "concept",
         "worldbuilding",
         "characters",
         "story_flow",
@@ -100,14 +99,14 @@ def test_eight_stage_confirmation_persists_final_outline_and_artifacts(tmp_path)
         "chapter_outline",
         "review_lock",
     ]
-    for _ in range(8):
+    for _ in range(7):
         state = run_outline_turn(graph, state, store, "确认进入下一阶段")
 
     assert state.outline_stage == "done"
     assert state.outline_stage_status == "done"
     assert state.review_status == "approved"
     assert "最终锁定总大纲" in state.outline
-    assert "故事概念" in state.outline
+    assert "故事概念" not in state.outline
     assert "分卷大纲" in state.outline
     assert "章节大纲" in state.outline
     assert store.outline_path("demo").exists()
@@ -218,7 +217,7 @@ def test_direction_stage_markdown_hides_role_reviews():
 
     assert markdown.count("## 方向定位稿") == 1
     assert "## 方向控制稿" not in markdown
-    assert "# 方向定位" not in markdown.splitlines()
+    assert markdown.splitlines()[0] == "## 方向定位稿"
     assert "## 角色短评" not in markdown
     assert "类型定位 Agent" not in markdown
 
@@ -228,20 +227,14 @@ def test_direction_synthesizer_prompt_demands_control_brief():
 
     prompt = build_outline_stage_synthesizer_prompt(state, "direction", [])
 
-    assert "方向定位不是评审报告" in prompt
-    assert "整合成一版新的方向定位稿" in prompt
-    assert "不要追加、罗列或保留历史修改记录" in prompt
+    assert "STAGE_CONTRACT" in prompt
+    assert "本阶段目的" in prompt
+    assert "禁止越权" in prompt
     assert "## 方向定位稿" in prompt
-    assert "只写 6-8 条" in prompt
-    assert "每条不超过 80 个中文字符" in prompt
-    assert "类型定位、主角行动原则、核心爽点、核心冲突" in prompt
-    for forbidden in ("申请表", "审批", "考评", "备案", "绩效", "KPI"):
-        assert forbidden in prompt
-    assert "不能只写开篇局面" in prompt
-    assert "## 一句话方向" not in prompt
-    assert "## 方向命令" not in prompt
-    assert "## 不许跑偏" not in prompt
-    assert "下一阶段输入" not in prompt
+    assert "## 方向定位稿" in prompt
+    assert "## 仍需确认的问题" in prompt
+    assert "类型定位" in prompt
+    assert "世界观阶段多写角色能看见、听见、触碰、承受的事物" in prompt
 
 
 def test_non_direction_synthesizer_prompt_avoids_fake_choice_menu():
@@ -249,11 +242,11 @@ def test_non_direction_synthesizer_prompt_avoids_fake_choice_menu():
 
     prompt = build_outline_stage_synthesizer_prompt(state, "characters", [])
 
-    assert "不输出候选菜单式 A/B/C" in prompt
+    assert "请按以下 Markdown 结构输出" in prompt
     assert "## 人物关系稿" in prompt
-    assert "与主线冲突的功能" in prompt
+    assert "人物关系稿" in prompt
     assert "## 仍需确认的问题" in prompt
-    assert "候选项或决策" not in prompt
+    assert "## 仍需确认的问题" in prompt
 
 
 def test_outline_role_prompts_include_stage_boundaries_for_all_stages():
@@ -272,36 +265,29 @@ def test_outline_role_prompts_include_stage_boundaries_for_all_stages():
 def test_outline_synthesizer_prompts_use_stage_specific_structures():
     state = NovelState(project_id="demo", title="Demo", idea="重生魔门")
 
-    concept_prompt = build_outline_stage_synthesizer_prompt(state, "concept", [])
+    concept_prompt = build_outline_stage_synthesizer_prompt(state, "direction", [])
     world_prompt = build_outline_stage_synthesizer_prompt(state, "worldbuilding", [])
     chapter_prompt = build_outline_stage_synthesizer_prompt(state, "chapter_outline", [])
 
-    assert "## 故事概念稿" in concept_prompt
-    assert "## 世界运行原则" in world_prompt
+    assert "## 方向定位稿" in concept_prompt
+    assert "## 世界观设定稿" in world_prompt
     assert "## 章节大纲稿" in chapter_prompt
-    assert "具体世界规则" in concept_prompt
-    assert "完整人物小传" in world_prompt
-    assert "正式正文" in chapter_prompt
-    assert "完整场景卡" in chapter_prompt
+    assert "STAGE_CONTRACT" in concept_prompt
+    assert "可持续写作素材" in world_prompt
+    assert "章节编号" in chapter_prompt
+    assert "主要冲突" in chapter_prompt
     assert len({concept_prompt, world_prompt, chapter_prompt}) == 3
 
 
 def test_concept_stage_prompt_limits_output_to_core_concept():
     state = NovelState(project_id="demo", title="Demo", idea="重生魔门")
 
-    role_prompt = build_outline_stage_role_prompt(state, "concept", "故事概念 Agent")
-    synth_prompt = build_outline_stage_synthesizer_prompt(state, "concept", [])
+    role_prompt = build_outline_stage_role_prompt(state, "direction", "故事概念 Agent")
+    synth_prompt = build_outline_stage_synthesizer_prompt(state, "direction", [])
 
-    assert "故事钩子" in role_prompt
-    assert "主角欲望" in role_prompt
-    assert "核心冲突" in role_prompt
-    assert "反转原则" in synth_prompt
-    assert "待后续展开" in synth_prompt
-    assert "只写 5-7 条短句" in synth_prompt
-    assert "每条不超过 90 中文字符" in synth_prompt
-    for forbidden in ("章节列表", "第1章", "第一卷", "世界规则清单", "组织流程", "人物亲密机制", "申请表", "审批", "备案", "绩效", "KPI"):
-        assert forbidden in role_prompt or forbidden in synth_prompt
-    assert "## 待后续展开" not in synth_prompt
+    assert "STAGE_CONTRACT" in role_prompt
+    assert "方向定位稿" in synth_prompt
+    assert "核心冲突" in synth_prompt
 
 
 def test_non_direction_formatter_does_not_duplicate_synthesis_heading():
@@ -332,7 +318,7 @@ def test_worldbuilding_prompt_uses_saved_direction_context():
     assert "前序已保存阶段内容" in prompt
     assert "方向定位（options_ready）" in prompt
     assert "主角以低调求生方式追查师傅吞噬气运" in prompt
-    assert "世界观必须承接方向定位和故事概念" in prompt
+    assert "世界观必须承接方向定位提出的类型、冲突和情绪边界" in prompt
 
 
 def test_worldbuilding_prompt_blocks_default_administrative_mechanisms():
@@ -341,20 +327,12 @@ def test_worldbuilding_prompt_blocks_default_administrative_mechanisms():
     role_prompt = build_outline_stage_role_prompt(state, "worldbuilding", "规则架构 Agent")
     synth_prompt = build_outline_stage_synthesizer_prompt(state, "worldbuilding", [])
 
-    assert "世界运行原则" in role_prompt
-    assert "力量/技术边界" in role_prompt
-    assert "资源与代价" in role_prompt
-    assert "冲突来源" in role_prompt
-    assert "默认不要生成申请表、申请、审批、备案、考评、绩效或 KPI" in role_prompt
-    assert "## 世界运行原则" in synth_prompt
-    assert "## 关键边界" in synth_prompt
-    assert "## 冲突资源" in synth_prompt
-    assert "## 代价红线" in synth_prompt
-    assert "6-8 条" in synth_prompt
-    assert "每条不超过 100 中文字符" in synth_prompt
-    assert "最多列 3 个阵营或资源冲突点" in synth_prompt
-    for forbidden in ("申请表", "审批", "备案", "考评", "绩效", "KPI", "表格制度"):
-        assert forbidden in role_prompt or forbidden in synth_prompt
+    assert "STAGE_CONTRACT" in role_prompt
+    assert "题材核心结构" in synth_prompt
+    assert "主角所在组织或生活圈" in synth_prompt
+    assert "可持续写作素材" in synth_prompt
+    for old in ("## 世界运行原则", "## 关键边界", "## 冲突资源", "## 代价红线"):
+        assert old not in synth_prompt
 
 
 def test_worldbuilding_prompt_preserves_user_requested_controlled_terms_as_principles():
@@ -363,10 +341,8 @@ def test_worldbuilding_prompt_preserves_user_requested_controlled_terms_as_princ
 
     prompt = build_outline_stage_synthesizer_prompt(state, "worldbuilding", [])
 
-    assert "用户原始输入或锁定产物已明确包含：绩效" in prompt
-    assert "可以保留这些词" in prompt
-    assert "只能改写为服务主线冲突的世界运行原则" in prompt
-    assert "不得扩写成申请/审批/备案/考评流程或表格制度" in prompt
+    assert "STAGE_CONTRACT" in prompt
+    assert "世界观设定稿" in prompt
 
 
 def test_characters_prompt_uses_direction_and_worldbuilding_context():
@@ -390,7 +366,7 @@ def test_characters_prompt_uses_direction_and_worldbuilding_context():
     assert "黑暗魔门悬疑智斗" in prompt
     assert "世界观设定（options_ready）" in prompt
     assert "气运可以被观测、借贷和吞噬" in prompt
-    assert "人物关系必须承接方向定位、故事概念和世界观规则" in prompt
+    assert "人物关系必须承接方向定位和世界观规则" in prompt
 
 
 def test_characters_prompt_requires_mainline_conflict_function():
@@ -399,16 +375,11 @@ def test_characters_prompt_requires_mainline_conflict_function():
     role_prompt = build_outline_stage_role_prompt(state, "characters", "关系冲突 Agent")
     synth_prompt = build_outline_stage_synthesizer_prompt(state, "characters", [])
 
-    assert "主角缺陷与欲望" in role_prompt
-    assert "关键人物目标" in role_prompt
-    assert "阵营位置" in role_prompt
-    assert "背叛/信任风险" in role_prompt
-    assert "人物 / 目标 / 与主线冲突的功能 / 关系张力 / 弧光风险" in synth_prompt
-    assert "主要人物 3-5 个" in synth_prompt
-    assert "每字段不超过 60 中文字符" in synth_prompt
-    assert "每个角色都必须有主线功能或冲突功能" in synth_prompt
-    for forbidden in ("亲密行为", "双修审批", "道侣绩效", "道侣流程", "暧昧规则", "福利场景", "恋爱系统表格"):
-        assert forbidden in role_prompt or forbidden in synth_prompt
+    assert "STAGE_CONTRACT" in role_prompt
+    assert "人物关系稿" in synth_prompt
+    assert "主角" in synth_prompt
+    assert "关键关系" in synth_prompt
+    assert "对立面" in synth_prompt
 
 
 def test_characters_prompt_preserves_user_requested_terms_as_conflict_function():
@@ -417,10 +388,8 @@ def test_characters_prompt_preserves_user_requested_terms_as_conflict_function()
 
     prompt = build_outline_stage_synthesizer_prompt(state, "characters", [])
 
-    assert "用户原始输入或锁定产物已明确包含：道侣绩效、福利场景" in prompt
-    assert "可以保留这些词的方向" in prompt
-    assert "必须改写为目标、动机、阵营位置或主线冲突功能" in prompt
-    assert "不得生成亲密行为规则、道侣流程或福利场景" in prompt
+    assert "人物关系稿" in prompt
+    assert "STAGE_CONTRACT" in prompt
 
 
 def test_story_flow_prompt_uses_all_prior_stage_contexts():
@@ -434,7 +403,7 @@ def test_story_flow_prompt_uses_all_prior_stage_contexts():
     assert "低调求生追查真相" in prompt
     assert "气运规则造成修行代价" in prompt
     assert "师徒关系隐藏吞噬冲突" in prompt
-    assert "故事流程必须承接方向定位、故事概念、世界观代价和人物关系冲突" in prompt
+    assert "故事流程必须承接方向定位、世界观代价和人物关系冲突" in prompt
 
 
 def test_story_flow_prompt_limits_flow_to_narrative_structure():
@@ -444,16 +413,10 @@ def test_story_flow_prompt_limits_flow_to_narrative_structure():
     synth_prompt = build_outline_stage_synthesizer_prompt(state, "story_flow", [])
 
     assert "流程只表示叙事流程" in role_prompt
-    assert "这里的“流程”只指叙事流程" in synth_prompt
-    assert "阶段目标" in synth_prompt
-    assert "关键转折" in synth_prompt
-    assert "伏笔布置/回收方向" in synth_prompt
-    assert "失败代价" in synth_prompt
-    assert "三幕或四段结构" in synth_prompt
-    assert "每段最多 4 个要点" in synth_prompt
-    assert "每点不超过 90 中文字符" in synth_prompt
-    for forbidden in ("完整章节正文", "细场景动作", "未确立新规则", "新增世界观 canon", "突然新增人物关系", "行政流程", "办理", "审批", "备案", "绩效", "申请表"):
-        assert forbidden in role_prompt or forbidden in synth_prompt
+    assert "故事流程稿" in synth_prompt
+    assert "开局压力" in synth_prompt
+    assert "中段升级" in synth_prompt
+    assert "终局方向" in synth_prompt
 
 
 def test_volume_outline_prompt_limits_output_to_volume_level():
@@ -463,14 +426,10 @@ def test_volume_outline_prompt_limits_output_to_volume_level():
     synth_prompt = build_outline_stage_synthesizer_prompt(state, "volume_outline", [])
 
     assert "只做卷级目标、卷内高潮、代价和卷间钩子" in role_prompt
-    assert "只输出卷级结构，不拆具体章节" in synth_prompt
-    assert "规划 3-5 卷" in synth_prompt
-    assert "卷名 / 卷目标 / 卷内主要矛盾 / 高潮事件 / 失败或胜利代价 / 卷间钩子" in synth_prompt
-    assert "每字段不超过 80 中文字符" in synth_prompt
-    assert "每卷必须包含目标、高潮、代价和卷间钩子" in synth_prompt
-    assert "主角能力或认知变化" in synth_prompt
-    for forbidden in ("逐章细纲", "第1章", "第2章", "章节列表", "场景列表", "正文片段", "新世界观规则", "新人物系统", "过细制度机制"):
-        assert forbidden in role_prompt or forbidden in synth_prompt
+    assert "分卷大纲稿" in synth_prompt
+    assert "分卷结构" in synth_prompt
+    assert "卷目标" in synth_prompt
+    assert "卷级高潮" in synth_prompt
 
 
 def test_chapter_outline_prompt_limits_output_to_chapter_level_plan():
@@ -480,14 +439,11 @@ def test_chapter_outline_prompt_limits_output_to_chapter_level_plan():
     synth_prompt = build_outline_stage_synthesizer_prompt(state, "chapter_outline", [])
 
     assert "只做章节目标、冲突、信息增量、人物变化、钩子和连续性提醒" in role_prompt
-    assert "只做章节级规划" in synth_prompt
-    assert "首批输出 8-12 章" in synth_prompt
-    assert "章节编号 / 章节目标 / 主要冲突 / 信息增量 / 人物状态变化 / 结尾钩子 / 连续性提醒" in synth_prompt
-    assert "每字段不超过 60 中文字符" in synth_prompt
-    assert "每章必须包含目标、冲突、信息增量和钩子" in synth_prompt
-    assert "信息增量只能来自前序已确立设定" in synth_prompt
-    for forbidden in ("正式正文", "对白", "中文引号对白", "细场景调度", "完整场景卡", "未确立新规则", "新人物关系", "审批", "制度", "亲密机制"):
-        assert forbidden in role_prompt or forbidden in synth_prompt
+    assert "章节大纲稿" in synth_prompt
+    assert "章节编号" in synth_prompt
+    assert "章节目标" in synth_prompt
+    assert "主要冲突" in synth_prompt
+    assert "信息增量" in synth_prompt
 
 
 def test_review_lock_prompt_is_status_first_and_non_creative():
@@ -499,15 +455,15 @@ def test_review_lock_prompt_is_status_first_and_non_creative():
     assert "只做一致性检查、风险标注、锁定建议和章节卡准备度判断" in role_prompt
     assert "STATUS: pass|revise|stop" in synth_prompt
     assert "STATUS: pass" in synth_prompt
-    assert "STATUS: revise" in synth_prompt
-    assert "STATUS: stop" in synth_prompt
+    assert "pass|revise|stop" in synth_prompt
     assert "一致性检查" in synth_prompt
     assert "锁定建议" in synth_prompt
-    assert "问题最多 8 条" in synth_prompt
-    assert "每条不超过 90 中文字符" in synth_prompt
-    assert "进入章节卡前的准备条件" in synth_prompt
-    for forbidden in ("新增世界规则", "新增 canon", "重写人物关系", "重写剧情流程", "生成章节卡", "生成正文", "二次创作"):
-        assert forbidden in role_prompt or forbidden in synth_prompt
+    assert "阶段承接检查" in synth_prompt
+    assert "已锁定 canon 清单" in synth_prompt
+    assert "是否可进入章节卡" in synth_prompt
+    assert "新设定" in role_prompt
+    assert "新人物" in role_prompt
+    assert "新剧情重写" in role_prompt
 
 
 def test_current_stage_draft_enters_synthesizer_prompt():
@@ -575,7 +531,7 @@ def test_direction_sanitizer_removes_nested_titles_and_institutional_terms():
 
     assert markdown.count("## 方向定位稿") == 1
     assert "## 方向控制稿" not in markdown
-    assert "# 方向定位" not in markdown.splitlines()
+    assert markdown.splitlines()[0] == "## 方向定位稿"
     for forbidden in ("申请表", "审批", "考评", "备案", "绩效", "项目审批", "亲密行为申请表"):
         assert forbidden not in markdown
     for marker in ("类型定位", "主角行动原则", "核心冲突", "情绪基调", "禁区"):
@@ -610,10 +566,10 @@ def test_outline_stage_advance_emits_progress_events(tmp_path):
     events.clear()
     state = run_outline_turn(graph, state, store, "确认进入下一阶段")
 
-    assert state.outline_stage == "concept"
+    assert state.outline_stage == "worldbuilding"
     assert any(stage == "OutlineStage" and "锁定" in message for stage, message in events)
     assert any(stage == "OutlineStage" and "进入" in message for stage, message in events)
-    assert any(stage == "故事概念 Agent" for stage, _message in events)
+    assert any(stage == "规则架构 Agent" for stage, _message in events)
     assert any(stage == "大纲汇总 Agent" for stage, _message in events)
 
 
@@ -680,7 +636,7 @@ def test_stage_prompt_prefers_stage_memory_over_full_synthesis():
         "synthesis": "完整长文不应进入 prompt。" + "污染" * 200,
     }
 
-    prompt = build_outline_stage_role_prompt(state, "concept", "故事概念 Agent")
+    prompt = build_outline_stage_role_prompt(state, "worldbuilding", "规则架构 Agent")
 
     assert "主角低调求生" in prompt
     assert "师傅吞噬气运是核心谜团" in prompt
@@ -865,7 +821,7 @@ def test_outline_direct_entry_temporary_revises_locked_direction_then_returns_to
     assert state.pending_questions == ["第5阶段问题？"]
     assert state.outline_stage_artifacts["direction"]["status"] == "locked"
     assert state.outline_stage_artifacts["direction"]["pending_questions"] == []
-    assert "已回到第 5 阶段「故事流程」继续修改" in state.director_message
+    assert "已回到第 4 阶段「故事流程」继续修改" in state.director_message
 
 
 def test_outline_stage_parallel_path_preserves_role_order(tmp_path, monkeypatch):

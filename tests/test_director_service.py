@@ -389,10 +389,10 @@ def test_director_service_confirms_existing_worldbuilding_stage(tmp_path):
 
     confirmed = service.handle_turn("重生魔门", "1", channel="cli")
 
-    assert confirmed.state.outline_stage == "characters"
+    assert confirmed.state.outline_stage == "worldbuilding"
     assert confirmed.state.outline_stage_artifacts["direction"]["status"] == "locked"
-    assert confirmed.state.outline_stage_artifacts["worldbuilding"]["status"] == "locked"
-    assert "气运可以被观测和借贷" in confirmed.state.outline_stage_artifacts["worldbuilding"]["synthesis"]
+    assert confirmed.state.outline_stage_artifacts["worldbuilding"]["status"] == "options_ready"
+    assert "世界观设定稿" in confirmed.state.outline_stage_artifacts["worldbuilding"]["synthesis"]
     assert store.outline_stage_path("重生魔门", "worldbuilding").exists()
 
 def test_confirmation_accepts_receive_words():
@@ -755,7 +755,7 @@ def test_director_service_temporary_revises_locked_direction_then_returns_to_sto
     assert confirmed.state.outline_stage_artifacts["direction"]["pending_questions"] == []
     assert confirmed.state.outline_stage_artifacts["concept"]["status"] == "locked"
     assert confirmed.state.outline_stage_artifacts["worldbuilding"]["status"] == "locked"
-    assert "已回到第 5 阶段「故事流程」继续修改" in confirmed.final_message
+    assert "已回到第 4 阶段「故事流程」继续修改" in confirmed.final_message
 
 
 def test_director_service_stage_number_revision_targets_direction(tmp_path):

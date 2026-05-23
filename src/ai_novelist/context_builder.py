@@ -476,7 +476,7 @@ def build_messages_summary_section(state: NovelState, max_items: int = 6, max_ch
 def build_previous_stage_memory(state: NovelState, stage: str | None) -> str:
     if not stage:
         return "暂无"
-    order = ["direction", "concept", "worldbuilding", "characters", "story_flow", "volume_outline", "chapter_outline", "review_lock"]
+    order = ["direction", "worldbuilding", "characters", "story_flow", "volume_outline", "chapter_outline", "review_lock"]
     if stage not in order:
         return "暂无"
     lines = []

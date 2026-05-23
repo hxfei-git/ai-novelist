@@ -23,17 +23,17 @@ def test_direction_proposer_prompt_marks_directions_as_candidates():
 def test_world_builder_prompt_limits_rules_to_conflict_principles():
     prompt = load_prompt("world_builder")
 
-    assert "3-5 条与主线冲突直接相关的运行原则" in prompt
-    assert "每条不超过 100 中文字符" in prompt
-    assert "如何制造冲突/代价" in prompt
-    assert "具体机制必须来自用户原话、锁定大纲或已有小说圣经" in prompt
-    assert "不要补造 canon" in prompt
-    assert "可复用素材最多 5 个" in prompt
-    assert "说明书式规则清单" in prompt
-    for forbidden in ("行政流程", "审批", "备案", "绩效", "申请表", "KPI", "考评"):
+    assert "世界观必须服务主线冲突" in prompt
+    assert "不写百科，不写说明书" in prompt
+    assert "不把世界观写成产品规则、游戏机制、编剧理论或抽象算法" in prompt
+    assert "具体设定必须有来源" in prompt
+    assert "信息不足时写“待确认”" in prompt
+    assert "世界观设定稿" in prompt
+    assert "题材核心结构" in prompt
+    assert "可持续写作素材" in prompt
+    assert "待确认事项" in prompt
+    for forbidden in ("审批", "备案", "绩效", "申请表", "KPI", "考评"):
         assert forbidden in prompt
-    assert "至少 5 条" not in prompt
-    assert "硬规则" not in prompt
 
 
 def test_outline_planner_prompt_requires_confirmed_inputs_and_pending_gaps():

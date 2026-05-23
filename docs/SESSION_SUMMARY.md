@@ -2015,3 +2015,40 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - Director 读取最近 3 章节奏并主动给“升压/降压建议”的策略还未深度接入决策提示词；当前已具备 `pacing_report.json` 与 state 数据基础。
 
+## 93. 本轮更新：执行 `plan.md` 全阶段（七阶段重构 + 三层治理）
+
+- 完成大纲共创链路七阶段重构：`direction -> worldbuilding -> characters -> story_flow -> volume_outline -> chapter_outline -> review_lock`。
+- 活跃流程移除 `concept`，保留 legacy 兼容迁移：旧项目 `concept` 自动回流到 `direction/worldbuilding`，旧 artifact 保留为参考。
+- 新增 `src/ai_novelist/outline/` 六个模块：`stage_contracts/source_ledger/stage_guard/question_filter/renderers/legacy_migration`。
+- `graph_outline` 全链路接入：
+  - contract 驱动 prompt。
+  - guard 统一治理（越权/无来源 canon/公式句/抽象机制语言）。
+  - 确认问题过滤，避免模型自造选项菜单。
+- 修复 Director 锁阶段 bug：`persist_outputs` 不再先改 `outline_stage`，始终锁当前阶段后推进。
+- `world_builder.md` 改为题材自适应结构与分类质量规则；去除旧“禁止词表中心”策略。
+- mock 输出同步到七阶段与新世界观结构，移除旧 worldbuilding 模板与公式化绝对因果句。
+
+测试结果：
+
+```bash
+.venv/bin/python -m pytest tests/test_outline_stage_controls.py
+# 9 passed
+
+.venv/bin/python -m pytest tests/test_outline_collaboration.py
+# 45 passed
+
+.venv/bin/python -m pytest tests/test_director_service.py tests/test_graph_writer.py tests/smoke_outline_collaboration.py tests/smoke_phase2_chat.py
+# 56 passed
+
+.venv/bin/python -m pytest
+# 297 passed
+```
+
+新增测试：
+
+- `tests/test_outline_stage_controls.py`（stage contracts/guard/filter/legacy/director bug 回归）。
+
+说明：
+
+- 由于会话环境中 `apply_patch` 工具触发沙箱 `bwrap loopback` 错误，本轮改动通过提权脚本化编辑完成，并在每一步后执行语法检查与全量回归验证。
+

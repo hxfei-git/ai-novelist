@@ -247,12 +247,8 @@ class DirectorService:
             result_state = self._run_research(state)
         elif decision.action == "persist_outputs":
             if state.active_workflow == "outline" and state.outline_stage != "done" and not state.outline.strip():
-                from ai_novelist.graph_outline import OUTLINE_STAGES, advance_outline_stage_node
+                from ai_novelist.graph_outline import advance_outline_stage_node
 
-                requested_stage = str(decision.task_args.get("stage", "")).strip()
-                if requested_stage in OUTLINE_STAGES:
-                    state.outline_stage = requested_stage  # type: ignore[assignment]
-                    state.current_stage = requested_stage
                 result_state = NovelState.from_dict(advance_outline_stage_node(state.to_dict(), self.adapter, self.store, self.progress or noop_progress))
             else:
                 result_state = NovelState.from_dict(persist_available_outputs(state.to_dict(), self.store))
@@ -954,7 +950,7 @@ def should_defer_outline_confirmation_to_director(text: str) -> bool:
 def stage_display_name(stage: str) -> str:
     labels = {
         "direction": "方向定位",
-        "concept": "故事概念",
+        "concept": "故事概念（旧版）",
         "worldbuilding": "世界观设定",
         "characters": "人物关系",
         "story_flow": "故事流程",
@@ -968,7 +964,6 @@ def stage_display_name(stage: str) -> str:
 def outline_stage_index(stage: str) -> int:
     stages = [
         "direction",
-        "concept",
         "worldbuilding",
         "characters",
         "story_flow",
@@ -987,16 +982,15 @@ def detect_outline_stage_reference(text: str) -> str:
 
 
 def detect_outline_stage_number(text: str) -> str:
-    match = re.search(r"第\s*(?P<number>[1-8一二三四五六七八])\s*(?:个)?阶段", text)
+    match = re.search(r"第\s*(?P<number>[1-7一二三四五六七])\s*(?:个)?阶段", text)
     if not match:
-        match = re.search(r"阶段\s*(?P<number>[1-8一二三四五六七八])", text)
+        match = re.search(r"阶段\s*(?P<number>[1-7一二三四五六七])", text)
     if not match:
         return ""
     raw_number = match.group("number")
-    number = int(raw_number) if raw_number.isdigit() else "一二三四五六七八".index(raw_number) + 1
+    number = int(raw_number) if raw_number.isdigit() else "一二三四五六七".index(raw_number) + 1
     stages = [
         "direction",
-        "concept",
         "worldbuilding",
         "characters",
         "story_flow",
@@ -1190,8 +1184,7 @@ def deterministic_view_decision(state: NovelState) -> DirectorDecision | None:
 
 def detect_outline_stage_request(text: str) -> str:
     stage_markers = {
-        "direction": ("方向定位", "创作方向", "方向阶段", "回到方向", "重修方向", "修改方向"),
-        "concept": ("故事概念", "概念阶段", "核心冲突", "反转机制"),
+        "direction": ("方向定位", "创作方向", "方向阶段", "回到方向", "重修方向", "修改方向", "故事概念", "概念阶段", "一句话故事", "核心概念", "核心冲突", "反转机制"),
         "worldbuilding": ("世界观", "世界观设定", "世界观阶段"),
         "characters": ("人物关系", "人物阶段", "角色关系"),
         "story_flow": ("故事流程", "流程阶段", "剧情流程"),

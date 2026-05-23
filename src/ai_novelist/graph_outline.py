@@ -12,6 +12,16 @@ from ai_novelist.agent_metrics import complete_with_metrics, estimate_tokens
 from ai_novelist.agent_parallel import AgentJob, run_agent_jobs
 from ai_novelist.artifacts import ArtifactRecord, register_artifact
 from ai_novelist.corpus.craft_resolver import resolve_author_craft
+from ai_novelist.outline.legacy_migration import ensure_outline_stage, normalize_legacy_outline_artifacts
+from ai_novelist.outline.question_filter import filter_stage_confirmation_questions
+from ai_novelist.outline.renderers import build_stage_output_rule
+from ai_novelist.outline.stage_contracts import (
+    LEGACY_OUTLINE_STAGES,
+    OUTLINE_STAGES,
+    STAGE_LABELS,
+    get_stage_contract,
+)
+from ai_novelist.outline.stage_guard import guard_stage_output
 from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, with_agent_metadata
 from ai_novelist.prompts import load_prompt
 from ai_novelist.state import NovelState
@@ -40,31 +50,8 @@ OUTLINE_ACTIONS = {
     "stop",
 }
 
-OUTLINE_STAGES = [
-    "direction",
-    "concept",
-    "worldbuilding",
-    "characters",
-    "story_flow",
-    "volume_outline",
-    "chapter_outline",
-    "review_lock",
-]
-LEGACY_STAGE_ALIASES = {"outline_draft": "volume_outline"}
-STAGE_LABELS = {
-    "direction": "方向定位",
-    "concept": "故事概念",
-    "worldbuilding": "世界观设定",
-    "characters": "人物关系",
-    "story_flow": "故事流程",
-    "volume_outline": "分卷大纲",
-    "chapter_outline": "章节大纲",
-    "review_lock": "审稿锁定",
-    "done": "已锁定",
-}
 STAGE_ROLES = {
     "direction": ["类型定位 Agent", "主题卖点 Agent"],
-    "concept": ["故事概念 Agent"],
     "worldbuilding": ["规则架构 Agent", "原作/检索一致性 Agent"],
     "characters": ["主角弧光 Agent", "关系冲突 Agent", "反派/势力 Agent"],
     "story_flow": ["主线结构 Agent", "节奏悬念 Agent", "伏笔 Agent"],
@@ -401,9 +388,10 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
         ),
     )
 
-    if stage == "direction":
-        synthesis = sanitize_direction_stage_output(synthesis, state.user_request)
+    guarded = guard_stage_output(synthesis, stage, state)
+    synthesis = guarded.text
     questions = extract_stage_confirmation_questions(synthesis)
+    questions = filter_stage_confirmation_questions(stage, questions, state, synthesis)
     artifact = {
         "stage": stage,
         "label": STAGE_LABELS[stage],
@@ -414,6 +402,15 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
         "summary": summarize_stage_text(synthesis),
         "stage_memory": extract_stage_memory(synthesis),
         "pending_questions": questions,
+        "guard_issues": [
+            {
+                "code": issue.code,
+                "severity": issue.severity,
+                "message": issue.message,
+                "excerpt": issue.excerpt,
+            }
+            for issue in guarded.issues
+        ],
         "user_feedback": state.user_request,
         "updated_at": datetime.now(UTC).isoformat(timespec="seconds"),
     }
@@ -476,7 +473,7 @@ def advance_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalSt
 
     next_stage = next_outline_stage(stage)
     if next_stage is None:
-        emit_progress(progress, "OutlineStage", "正在合并八阶段产物并保存最终大纲...")
+        emit_progress(progress, "OutlineStage", "正在合并七阶段产物并保存最终大纲...")
         finalize_locked_outline(state, store)
         store.save_state(state)
         outline_message = state.director_message
@@ -611,34 +608,6 @@ def show_outline_stage_node(data: dict, store: LocalStore) -> dict:
     return state.to_dict()
 
 
-def ensure_outline_stage(state: NovelState) -> None:
-    normalize_legacy_outline_artifacts(state)
-    if state.outline_stage == "done":
-        state.outline_stage_status = "done"
-        return
-    if state.outline_stage in LEGACY_STAGE_ALIASES:
-        state.outline_stage = LEGACY_STAGE_ALIASES[state.outline_stage]  # type: ignore[assignment]
-    if state.outline_stage not in OUTLINE_STAGES:
-        state.outline_stage = "direction"
-    if not state.outline_stage_status:
-        state.outline_stage_status = "collecting"
-
-
-def normalize_legacy_outline_artifacts(state: NovelState) -> None:
-    for legacy_stage, stage in LEGACY_STAGE_ALIASES.items():
-        if legacy_stage not in state.outline_stage_artifacts:
-            continue
-        if stage not in state.outline_stage_artifacts:
-            artifact = state.outline_stage_artifacts[legacy_stage]
-            if isinstance(artifact, dict):
-                artifact = dict(artifact)
-                artifact["stage"] = stage
-                if artifact.get("label") == "总大纲草案":
-                    artifact["label"] = STAGE_LABELS[stage]
-            state.outline_stage_artifacts[stage] = artifact
-        del state.outline_stage_artifacts[legacy_stage]
-
-
 
 def negates_stage_advance(text: str) -> bool:
     return any(marker in text for marker in ("不要进入下一阶段", "不进入下一阶段", "先不进入下一阶段", "暂不进入下一阶段", "别进入下一阶段", "不要推进", "先不推进", "暂不推进"))
@@ -759,8 +728,7 @@ def is_stage_switch_request(text: str) -> bool:
 
 def detect_stage_reference(text: str) -> str | None:
     mapping = [
-        ("direction", ("方向", "定位", "类型", "卖点")),
-        ("concept", ("故事概念", "概念", "核心冲突", "主题", "反转")),
+        ("direction", ("方向", "定位", "类型", "卖点", "故事概念", "概念", "一句话故事", "核心概念")),
         ("worldbuilding", ("世界观", "设定", "规则")),
         ("characters", ("人物", "人设", "关系", "反派", "势力")),
         ("story_flow", ("故事流程", "流程", "主线", "节奏", "伏笔")),
@@ -825,11 +793,22 @@ def load_outline_stage_craft_brief(state: NovelState, store: LocalStore) -> str:
 
 
 def build_outline_stage_role_prompt(state: NovelState, stage: str, role: str, author_craft: str = "") -> str:
+    contract = get_stage_contract(stage)
     return (
         "AGENT: outline_stage_role\n"
         f"ROLE: {role}\n"
         f"STAGE: {stage}\n"
         f"STAGE_LABEL: {STAGE_LABELS[stage]}\n\n"
+        "STAGE_CONTRACT:\n"
+        f"- 本阶段目的：{contract.purpose}\n"
+        f"- 允许新增：{', '.join(contract.allowed_intents)}\n"
+        f"- 禁止越权：{', '.join(contract.forbidden_intents)}\n"
+        f"- Canon policy：{contract.canon_policy}\n"
+        "- 所有具体设定必须说明来源，不能把自造机制写成已锁定事实。\n\n"
+        "LANGUAGE_QUALITY:\n"
+        "- 不写公式化绝对因果句。\n"
+        "- 不写产品规则、游戏机制、编剧理论语言。\n"
+        "- 世界观阶段多写角色能看见、听见、触碰、承受的事物。\n\n"
         f"角色专属关注点：\n{role_focus_instruction(stage, role)}\n\n"
         f"用户最新输入：{state.user_request}\n"
         f"创意：{state.idea or '暂无'}\n"
@@ -838,9 +817,7 @@ def build_outline_stage_role_prompt(state: NovelState, stage: str, role: str, au
         f"前序已保存阶段内容：\n{previous_stage_context(state, stage)}\n\n"
         f"当前阶段已有内容：\n{current_stage_context(state, stage)}\n\n"
         f"阶段连续性要求：\n{stage_continuity_requirement(stage)}\n\n"
-        f"{outline_stage_boundary_prompt(stage)}\n"
-        f"{worldbuilding_overfine_terms_guard(state, stage)}"
-        f"{characters_relationship_guard(state, stage)}\n\n"
+        f"{outline_stage_boundary_prompt(stage)}\n\n"
         "OUTPUT_BUDGET:\n"
         "- 只输出短 JSON：{role, opportunities, risks, suggestions}。\n"
         "- opportunities/risks/suggestions 各最多 2 条，每条不超过 80 中文字符。\n"
@@ -852,22 +829,31 @@ def build_outline_stage_role_prompt(state: NovelState, stage: str, role: str, au
 
 
 def build_outline_stage_synthesizer_prompt(state: NovelState, stage: str, role_reviews: list[dict[str, str]], author_craft: str = "") -> str:
+    contract = get_stage_contract(stage)
     reviews = "\n\n".join(f"## {item['role']}\n{item['content']}" for item in role_reviews)
     return (
         "AGENT: outline_stage_synthesizer\n"
         f"STAGE: {stage}\n"
         f"STAGE_LABEL: {STAGE_LABELS[stage]}\n\n"
+        "STAGE_CONTRACT:\n"
+        f"- 本阶段目的：{contract.purpose}\n"
+        f"- 允许新增：{', '.join(contract.allowed_intents)}\n"
+        f"- 禁止越权：{', '.join(contract.forbidden_intents)}\n"
+        f"- Canon policy：{contract.canon_policy}\n"
+        "- 所有具体设定必须说明来源，不能把自造机制写成已锁定事实。\n\n"
+        "LANGUAGE_QUALITY:\n"
+        "- 不写公式化绝对因果句。\n"
+        "- 不写产品规则、游戏机制、编剧理论语言。\n"
+        "- 世界观阶段多写角色能看见、听见、触碰、承受的事物。\n\n"
         f"创意：{state.idea or '暂无'}\n"
         f"用户最新输入：{state.user_request}\n"
         f"作者构思参考：\n{author_craft or '暂无'}\n\n"
         f"前序已保存阶段内容：\n{previous_stage_context(state, stage)}\n\n"
         f"当前阶段已有内容：\n{current_stage_context(state, stage)}\n\n"
         f"阶段连续性要求：\n{stage_continuity_requirement(stage)}\n\n"
-        f"{outline_stage_boundary_prompt(stage)}\n"
-        f"{worldbuilding_overfine_terms_guard(state, stage)}"
-        f"{characters_relationship_guard(state, stage)}\n\n"
+        f"{outline_stage_boundary_prompt(stage)}\n\n"
         f"角色短评：\n{reviews}\n\n"
-        f"{outline_stage_synthesizer_output_rule(stage)}"
+        f"{outline_stage_synthesizer_output_rule(stage, state)}"
     )
 
 
@@ -881,8 +867,8 @@ OUTLINE_STAGE_BOUNDARIES = {
         "forbidden": "具体世界规则、世界规则清单、组织流程、人物关系细则、人物亲密机制、章节列表、第1章/第 1 章、分卷结构、第一卷、专有名词堆砌、行政或制度化细则、申请表、审批、备案、绩效、KPI",
     },
     "worldbuilding": {
-        "allowed": "世界运行原则、力量/技术边界、阵营结构、资源与代价、冲突来源、可渐进揭露的秘密",
-        "forbidden": "过细行政流程、表格化制度、申请表、申请、审批、备案、考评、绩效、KPI、与主线无关的规则清单、未被用户要求的猎奇机制、完整人物小传、章节剧情、分卷安排、无代价万能规则",
+        "allowed": "力量或修炼体系、门派/组织生态、势力格局与理念、资源与场景素材、可持续冲突来源",
+        "forbidden": "抽象剧情算法、代价红线式标题、人物小传、章节流程、结局安排、产品规则语言、模型自造机制",
     },
     "characters": {
         "allowed": "主角缺陷与欲望、关键人物目标、动机、关系张力、阵营位置、阵营冲突、背叛/信任风险、成长矛盾、人物弧光",
@@ -908,11 +894,11 @@ OUTLINE_STAGE_BOUNDARIES = {
 
 
 def outline_stage_boundary_prompt(stage: str) -> str:
-    boundary = OUTLINE_STAGE_BOUNDARIES.get(stage, OUTLINE_STAGE_BOUNDARIES["direction"])
+    contract = get_stage_contract(stage)
     return (
         "STAGE_BOUNDARY:\n"
-        f"- 允许输出：{boundary['allowed']}。\n"
-        f"- 禁止输出：{boundary['forbidden']}。\n"
+        f"- 允许输出：{', '.join(contract.allowed_intents)}。\n"
+        f"- 禁止输出：{', '.join(contract.forbidden_intents)}。\n"
         "- 只给本阶段短评或产物，不越权生成其他阶段内容，不新增无依据 canon。"
     )
 
@@ -971,85 +957,9 @@ def characters_relationship_guard(state: NovelState, stage: str) -> str:
     )
 
 
-def outline_stage_synthesizer_output_rule(stage: str) -> str:
-    if stage == "direction":
-        return (
-            "方向定位不是评审报告，而是后续概念、世界观、人物和剧情都会继承的创作基准。"
-            "必须把用户最新输入与当前阶段已有内容整合成一版新的方向定位稿；"
-            "不要追加、罗列或保留历史修改记录，不要把用户意见单独堆成段落。"
-            "若新意见与旧方向重复，合并去重；若冲突，以用户最新输入为准并改写旧方向。"
-            "最终文本必须短、准、可执行，而不是资料汇编。"
-            "如果角色短评给出具体机制，必须改写成抽象方向原则。"
-            "请只输出一个 Markdown 小节：\n"
-            "## 方向定位稿\n"
-            "只写 6-8 条，每条不超过 80 个中文字符，每条必须是方向原则；"
-            "必须覆盖故事类型、主角行动原则、核心爽点、核心冲突、情绪基调、主题边界、反转原则和禁区；"
-            "可以用抽象原则暗示全书开篇切入、中期升级和后期终局，但不得写成具体剧情桥段；"
-            "不能只写开篇局面，必须让后续故事概念、世界观、人物关系和故事流程能看见中期与结尾方向；"
-            "不要再拆成“一句话方向 / 方向命令 / 不许跑偏”。"
-        )
+def outline_stage_synthesizer_output_rule(stage: str, state: NovelState | None = None) -> str:
+    return build_stage_output_rule(stage, state)
 
-    structures = {
-        "concept": (
-            "## 故事概念稿\n"
-            "只写 5-7 条短句，每条不超过 90 中文字符；必须覆盖「一句话概念、主角欲望、核心冲突、叙事承诺、反转原则、待后续展开」。\n"
-            "待后续展开只能标记需要世界观、人物或流程阶段确认的方向，不展开规则、关系细则、章节或分卷安排。\n"
-            "不得出现章节列表、第1章、第一卷、世界规则清单、组织流程、人物亲密机制、申请表、审批、备案、绩效或 KPI。"
-        ),
-        "worldbuilding": (
-            "## 世界运行原则\n"
-            "写 6-8 条可支撑剧情的运行原则，每条不超过 100 中文字符；每条必须说明冲突或代价功能，不写规则清单式条款。\n"
-            "## 关键边界\n"
-            "说明力量/技术边界和可渐进揭露的秘密，避免扩成百科、行政流程或表格制度。\n"
-            "## 冲突资源\n"
-            "最多列 3 个阵营或资源冲突点，只说明它们如何推动主线选择。\n"
-            "## 代价红线\n"
-            "列出不可绕开的代价，禁止无代价万能规则。"
-        ),
-        "characters": (
-            "## 人物关系稿\n"
-            "只列主要人物 3-5 个；每人固定使用「人物 / 目标 / 与主线冲突的功能 / 关系张力 / 弧光风险」5 个字段，每字段不超过 60 中文字符。\n"
-            "每个角色都必须有主线功能或冲突功能；只写目标、动机、阵营位置、背叛/信任风险和成长矛盾。\n"
-            "禁止亲密行为、双修审批、道侣绩效、道侣流程、暧昧规则、福利场景、恋爱系统表格和无主线功能的人设细节。"
-        ),
-        "story_flow": (
-            "## 故事流程稿\n"
-            "这里的“流程”只指叙事流程，不是组织流程、制度流程或行政流程。采用三幕或四段结构；每段最多 4 个要点，每点不超过 90 中文字符。\n"
-            "每段必须写清阶段目标、关键转折、信息释放、伏笔布置/回收方向、失败代价和高潮方向。\n"
-            "禁止完整章节正文、细场景动作、未确立新规则、新增世界观 canon、突然新增人物关系、行政流程、办理、审批、备案、绩效或申请表。"
-        ),
-        "volume_outline": (
-            "## 分卷大纲稿\n"
-            "只输出卷级结构，不拆具体章节。规划 3-5 卷；每卷固定使用「卷名 / 卷目标 / 卷内主要矛盾 / 高潮事件 / 失败或胜利代价 / 卷间钩子」字段，每字段不超过 80 中文字符。\n"
-            "每卷必须包含目标、高潮、代价和卷间钩子，并说明主角能力或认知变化如何推进全书核心谜团或主题。\n"
-            "禁止第1章/第2章式逐章细纲、章节列表、场景列表、正文片段、新世界观规则、新人物系统或过细制度机制。"
-        ),
-        "chapter_outline": (
-            "## 章节大纲稿\n"
-            "只做章节级规划，不写场景卡、正文或对白。首批输出 8-12 章，或严格沿用已有计划；每章固定使用「章节编号 / 章节目标 / 主要冲突 / 信息增量 / 人物状态变化 / 结尾钩子 / 连续性提醒」字段，每字段不超过 60 中文字符。\n"
-            "每章必须包含目标、冲突、信息增量和钩子；信息增量只能来自前序已确立设定、分卷目标和故事流程。\n"
-            "禁止正式正文、对白、中文引号对白、细场景调度、完整场景卡、未确立新规则、新人物关系、审批/制度/亲密机制等无依据细节。"
-        ),
-        "review_lock": (
-            "STATUS: pass|revise|stop\n"
-            "## 一致性检查\n"
-            "只列一致性问题、阶段承接问题和风险标注，问题最多 8 条，每条不超过 90 中文字符；不得重写设定或补写内容。\n"
-            "## 锁定建议\n"
-            "列出可锁定约束、待确认问题和进入章节卡前的准备条件；修复建议必须短，只能指向前序阶段需确认或最小修正。\n"
-            "## 禁止事项自检\n"
-            "确认没有新增世界规则、重写人物关系、重写剧情流程、生成章节卡或生成正文；结论必须使用 STATUS: pass、STATUS: revise 或 STATUS: stop。"
-        ),
-    }
-    structure = structures.get(stage, structures["concept"])
-    return (
-        "请综合为用户可读的阶段最终产物，不输出候选菜单式 A/B/C，不跨阶段扩写。"
-        "阶段产物总长控制在 1200-1800 中文字符内；确认问题最多 3 条。"
-        "不得新增无依据 canon，不输出长篇解释，不重复外层标题。"
-        "请只输出以下 Markdown 结构：\n"
-        f"{structure}\n"
-        "## 仍需确认的问题\n"
-        "只列真正需要用户补充或拍板的问题；如果没有，写“暂无，当前阶段可继续修改或确认进入下一阶段”。"
-    )
 
 def summarize_stage_text(text: str, max_chars: int = 420) -> str:
     cleaned = re.sub(r"\s+", " ", text).strip()
@@ -1150,7 +1060,7 @@ def role_focus_instruction(stage: str, role: str) -> str:
         "章节拆分 Agent": "专注章节颗粒度和执行顺序；章节必须能被写手直接转成场景任务。",
         "章节钩子 Agent": "专注章末钩子、信息差和读者追读动力；钩子要服务主线推进，不制造无关悬念。",
         "连续性编辑 Agent": "专注章节之间的因果、时间线和设定一致性；发现割裂点时优先提出低成本修补方式。",
-        "总编辑 Agent": "专注八阶段整体一致性和可写性；判断当前大纲是否已经足够进入章节卡和正文生产。",
+        "总编辑 Agent": "专注七阶段整体一致性和可写性；判断当前大纲是否已经足够进入章节卡和正文生产。",
         "约束审计 Agent": "专注锁定约束、未决问题和设定边界；检查是否存在互相冲突或尚未闭环的约束。",
         "章节准备 Agent": "专注下一步章节生产准备度；指出章节卡、场景卡和正文写作前还缺哪些最小信息。",
     }
@@ -1162,11 +1072,11 @@ def role_focus_instruction(stage: str, role: str) -> str:
 def stage_continuity_requirement(stage: str) -> str:
     requirements = {
         "direction": "方向定位是后续所有阶段的源头：只锁定宏观创作原则，具体规则、人物细则和剧情桥段留到后续阶段展开。",
-        "concept": "故事概念必须承接方向定位，明确故事概念、核心冲突、主题表达和反转机制，不能另起一个故事。",
-        "worldbuilding": "世界观必须承接方向定位和故事概念提出的类型、冲突、主题与反转机制；每条规则都要服务这个故事方向。",
-        "characters": "人物关系必须承接方向定位、故事概念和世界观规则；人物欲望、关系张力和阵营冲突要由已保存设定自然生长。",
-        "story_flow": "故事流程必须承接方向定位、故事概念、世界观代价和人物关系冲突；这里的流程只表示叙事流程，转折不能脱离已建立的规则和人物动机。",
-        "volume_outline": "分卷大纲必须整合方向、概念、世界观、人物关系和故事流程，只做卷级目标、卷内高潮、代价和卷间钩子，不拆逐章细纲。",
+        "concept": "故事概念为旧版兼容阶段，新流程不再主动进入。",
+        "worldbuilding": "世界观必须承接方向定位提出的类型、冲突和情绪边界；每条规则都要服务这个故事方向。",
+        "characters": "人物关系必须承接方向定位和世界观规则；人物欲望、关系张力和阵营冲突要由已保存设定自然生长。",
+        "story_flow": "故事流程必须承接方向定位、世界观代价和人物关系冲突；这里的流程只表示叙事流程，转折不能脱离已建立的规则和人物动机。",
+        "volume_outline": "分卷大纲必须整合方向、世界观、人物关系和故事流程，只做卷级目标、卷内高潮、代价和卷间钩子，不拆逐章细纲。",
         "chapter_outline": "章节大纲必须承接分卷大纲，只做章节目标、冲突、信息增量、人物变化、钩子和连续性提醒，不写场景卡或正文。",
         "review_lock": "审稿锁定只做一致性检查、风险标注、锁定建议和章节卡准备度判断；不得新增 canon、重写人物关系、重写剧情流程或生成章节卡/正文。",
     }
@@ -1230,41 +1140,33 @@ DIRECTION_FORBIDDEN_REPLACEMENTS = {
 
 
 def sanitize_direction_stage_output(markdown: str, user_text: str = "") -> str:
-    text = (markdown or "").strip()
+    state = NovelState(project_id="sanitize", title="sanitize", idea=user_text, user_request=user_text)
+    result = guard_stage_output(markdown or "", "direction", state)
+    text = result.text.strip()
     if not text:
         return "## 方向定位稿\n"
 
-    text = text.replace("## 方向控制稿", "## 方向定位稿")
-    text = text.replace("# 方向控制稿", "## 方向定位稿")
-    text = re.sub(r"(?m)^#{1,6}\s*方向定位\s*$", "", text)
-
-    for forbidden, replacement in DIRECTION_FORBIDDEN_REPLACEMENTS.items():
-        if forbidden in user_text:
-            continue
-        text = text.replace(forbidden, replacement)
-
-    items: list[str] = []
+    cleaned_lines: list[str] = []
     for raw_line in text.splitlines():
         line = raw_line.strip()
         if not line:
             continue
-        if re.match(r"^#{1,6}\s*方向定位稿\s*$", line):
+        if re.match(r"^#{1,6}\s*方向定位\s*$", line):
             continue
-        if line.startswith("#"):
+        if re.match(r"^#{1,6}\s*方向控制稿\s*$", line):
             continue
-        line = re.sub(r"^[-*+•\s]*", "", line)
-        line = re.sub(r"^\d+[.、)]\s*", "", line).strip()
-        if not line:
+        if line == "## 方向定位稿":
             continue
-        if len(line) > 80:
-            line = line[:80].rstrip("，,；;、 ") + "。"
-        if line not in items:
-            items.append(line)
-        if len(items) >= 8:
-            break
+        for forbidden, replacement in DIRECTION_FORBIDDEN_REPLACEMENTS.items():
+            if forbidden in user_text:
+                continue
+            line = line.replace(forbidden, replacement)
+        cleaned_lines.append(line)
 
-    body = "\n".join(f"{index}. {item}" for index, item in enumerate(items, start=1))
-    return "## 方向定位稿\n" + (body if body else "")
+    if not cleaned_lines:
+        return "## 方向定位稿\n"
+    body = "\n".join(cleaned_lines)
+    return "## 方向定位稿\n" + body
 
 
 def stage_ready_message(stage: str, questions: list[str] | None = None) -> str:
@@ -1311,10 +1213,14 @@ def extract_stage_confirmation_questions(markdown: str) -> list[str]:
 def finalize_locked_outline(state: NovelState, store: LocalStore) -> None:
     sections = []
     for stage in OUTLINE_STAGES:
-        artifact = state.outline_stage_artifacts.get(stage, {})
         synthesis = stage_full_text(state, store, stage).strip()
         if synthesis:
             sections.append(f"## {STAGE_LABELS[stage]}\n\n{synthesis}")
+    concept_artifact = state.outline_stage_artifacts.get("concept")
+    if isinstance(concept_artifact, dict):
+        concept_text = str(concept_artifact.get("synthesis") or concept_artifact.get("summary") or "").strip()
+        if concept_text:
+            sections.append("## 旧版故事概念参考\n\n" + concept_text)
     state.outline = "# 最终锁定总大纲\n\n" + "\n\n".join(sections)
     state.outline_stage = "done"
     state.outline_stage_status = "done"
@@ -1323,8 +1229,8 @@ def finalize_locked_outline(state: NovelState, store: LocalStore) -> None:
     state.active_workflow = ""
     state.current_stage = "chapter_plan"
     state.director_action = "advance_outline_stage"
-    state.director_message = f"八阶段大纲已锁定，并保存为最终大纲：{store.outline_path(state.project_id)}"
-    add_outline_version(state, "outline", state.outline, "八阶段锁定大纲")
+    state.director_message = f"七阶段大纲已锁定，并保存为最终大纲：{store.outline_path(state.project_id)}"
+    add_outline_version(state, "outline", state.outline, "七阶段锁定大纲")
     store.save_outline(state)
 
 
