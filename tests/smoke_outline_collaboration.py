@@ -9,6 +9,7 @@ from ai_novelist.adapters.codex_cli import CodexCLIAdapter
 from ai_novelist.graph_outline import append_message, build_outline_collaboration_graph
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
+from ai_novelist.worldbuilding_framework import validate_worldbuilding_outline
 
 
 def run_turn(graph, store: LocalStore, state: NovelState, text: str) -> NovelState:
@@ -39,15 +40,19 @@ def main() -> int:
         assert not state.outline
 
         state = run_turn(graph, store, state, "确认进入下一阶段")
-        assert state.outline_stage == "concept"
+        assert state.outline_stage == "worldbuilding"
         assert state.outline_stage_artifacts["direction"]["status"] == "locked"
-        assert "concept" in state.outline_stage_artifacts
+        assert "worldbuilding" in state.outline_stage_artifacts
+        worldbuilding_text = store.load_outline_artifact("demo", "worldbuilding")
+        ok, missing = validate_worldbuilding_outline(worldbuilding_text)
+        assert ok, missing
+        assert store.worldbuilding_path("demo").exists()
         assert not store.outline_path("demo").exists()
 
         state = run_turn(graph, store, state, "确认进入下一阶段")
-        assert state.outline_stage == "worldbuilding"
-        assert state.outline_stage_artifacts["concept"]["status"] == "locked"
-        assert "worldbuilding" in state.outline_stage_artifacts
+        assert state.outline_stage == "characters"
+        assert state.outline_stage_artifacts["worldbuilding"]["status"] == "locked"
+        assert "characters" in state.outline_stage_artifacts
         assert not store.outline_path("demo").exists()
 
     print("outline collaboration smoke ok")

@@ -14,6 +14,7 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
 - Research/检索增强：chat 可先搜索原始资料，生成通用 `retrieval_context`，并继续产出兼容旧流程的参考简报和来源列表。
 - 本地小说知识库优先 RAG：chat 可配置本地 `.txt/.md` 语料目录，research 优先检索本地语料；本地无命中时回退 mock 或真实联网搜索。
 - 大纲共创增强：outline collaboration graph，支持方向提案、生成、审稿、用户反馈、修订、版本比较、锁定约束、查看正文和保存。
+- 世界观大纲框架修复：`worldbuilding` 阶段已改为 33 项完整小说世界大纲，按世界组成部分组织，并接入 prompt、结构校验、一次 repair、兜底补节、专用摘要和 `worldbuilding.md` 同步保存。
 - Director 交互增强：用户始终只和 Director 对话；每轮 chat 自然语言输入优先调用 LLM Director prompt 做意图判断，确定性规则只作为模型失败兜底；Director 会把口语化、多项确认和“接收/接受/同意”等回复转译为下游 Agent 可执行的 `instruction` 与 `locked_constraints`。
 - Director 确认门增强：`chat/ask_user/show_* /stop` 直接返回；research、大纲修订/推进、章节规划、写作、审稿、修订、定稿、导出、保存、小说圣经更新等写操作都会先返回 1/2 确认选项，用户确认后才执行工作流。
 - mock 模式：不依赖外部模型即可端到端验证。
@@ -244,6 +245,8 @@ START
 - `revise_outline` 会写入新版本，并调用 `compare_versions`。
 - `show_outline` 展示 `state.outline` 正文。
 - `persist_outline` 保存 `outline.md`，并清空 `active_workflow`，`current_stage` 进入 `chapter_plan`。
+- `worldbuilding` 阶段产物必须包含从“世界核心设定”到“结局后的世界格局”的 33 个二级标题；生成后会校验结构，失败时调用一次 `worldbuilding_structure_repair`，仍失败则追加明确的兜底占位。
+- 世界观完整正文保存到 `outline/worldbuilding.md`、`outline_stages/worldbuilding.md` 和根目录 `worldbuilding.md`；状态摘要只保留核心规则、空间格局、力量代价、关键势力、核心矛盾、主角关系、隐藏真相和终局方向，避免后续阶段上下文过长。
 - 用户明确 `stop / 退出 / 结束` 会清空 `active_workflow/current_stage`。
 
 outline prompt 已注入 retrieval/research 上下文：
@@ -432,7 +435,8 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 - `tests/test_graph_writer.py`：单 Agent、compose、chat、Director 路由、chat 主入口 workflow。
 - `tests/test_graph_chapter_plan.py`：章节卡生成、必需小节、状态更新、artifact 注册、`plan_chapters` alias。
 - `tests/test_graph_scene.py`：场景卡生成、必需字段、状态更新、artifact 注册、缺章节卡提示。
-- `tests/test_outline_collaboration.py`：大纲 approve、revise、lock、variant、旧 state 兼容、chat 路由到大纲修订。
+- `tests/test_worldbuilding_framework.py`：33 项世界观框架标题、渲染、结构校验和兜底补节。
+- `tests/test_outline_collaboration.py`：大纲 approve、revise、lock、variant、旧 state 兼容、chat 路由到大纲修订，并覆盖 worldbuilding prompt 注入、结构 repair、mock 生成和根目录 `worldbuilding.md` 同步。
 - `tests/test_research_workflow.py`：research 触发、mock 搜索、参考简报持久化、research 后进入 outline、本地优先后端配置和回退。
 - `tests/test_search_backend.py`：WebSearchBackend、本地 `.txt/.md` 检索、切片 metadata、关键词排序、本地优先 fallback。
 - `tests/test_research_workflow.py` 覆盖 CLI `--search-provider` 与 provider 专用 API Key 的组合，例如 `--search-provider exa` 读取 `EXA_API_KEY`。

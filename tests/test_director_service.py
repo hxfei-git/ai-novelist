@@ -392,7 +392,9 @@ def test_director_service_confirms_existing_worldbuilding_stage(tmp_path):
     assert confirmed.state.outline_stage == "worldbuilding"
     assert confirmed.state.outline_stage_artifacts["direction"]["status"] == "locked"
     assert confirmed.state.outline_stage_artifacts["worldbuilding"]["status"] == "options_ready"
-    assert "世界观设定稿" in confirmed.state.outline_stage_artifacts["worldbuilding"]["synthesis"]
+    synthesis = confirmed.state.outline_stage_artifacts["worldbuilding"]["synthesis"]
+    assert "## 一、世界核心设定" in synthesis
+    assert "## 三十三、结局后的世界格局" in synthesis
     assert store.outline_stage_path("重生魔门", "worldbuilding").exists()
 
 def test_confirmation_accepts_receive_words():

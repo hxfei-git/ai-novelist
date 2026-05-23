@@ -52,7 +52,7 @@ OUTLINE_ACTIONS = {
 
 STAGE_ROLES = {
     "direction": ["类型定位 Agent", "主题卖点 Agent"],
-    "worldbuilding": ["规则架构 Agent", "原作/检索一致性 Agent"],
+    "worldbuilding": ["世界架构 Agent", "规则力量 Agent", "社会权力 Agent", "剧情服务 Agent"],
     "characters": ["主角弧光 Agent", "关系冲突 Agent", "反派/势力 Agent"],
     "story_flow": ["主线结构 Agent", "节奏悬念 Agent", "伏笔 Agent"],
     "volume_outline": ["分卷策划 Agent", "卷内高潮 Agent", "卷间钩子 Agent"],
@@ -375,6 +375,14 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
         state.review_status = "error"
         store.save_state(state)
         return state.to_dict()
+    if stage == "worldbuilding":
+        synthesis = ensure_worldbuilding_outline_structure(
+            synthesis=synthesis,
+            state=state,
+            adapter=adapter,
+            store=store,
+            author_craft=author_craft,
+        )
     emit_progress(
         progress,
         "大纲汇总 Agent",
@@ -390,6 +398,8 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
 
     guarded = guard_stage_output(synthesis, stage, state)
     synthesis = guarded.text
+    if stage == "worldbuilding":
+        state.worldbuilding = synthesis
     questions = extract_stage_confirmation_questions(synthesis)
     questions = filter_stage_confirmation_questions(stage, questions, state, synthesis)
     artifact = {
@@ -399,8 +409,8 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
         "path": f"outline/{stage}.md",
         "role_reviews": role_reviews,
         "synthesis": synthesis,
-        "summary": summarize_stage_text(synthesis),
-        "stage_memory": extract_stage_memory(synthesis),
+        "summary": summarize_worldbuilding_outline(synthesis) if stage == "worldbuilding" else summarize_stage_text(synthesis),
+        "stage_memory": extract_worldbuilding_memory(synthesis) if stage == "worldbuilding" else extract_stage_memory(synthesis),
         "pending_questions": questions,
         "guard_issues": [
             {
@@ -432,6 +442,8 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
     record_stage_history(state, "run", stage, state.user_request)
     emit_progress(progress, "OutlineStage", f"正在保存「{label}」阶段产物...")
     save_outline_stage_outputs(state, stage, format_stage_markdown(artifact), store)
+    if stage == "worldbuilding":
+        store.save_worldbuilding(state)
     store.save_state(state)
     return state.to_dict()
 
@@ -570,8 +582,8 @@ def hydrate_stage_artifact_from_legacy_fields(state: NovelState, stage: str, sto
         "status": "options_ready",
         "role_reviews": [],
         "synthesis": state.worldbuilding.strip(),
-        "summary": summarize_stage_text(state.worldbuilding),
-        "stage_memory": extract_stage_memory(state.worldbuilding),
+        "summary": summarize_worldbuilding_outline(state.worldbuilding),
+        "stage_memory": extract_worldbuilding_memory(state.worldbuilding),
         "user_feedback": state.user_request,
         "updated_at": datetime.now(UTC).isoformat(timespec="seconds"),
     }
@@ -792,6 +804,19 @@ def load_outline_stage_craft_brief(state: NovelState, store: LocalStore) -> str:
     return path.read_text(encoding="utf-8").strip()
 
 
+def worldbuilding_framework_prompt(stage: str) -> str:
+    if stage != "worldbuilding":
+        return ""
+    from ai_novelist.worldbuilding_framework import render_worldbuilding_framework
+
+    return (
+        "\nWORLD_OUTLINE_FRAMEWORK:\n"
+        "你必须按下面的通用世界大纲框架生成，不要按题材分类。"
+        "题材只影响每项如何填写。每项都要服务主角生存、冲突制造和后续剧情。\n"
+        f"{render_worldbuilding_framework(mode='full')}\n"
+    )
+
+
 def build_outline_stage_role_prompt(state: NovelState, stage: str, role: str, author_craft: str = "") -> str:
     contract = get_stage_contract(stage)
     return (
@@ -817,6 +842,7 @@ def build_outline_stage_role_prompt(state: NovelState, stage: str, role: str, au
         f"前序已保存阶段内容：\n{previous_stage_context(state, stage)}\n\n"
         f"当前阶段已有内容：\n{current_stage_context(state, stage)}\n\n"
         f"阶段连续性要求：\n{stage_continuity_requirement(stage)}\n\n"
+        f"{worldbuilding_framework_prompt(stage)}\n"
         f"{outline_stage_boundary_prompt(stage)}\n\n"
         "OUTPUT_BUDGET:\n"
         "- 只输出短 JSON：{role, opportunities, risks, suggestions}。\n"
@@ -851,6 +877,7 @@ def build_outline_stage_synthesizer_prompt(state: NovelState, stage: str, role_r
         f"前序已保存阶段内容：\n{previous_stage_context(state, stage)}\n\n"
         f"当前阶段已有内容：\n{current_stage_context(state, stage)}\n\n"
         f"阶段连续性要求：\n{stage_continuity_requirement(stage)}\n\n"
+        f"{worldbuilding_framework_prompt(stage)}\n"
         f"{outline_stage_boundary_prompt(stage)}\n\n"
         f"角色短评：\n{reviews}\n\n"
         f"{outline_stage_synthesizer_output_rule(stage, state)}"
@@ -867,8 +894,8 @@ OUTLINE_STAGE_BOUNDARIES = {
         "forbidden": "具体世界规则、世界规则清单、组织流程、人物关系细则、人物亲密机制、章节列表、第1章/第 1 章、分卷结构、第一卷、专有名词堆砌、行政或制度化细则、申请表、审批、备案、绩效、KPI",
     },
     "worldbuilding": {
-        "allowed": "力量或修炼体系、门派/组织生态、势力格局与理念、资源与场景素材、可持续冲突来源",
-        "forbidden": "抽象剧情算法、代价红线式标题、人物小传、章节流程、结局安排、产品规则语言、模型自造机制",
+        "allowed": "完整小说世界大纲：世界核心设定、世界格局、地理与环境、历史背景、时代背景、世界规则、力量体系、成长体系、能力分类体系、职业与身份体系、资源体系、经济体系、政治与权力体系、势力体系、社会结构、文化体系、宗教信仰神话、科技工艺生产力、交通通讯、法律秩序、军事战争、种族族群生灵、重要地点、危险体系、知识教育、日常生活、信息舆论、核心矛盾、主角与世界关系、主要人物群体、主线时间线、隐藏真相、结局后世界格局",
+        "forbidden": "按题材分类替代世界组成部分、只输出世界运行原则/关键边界/冲突资源/代价红线四段摘要、只写抽象口号、只写专有名词清单、空标题模板、过细行政流程、申请表、审批、备案、考评、绩效、KPI、无代价万能规则、完整人物小传、章节正文、分卷章节安排、与主线无关的猎奇机制",
     },
     "characters": {
         "allowed": "主角缺陷与欲望、关键人物目标、动机、关系张力、成人亲密张力、情色/福利关系功能、阵营位置、阵营冲突、背叛/信任风险、成长矛盾、人物弧光",
@@ -894,11 +921,18 @@ OUTLINE_STAGE_BOUNDARIES = {
 
 
 def outline_stage_boundary_prompt(stage: str) -> str:
-    contract = get_stage_contract(stage)
+    boundary = OUTLINE_STAGE_BOUNDARIES.get(stage)
+    if boundary:
+        allowed = str(boundary.get("allowed") or "").strip()
+        forbidden = str(boundary.get("forbidden") or "").strip()
+    else:
+        contract = get_stage_contract(stage)
+        allowed = ", ".join(contract.allowed_intents)
+        forbidden = ", ".join(contract.forbidden_intents)
     return (
         "STAGE_BOUNDARY:\n"
-        f"- 允许输出：{', '.join(contract.allowed_intents)}。\n"
-        f"- 禁止输出：{', '.join(contract.forbidden_intents)}。\n"
+        f"- 允许输出：{allowed}。\n"
+        f"- 禁止输出：{forbidden}。\n"
         "- 只给本阶段短评或产物，不越权生成其他阶段内容，不新增无依据 canon。"
     )
 
@@ -960,6 +994,157 @@ def characters_relationship_guard(state: NovelState, stage: str) -> str:
 
 def outline_stage_synthesizer_output_rule(stage: str, state: NovelState | None = None) -> str:
     return build_stage_output_rule(stage, state)
+
+
+def ensure_worldbuilding_outline_structure(
+    synthesis: str,
+    state: NovelState,
+    adapter: AgentAdapter,
+    store: LocalStore,
+    author_craft: str = "",
+) -> str:
+    from ai_novelist.worldbuilding_framework import (
+        append_missing_worldbuilding_sections,
+        render_worldbuilding_framework,
+        validate_worldbuilding_outline,
+    )
+
+    ok, missing = validate_worldbuilding_outline(synthesis, mode="full")
+    if ok:
+        return synthesis
+
+    repair_prompt = (
+        "AGENT: worldbuilding_structure_repair\n"
+        "你要修复世界观阶段输出结构。不要分析，不要解释，只输出完整 Markdown。\n"
+        f"缺失或顺序异常标题：{missing}\n\n"
+        "必须使用完整 33 项世界大纲标题，且继承原文内容。\n"
+        "不要按题材分类，不得只输出世界运行原则/关键边界/冲突资源/代价红线四段摘要。\n"
+        "每个小节写 2-5 条当前小说的具体 bullet；信息不足时给出合理默认建议。\n\n"
+        f"框架：\n{render_worldbuilding_framework(mode='full')}\n\n"
+        f"作者构思参考：\n{author_craft or '暂无'}\n\n"
+        f"前序已保存阶段内容：\n{previous_stage_context(state, 'worldbuilding')}\n\n"
+        f"原始世界观草稿：\n{synthesis}\n"
+    )
+    try:
+        repaired = complete_with_metrics(
+            adapter=adapter,
+            prompt=repair_prompt,
+            project_dir=store.project_dir(state.project_id),
+            project_id=state.project_id,
+            graph="outline",
+            node="worldbuilding_structure_repair",
+            agent="worldbuilding_structure_repair",
+            prompt_profile="outline_worldbuilding_repair",
+        )
+    except AgentAdapterError:
+        repaired = synthesis
+
+    ok, missing = validate_worldbuilding_outline(repaired, mode="full")
+    if ok:
+        return repaired
+    return append_missing_worldbuilding_sections(repaired, missing)
+
+
+def summarize_worldbuilding_outline(text: str, max_chars: int = 1800) -> str:
+    sections = split_worldbuilding_sections(text)
+    key_headings = [
+        "一、世界核心设定",
+        "二、世界格局",
+        "六、世界规则",
+        "七、力量体系",
+        "八、成长体系",
+        "十四、势力体系",
+        "二十八、核心矛盾",
+        "二十九、主角与世界的关系",
+        "三十一、主线时间线",
+        "三十二、隐藏真相",
+        "三十三、结局后的世界格局",
+    ]
+    lines: list[str] = []
+    for heading in key_headings:
+        bullet = first_worldbuilding_bullet(sections.get(heading, ""))
+        if bullet:
+            lines.append(f"{heading}：{bullet}")
+    if not lines:
+        return summarize_stage_text(text, max_chars=420)
+    summary = "；".join(lines)
+    return summary[:max_chars].rstrip() + ("..." if len(summary) > max_chars else "")
+
+
+def extract_worldbuilding_memory(text: str, max_items: int = 18, max_chars: int = 1800) -> list[str]:
+    sections = split_worldbuilding_sections(text)
+    priority = [
+        "一、世界核心设定",
+        "二、世界格局",
+        "六、世界规则",
+        "七、力量体系",
+        "八、成长体系",
+        "十一、资源体系",
+        "十四、势力体系",
+        "二十、法律与秩序体系",
+        "二十三、重要地点体系",
+        "二十八、核心矛盾",
+        "二十九、主角与世界的关系",
+        "三十、主要人物群体",
+        "三十一、主线时间线",
+        "三十二、隐藏真相",
+        "三十三、结局后的世界格局",
+    ]
+    result: list[str] = []
+    total = 0
+    for heading in priority:
+        for bullet in worldbuilding_bullets(sections.get(heading, ""))[:2]:
+            item = f"{heading}：{bullet}"
+            if item in result:
+                continue
+            if total + len(item) > max_chars and result:
+                return result
+            result.append(item)
+            total += len(item)
+            if len(result) >= max_items:
+                return result
+    if result:
+        return result
+    return extract_stage_memory(text, max_items=12, max_chars=1100)
+
+
+def split_worldbuilding_sections(text: str) -> dict[str, str]:
+    from ai_novelist.worldbuilding_framework import full_worldbuilding_headings
+
+    headings = full_worldbuilding_headings()
+    matches: list[tuple[str, int, int]] = []
+    for heading in headings:
+        pattern = re.compile(rf"^\s*#{{1,6}}\s*{re.escape(heading)}(?:\s|$)", re.MULTILINE)
+        match = pattern.search(text or "")
+        if match:
+            matches.append((heading, match.start(), match.end()))
+    matches.sort(key=lambda item: item[1])
+    sections: dict[str, str] = {}
+    for index, (heading, _start, end) in enumerate(matches):
+        next_start = matches[index + 1][1] if index + 1 < len(matches) else len(text)
+        sections[heading] = text[end:next_start].strip()
+    return sections
+
+
+def worldbuilding_bullets(section_text: str) -> list[str]:
+    bullets: list[str] = []
+    for raw_line in section_text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "仍需确认" in line:
+            continue
+        line = re.sub(r"^[-*+•\s]*", "", line)
+        line = re.sub(r"^\d+[.、)]\s*", "", line).strip()
+        if not line or line in {"暂无", "暂无。"}:
+            continue
+        if line.startswith("待补充：结构兜底占位"):
+            continue
+        bullets.append(line)
+    return bullets
+
+
+def first_worldbuilding_bullet(section_text: str) -> str:
+    bullets = worldbuilding_bullets(section_text)
+    return bullets[0] if bullets else ""
 
 
 def summarize_stage_text(text: str, max_chars: int = 420) -> str:
@@ -1047,6 +1232,10 @@ def role_focus_instruction(stage: str, role: str) -> str:
         "类型定位 Agent": "从类型承诺、读者预期和市场识别度判断方向是否清晰；重点检查开篇钩子、中段升级、终局承诺是否属于同一种故事体验，避免只给出氛围标签。",
         "主题卖点 Agent": "从主题表达、情绪卖点和主角核心欲望判断方向是否有长线吸引力；重点提炼一句能驱动后续概念、人物和流程的核心卖点。",
         "故事概念 Agent": "专注故事概念本身：主角在什么异常局面中采取什么行动，故事以什么长期问题牵引读者。必须把方向定位转成可连续展开的故事发动机。",
+        "世界架构 Agent": "负责世界核心设定、世界格局、地理环境、历史背景和时代背景；必须把主舞台、空间边界、历史遗留问题和时代压力写成后续剧情可复用的世界基座。",
+        "规则力量 Agent": "负责世界规则、力量体系、成长体系、能力分类体系和危险体系；必须说明力量来源、获得条件、代价、克制、寿命影响和强者尺度，避免无代价万能规则。",
+        "社会权力 Agent": "负责职业身份、资源、经济、政治权力、势力、社会结构、法律秩序、军事战争、文化信仰、科技生产力、交通通讯、信息舆论、知识教育和日常生活；必须写清普通人与强者如何被制度和资源压迫。",
+        "剧情服务 Agent": "负责核心矛盾、主角与世界关系、主要人物群体、主线时间线、隐藏真相和结局后的世界格局；必须检查每项设定是否服务后续人物、主线、分卷和章节。",
         "规则架构 Agent": "专注世界规则的因果链：力量、资源、限制和代价如何运转。每条规则都必须能制造剧情选择，而不是只做背景百科。",
         "原作/检索一致性 Agent": "专注参考资料边界：区分已确认事实、用户自创延展和不确定点；不得把缺证据的内容当成原作设定。",
         "主角弧光 Agent": "专注主角欲望、缺陷、代价和阶段性变化；人物弧光必须从已有方向、概念和世界规则中自然生长。",
@@ -1074,7 +1263,7 @@ def stage_continuity_requirement(stage: str) -> str:
     requirements = {
         "direction": "方向定位是后续所有阶段的源头：只锁定宏观创作原则，具体规则、人物细则和剧情桥段留到后续阶段展开。",
         "concept": "故事概念为旧版兼容阶段，新流程不再主动进入。",
-        "worldbuilding": "世界观必须承接方向定位提出的类型、冲突和情绪边界；每条规则都要服务这个故事方向。",
+        "worldbuilding": "世界观必须承接方向定位提出的类型、冲突和情绪边界；按世界组成部分建立完整基座，每项都要影响主角生存、制造冲突或服务后续剧情。",
         "characters": "人物关系必须承接方向定位和世界观规则；人物欲望、关系张力和阵营冲突要由已保存设定自然生长。",
         "story_flow": "故事流程必须承接方向定位、世界观代价和人物关系冲突；这里的流程只表示叙事流程，转折不能脱离已建立的规则和人物动机。",
         "volume_outline": "分卷大纲必须整合方向、世界观、人物关系和故事流程，只做卷级目标、卷内高潮、代价和卷间钩子，不拆逐章细纲。",

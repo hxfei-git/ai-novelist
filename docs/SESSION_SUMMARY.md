@@ -33,6 +33,22 @@
 - 单步 Agent 命令：`worldbuild`、`plan-outline`、`plan-chapters`、`write-chapter`、`review`。
 - Phase 6+7：新增章节卡与场景卡管线，DirectorService 支持 `plan_chapter` 和 `plan_scenes`，旧 `plan-chapters` CLI 保持兼容。
 
+### 世界观大纲框架修复：已完成
+
+能力：
+
+- 新增 `src/ai_novelist/worldbuilding_framework.py`，提供 33 项完整世界大纲框架、18 项精简框架、渲染、结构校验和兜底补节。
+- `graph_outline.py` 的 `worldbuilding` 阶段改为世界架构、规则力量、社会权力、剧情服务四个角色，并在 role/synthesizer prompt 中注入 `WORLD_OUTLINE_FRAMEWORK`。
+- 世界观输出规则要求从 `## 一、世界核心设定` 到 `## 三十三、结局后的世界格局` 依次输出，禁止退回“世界运行原则/关键边界/冲突资源/代价红线”四段式摘要。
+- 生成后执行结构校验；缺失或顺序异常时调用一次 `worldbuilding_structure_repair`，失败后才追加明确兜底占位。
+- `state.worldbuilding`、`outline/worldbuilding.md`、`outline_stages/worldbuilding.md` 和根目录 `worldbuilding.md` 同步保存完整 33 项版；后续阶段使用专用摘要和 stage memory 保留关键 canon。
+
+验证：
+
+- `.venv/bin/python -m pytest tests/test_worldbuilding_framework.py tests/test_outline_collaboration.py tests/test_outline_stage_controls.py`：61 passed。
+- `.venv/bin/python -m pytest`：305 passed。
+- `.venv/bin/python tests/smoke_outline_collaboration.py`：outline collaboration smoke ok。
+
 ### Author Craft Layer v1.0：已完成
 
 能力：
@@ -201,6 +217,7 @@ worldbuild
 测试：
 
 - `tests/test_research_workflow.py`
+- `tests/test_worldbuilding_framework.py`
 - `tests/test_outline_collaboration.py`
 - `tests/test_graph_writer.py`
 - `tests/test_graph_chapter_plan.py`

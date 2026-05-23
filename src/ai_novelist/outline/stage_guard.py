@@ -80,6 +80,8 @@ def detect_non_worldbuilding_language(text: str, stage: str) -> list[GuardIssue]
     if any(marker in text for marker in ("世界运行原则", "关键边界", "冲突资源", "代价红线")):
         issues.append(GuardIssue("legacy_worldbuilding_template", "rewrite", "命中旧世界观模板标题"))
     for sentence in split_sentences(text):
+        if sentence.lstrip().startswith("#"):
+            continue
         if any(marker in sentence for marker in WORLD_ABSTRACT_MARKERS):
             issues.append(GuardIssue("abstract_mechanism_language", "warning", "命中抽象机制语言", sentence))
     return issues

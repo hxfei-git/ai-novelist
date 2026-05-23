@@ -2,10 +2,11 @@ import json
 
 from ai_novelist.adapters.codex_cli import CodexCLIAdapter
 from ai_novelist.artifacts import load_artifacts
-from ai_novelist.graph_outline import OUTLINE_STAGES, build_outline_stage_role_prompt, build_outline_stage_synthesizer_prompt, extract_stage_confirmation_questions, format_stage_markdown, sanitize_direction_stage_output, append_message, build_outline_collaboration_graph, build_outline_prompt
+from ai_novelist.graph_outline import OUTLINE_STAGES, build_outline_stage_role_prompt, build_outline_stage_synthesizer_prompt, ensure_worldbuilding_outline_structure, extract_stage_confirmation_questions, format_stage_markdown, sanitize_direction_stage_output, append_message, build_outline_collaboration_graph, build_outline_prompt
 from ai_novelist.graph_writer import build_chat_graph
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
+from ai_novelist.worldbuilding_framework import full_worldbuilding_headings, validate_worldbuilding_outline
 
 
 def run_outline_turn(graph, state, store, text):
@@ -51,6 +52,13 @@ def test_outline_confirmation_advances_one_stage(tmp_path):
     assert state.outline_stage_artifacts["direction"]["status"] == "locked"
     assert "worldbuilding" in state.outline_stage_artifacts
     assert store.outline_artifact_path("demo", "worldbuilding").exists()
+    assert store.worldbuilding_path("demo").exists()
+    worldbuilding_text = store.load_outline_artifact("demo", "worldbuilding")
+    ok, missing = validate_worldbuilding_outline(worldbuilding_text)
+    assert ok, missing
+    assert state.worldbuilding.strip()
+    assert "## 一、世界核心设定" in worldbuilding_text
+    assert "## 三十三、结局后的世界格局" in worldbuilding_text
     assert not store.outline_path("demo").exists()
 
 
@@ -270,10 +278,11 @@ def test_outline_synthesizer_prompts_use_stage_specific_structures():
     chapter_prompt = build_outline_stage_synthesizer_prompt(state, "chapter_outline", [])
 
     assert "## 方向定位稿" in concept_prompt
-    assert "## 世界观设定稿" in world_prompt
+    assert "## 一、世界核心设定" in world_prompt
+    assert "## 三十三、结局后的世界格局" in world_prompt
     assert "## 章节大纲稿" in chapter_prompt
     assert "STAGE_CONTRACT" in concept_prompt
-    assert "可持续写作素材" in world_prompt
+    assert "不要按题材分类" in world_prompt
     assert "章节编号" in chapter_prompt
     assert "主要冲突" in chapter_prompt
     assert len({concept_prompt, world_prompt, chapter_prompt}) == 3
@@ -313,7 +322,7 @@ def test_worldbuilding_prompt_uses_saved_direction_context():
         "synthesis": "## 方向定位稿\n\n主角以低调求生方式追查师傅吞噬气运。",
     }
 
-    prompt = build_outline_stage_role_prompt(state, "worldbuilding", "规则架构 Agent")
+    prompt = build_outline_stage_role_prompt(state, "worldbuilding", "世界架构 Agent")
 
     assert "前序已保存阶段内容" in prompt
     assert "方向定位（options_ready）" in prompt
@@ -324,13 +333,13 @@ def test_worldbuilding_prompt_uses_saved_direction_context():
 def test_worldbuilding_prompt_blocks_default_administrative_mechanisms():
     state = NovelState(project_id="demo", title="Demo", idea="重生魔门")
 
-    role_prompt = build_outline_stage_role_prompt(state, "worldbuilding", "规则架构 Agent")
+    role_prompt = build_outline_stage_role_prompt(state, "worldbuilding", "规则力量 Agent")
     synth_prompt = build_outline_stage_synthesizer_prompt(state, "worldbuilding", [])
 
     assert "STAGE_CONTRACT" in role_prompt
-    assert "题材核心结构" in synth_prompt
-    assert "主角所在组织或生活圈" in synth_prompt
-    assert "可持续写作素材" in synth_prompt
+    assert "WORLD_OUTLINE_FRAMEWORK" in synth_prompt
+    assert "## 一、世界核心设定" in synth_prompt
+    assert "## 三十三、结局后的世界格局" in synth_prompt
     for old in ("## 世界运行原则", "## 关键边界", "## 冲突资源", "## 代价红线"):
         assert old not in synth_prompt
 
@@ -342,7 +351,8 @@ def test_worldbuilding_prompt_preserves_user_requested_controlled_terms_as_princ
     prompt = build_outline_stage_synthesizer_prompt(state, "worldbuilding", [])
 
     assert "STAGE_CONTRACT" in prompt
-    assert "世界观设定稿" in prompt
+    assert "## 一、世界核心设定" in prompt
+    assert "职场绩效修仙" in prompt
 
 
 def test_characters_prompt_uses_direction_and_worldbuilding_context():
@@ -569,7 +579,8 @@ def test_outline_stage_advance_emits_progress_events(tmp_path):
     assert state.outline_stage == "worldbuilding"
     assert any(stage == "OutlineStage" and "锁定" in message for stage, message in events)
     assert any(stage == "OutlineStage" and "进入" in message for stage, message in events)
-    assert any(stage == "规则架构 Agent" for stage, _message in events)
+    assert any(stage == "世界架构 Agent" for stage, _message in events)
+    assert any(stage == "规则力量 Agent" for stage, _message in events)
     assert any(stage == "大纲汇总 Agent" for stage, _message in events)
 
 
@@ -636,7 +647,7 @@ def test_stage_prompt_prefers_stage_memory_over_full_synthesis():
         "synthesis": "完整长文不应进入 prompt。" + "污染" * 200,
     }
 
-    prompt = build_outline_stage_role_prompt(state, "worldbuilding", "规则架构 Agent")
+    prompt = build_outline_stage_role_prompt(state, "worldbuilding", "世界架构 Agent")
 
     assert "主角低调求生" in prompt
     assert "师傅吞噬气运是核心谜团" in prompt
@@ -838,3 +849,36 @@ def test_outline_stage_parallel_path_preserves_role_order(tmp_path, monkeypatch)
     trace_path = store.project_dir("demo") / "debug" / "agent_runs.jsonl"
     assert trace_path.exists()
     assert "outline_stage_role" in trace_path.read_text(encoding="utf-8")
+
+
+def test_worldbuilding_synthesizer_prompt_demands_full_framework():
+    state = NovelState(project_id="demo", title="Demo", idea="重生魔门")
+    state.outline_stage = "worldbuilding"
+
+    prompt = build_outline_stage_synthesizer_prompt(state, "worldbuilding", [])
+
+    assert "WORLD_OUTLINE_FRAMEWORK" in prompt
+    assert "一、世界核心设定" in prompt
+    assert "三十三、结局后的世界格局" in prompt
+    assert "不要按题材分类" in prompt
+    assert "不得只输出“世界运行原则、关键边界、冲突资源、代价红线”" in prompt
+
+
+def test_worldbuilding_structure_repair_expands_legacy_four_section_shape(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.idea = "重生魔门底层弟子，苟着发育，保护师姐和师妹"
+    legacy_text = "## 世界运行原则\n- 弱肉强食\n\n## 关键边界\n- 前世记忆有代价"
+
+    repaired = ensure_worldbuilding_outline_structure(
+        synthesis=legacy_text,
+        state=state,
+        adapter=CodexCLIAdapter(mock=True),
+        store=store,
+    )
+
+    ok, missing = validate_worldbuilding_outline(repaired)
+    assert ok, missing
+    for heading in full_worldbuilding_headings():
+        assert f"## {heading}" in repaired
+    assert repaired.count("## 世界运行原则") == 0
