@@ -9,6 +9,7 @@ from ai_novelist.agent_metrics import complete_with_metrics
 from ai_novelist.agent_parallel import AgentJob, run_agent_jobs
 from ai_novelist.artifacts import ArtifactRecord, load_artifacts, register_artifact
 from ai_novelist.context_builder import build_context
+from ai_novelist.corpus.craft_resolver import resolve_author_craft
 from ai_novelist.pacing import PacingTarget, infer_pacing_target_from_outline, parse_pacing_target_from_card, required_chapter_card_sections, select_chapter_agent_specs
 from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, run_with_progress, run_with_progress, with_agent_metadata
 from ai_novelist.prompts import load_prompt
@@ -105,10 +106,13 @@ def select_chapter_node(data: dict, store: LocalStore) -> dict:
 
 def load_chapter_context_node(data: dict, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
-    context = build_context(state, store, "chapter_planning", chapter=state.active_chapter, max_chars=14000)
     chapter_outline = collect_chapter_outline(state, store)
-    state.director_task_args["chapter_planning_context"] = context
     state.director_task_args["selected_chapter_outline"] = chapter_outline
+    if "pacing_target" not in state.director_task_args:
+        state.director_task_args["pacing_target"] = infer_pacing_target_from_outline(state.active_chapter or state.current_chapter or 1, chapter_outline).to_dict()
+    state = resolve_author_craft(state, store, "chapter_planning", chapter=state.active_chapter)
+    context = build_context(state, store, "chapter_planning", chapter=state.active_chapter, max_chars=14000)
+    state.director_task_args["chapter_planning_context"] = context
     state.last_context_digest = context[:1200]
     state.active_stage = "load_chapter_context"
     store.save_state(state)

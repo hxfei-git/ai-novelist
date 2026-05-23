@@ -82,6 +82,21 @@ class LocalStore:
     def artifact_registry_path(self, project_id: str) -> Path:
         return self.project_dir(project_id) / "artifacts.json"
 
+    def craft_dir(self, project_id: str) -> Path:
+        return self.project_dir(project_id) / "craft"
+
+    def stage_craft_briefs_dir(self, project_id: str) -> Path:
+        return self.craft_dir(project_id) / "stage_briefs"
+
+    def stage_craft_sources_dir(self, project_id: str) -> Path:
+        return self.craft_dir(project_id) / "stage_sources"
+
+    def craft_similarity_reports_dir(self, project_id: str) -> Path:
+        return self.craft_dir(project_id) / "similarity_reports"
+
+    def project_craft_memory_path(self, project_id: str) -> Path:
+        return self.craft_dir(project_id) / "project_craft_memory.json"
+
     def project_memory_path(self, project_id: str) -> Path:
         return self.project_dir(project_id) / "project_memory.md"
 
@@ -142,6 +157,21 @@ class LocalStore:
     def bible_export_path(self, project_id: str) -> Path:
         return self.exports_dir(project_id) / "novel_bible.md"
 
+    def stage_craft_brief_relative_path(self, purpose: str, chapter: int | None, stage: str | None = None) -> str:
+        return f"craft/stage_briefs/{craft_stage_filename(purpose, chapter, stage)}.md"
+
+    def stage_craft_sources_relative_path(self, purpose: str, chapter: int | None, stage: str | None = None) -> str:
+        return f"craft/stage_sources/{craft_stage_filename(purpose, chapter, stage)}.sources.json"
+
+    def stage_craft_brief_path(self, project_id: str, purpose: str, chapter: int | None, stage: str | None = None) -> Path:
+        return self.project_dir(project_id) / self.stage_craft_brief_relative_path(purpose, chapter, stage)
+
+    def stage_craft_sources_path(self, project_id: str, purpose: str, chapter: int | None, stage: str | None = None) -> Path:
+        return self.project_dir(project_id) / self.stage_craft_sources_relative_path(purpose, chapter, stage)
+
+    def craft_similarity_report_relative_path(self, chapter: int, artifact: str) -> str:
+        return f"craft/similarity_reports/chapter_{chapter:03d}_{safe_artifact_name(artifact)}.json"
+
     def editor_notes_path(self, project_id: str, chapter: int) -> Path:
         return self.chapters_dir(project_id) / f"chapter_{chapter:03d}_review.md"
 
@@ -158,6 +188,9 @@ class LocalStore:
         self.chapters_dir(state.project_id).mkdir(exist_ok=True)
         self.outline_stages_dir(state.project_id).mkdir(exist_ok=True)
         self.outline_dir(state.project_id).mkdir(exist_ok=True)
+        self.stage_craft_briefs_dir(state.project_id).mkdir(parents=True, exist_ok=True)
+        self.stage_craft_sources_dir(state.project_id).mkdir(parents=True, exist_ok=True)
+        self.craft_similarity_reports_dir(state.project_id).mkdir(parents=True, exist_ok=True)
         data = self._lightweight_state_dict(state)
         with self.state_path(state.project_id).open("w", encoding="utf-8") as file:
             json.dump(data, file, ensure_ascii=False, indent=2)
@@ -484,3 +517,14 @@ def slugify(value: str) -> str:
 
 def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+def craft_stage_filename(purpose: str, chapter: int | None, stage: str | None = None) -> str:
+    prefix = f"chapter_{chapter:03d}_" if chapter is not None else ""
+    suffix = f"_{safe_artifact_name(stage)}" if stage else ""
+    return f"{prefix}{safe_artifact_name(purpose)}{suffix}"
+
+
+def safe_artifact_name(value: str | None) -> str:
+    text = str(value or "general").strip().lower()
+    text = re.sub(r"[^a-z0-9_\-]+", "_", text)
+    return text.strip("_") or "general"

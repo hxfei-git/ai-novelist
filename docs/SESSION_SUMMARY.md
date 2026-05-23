@@ -1,6 +1,6 @@
 # 会话摘要与上下文压缩记录
 
-更新时间：2026-05-22
+更新时间：2026-05-23
 项目路径：`/home/ubuntu/1.project/ai-novelist-v1`
 
 ## 1. 项目目标
@@ -32,6 +32,24 @@
 - `compose`：一次性完整多 Agent 创作图。
 - 单步 Agent 命令：`worldbuild`、`plan-outline`、`plan-chapters`、`write-chapter`、`review`。
 - Phase 6+7：新增章节卡与场景卡管线，DirectorService 支持 `plan_chapter` 和 `plan_scenes`，旧 `plan-chapters` CLI 保持兼容。
+
+### Author Craft Layer v1.0：已完成
+
+能力：
+
+- 本地作者语料索引：`index-corpus` 生成 manifest、works、chapters、scenes、chunks、quality_report。
+- 构思方法提炼：`extract-craft --mock` 生成 work/chapter/scene/genre profiles，不保存长原文。
+- 阶段检索与简报：`craft-brief` 和 AuthorCraftResolver 按 purpose、Pacing Target、craft_mode 生成 StageCraftBrief。
+- 工作流接入：outline stage、chapter planning、scene design、drafting、review、revision 自动注入“作者构思参考”。
+- 防复刻：draft/revision/finalize 保存后可生成 similarity report；strict 模式 high risk 会进入修订状态。
+- 项目记忆：finalize 后生成 `projects/<project>/craft/project_craft_memory.json`，后续检索优先使用本项目方法。
+- CLI/配置：新增 `AI_NOVELIST_AUTHOR_CORPUS_DIR`、`AI_NOVELIST_CORPUS_INDEX_DIR`、`AI_NOVELIST_CRAFT_MODE`、`AI_NOVELIST_CRAFT_MAX_CHARS` 等配置。
+
+验证：
+
+- `.venv/bin/python -m pytest`：288 passed。
+- `.venv/bin/python tests/smoke_author_craft_mock.py`：1 passed。
+- CLI 手工验证：`index-corpus`、`extract-craft --mock`、`craft-profiles`、`craft-brief` 均成功。
 
 ## 3. 最新架构摘要
 

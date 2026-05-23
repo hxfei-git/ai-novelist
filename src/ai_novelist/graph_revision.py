@@ -9,6 +9,8 @@ from typing import Any, Protocol
 from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
 from ai_novelist.artifacts import ArtifactRecord, load_artifacts, register_artifact
 from ai_novelist.context_builder import build_context
+from ai_novelist.corpus.craft_resolver import resolve_author_craft
+from ai_novelist.corpus.similarity_guard import save_similarity_report_for_state
 from ai_novelist.graph_review import normalize_review_report
 from ai_novelist.graph_writer import parse_editor_review
 from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, run_with_progress, run_with_progress, with_agent_metadata
@@ -108,6 +110,7 @@ def load_revision_context_node(data: dict, store: LocalStore) -> dict:
     state.chapter_draft = draft
     state.director_task_args["revision_review_json"] = review
     state.current_review_report = state.current_review_report or review_to_markdown(review)
+    state = resolve_author_craft(state, store, "revision", chapter=state.active_chapter)
     context = build_context(state, store, "revision", chapter=state.active_chapter, max_chars=18000)
     state.director_task_args["revision_context"] = context
     state.last_context_digest = context[:1200]
@@ -218,6 +221,8 @@ def save_revised_draft_node(data: dict, store: LocalStore) -> dict:
     state.director_message = f"第 {state.active_chapter} 章已修订：{draft_path}"
     state.artifact_registry = [item.to_dict() for item in load_artifacts(project_dir)][-20:]
     state.last_agent_reports = append_agent_report(state.last_agent_reports, "revision", "saved", {"plan_artifact_id": plan_record.id, "draft_artifact_id": draft_record.id})
+    state = save_similarity_report_for_state(state, store, "draft_v2", state.chapter_draft)
+    state.artifact_registry = [item.to_dict() for item in load_artifacts(project_dir)][-20:]
     store.save_state(state)
     return state.to_dict()
 

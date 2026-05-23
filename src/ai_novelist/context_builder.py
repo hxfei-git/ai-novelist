@@ -77,7 +77,7 @@ CONTEXT_PROFILES = {
         name="review_context",
         purpose="review",
         max_chars=9000,
-        sections=("user_request", "task", "locked_constraints", "chapter_artifacts", "previous_chapter_summaries", "style_or_bible_digest"),
+        sections=("user_request", "task", "locked_constraints", "author_craft", "chapter_artifacts", "previous_chapter_summaries", "style_or_bible_digest"),
         artifact_types=("chapter_card", "scene_cards"),
         include_full_draft=False,
         include_reference="none",
@@ -87,7 +87,7 @@ CONTEXT_PROFILES = {
         name="review_editor",
         purpose="review",
         max_chars=10000,
-        sections=("task", "locked_constraints", "chapter_artifacts", "previous_chapter_summaries", "style_or_bible_digest"),
+        sections=("task", "locked_constraints", "author_craft", "chapter_artifacts", "previous_chapter_summaries", "style_or_bible_digest"),
         artifact_types=("chapter_card", "scene_cards"),
         include_full_draft=False,
         include_reference="none",
@@ -97,7 +97,7 @@ CONTEXT_PROFILES = {
         name="review_synthesizer",
         purpose="review",
         max_chars=8000,
-        sections=("task", "locked_constraints", "chapter_artifacts"),
+        sections=("task", "locked_constraints", "author_craft", "chapter_artifacts"),
         artifact_types=("chapter_card", "scene_cards"),
         include_full_draft=False,
         include_reference="none",
@@ -107,16 +107,35 @@ CONTEXT_PROFILES = {
         name="chapter_planning",
         purpose="chapter_planning",
         max_chars=8000,
-        sections=("user_request", "task", "locked_constraints", "chapter_outline_slice", "previous_chapter_summaries", "bible_digest"),
+        sections=("user_request", "task", "locked_constraints", "author_craft", "chapter_outline_slice", "previous_chapter_summaries", "bible_digest"),
         artifact_types=("chapter_outline",),
         include_reference="brief",
+        include_bible="summary",
+    ),
+    "scene_design": ContextProfile(
+        name="scene_design",
+        purpose="scene_design",
+        max_chars=9000,
+        sections=("user_request", "task", "locked_constraints", "author_craft", "chapter_artifacts", "previous_chapter_summaries", "bible_digest"),
+        artifact_types=("chapter_card",),
+        include_reference="none",
+        include_bible="summary",
+    ),
+    "drafting": ContextProfile(
+        name="drafting",
+        purpose="drafting",
+        max_chars=12000,
+        sections=("user_request", "task", "locked_constraints", "author_craft", "chapter_artifacts", "previous_chapter_summaries", "bible_digest"),
+        artifact_types=("chapter_card", "scene_cards"),
+        include_full_draft=False,
+        include_reference="none",
         include_bible="summary",
     ),
     "outline_role": ContextProfile(
         name="outline_role",
         purpose="outline_stage",
         max_chars=6000,
-        sections=("user_request", "idea", "locked_constraints", "reference_brief", "previous_stage_memory", "current_stage_context"),
+        sections=("user_request", "idea", "locked_constraints", "author_craft", "reference_brief", "previous_stage_memory", "current_stage_context"),
         artifact_types=("reference_brief",),
         include_reference="brief",
         include_bible="none",
@@ -125,7 +144,7 @@ CONTEXT_PROFILES = {
         name="outline_synthesizer",
         purpose="outline_stage",
         max_chars=9000,
-        sections=("user_request", "idea", "locked_constraints", "previous_stage_memory", "current_stage_context", "role_reviews"),
+        sections=("user_request", "idea", "locked_constraints", "author_craft", "previous_stage_memory", "current_stage_context", "role_reviews"),
         include_reference="brief",
         include_bible="none",
     ),
@@ -133,7 +152,7 @@ CONTEXT_PROFILES = {
         name="revision",
         purpose="revision",
         max_chars=12000,
-        sections=("task", "locked_constraints", "chapter_artifacts", "review_tasks", "previous_chapter_summaries"),
+        sections=("task", "locked_constraints", "author_craft", "chapter_artifacts", "review_tasks", "previous_chapter_summaries"),
         artifact_types=("chapter_card", "scene_cards", "revision_plan"),
         include_full_draft=True,
         include_reference="none",
@@ -144,6 +163,8 @@ CONTEXT_PROFILES = {
 PURPOSE_PROFILE_ALIASES = {
     "review": "review_context",
     "chapter_planning": "chapter_planning",
+    "scene_design": "scene_design",
+    "drafting": "drafting",
     "outline_stage": "outline_role",
     "revision": "revision",
     "director": "director",
@@ -168,6 +189,7 @@ def build_context(
         ("用户当前请求", state.user_request or "暂无"),
         ("当前任务", build_task_summary(purpose, selected_chapter, selected_stage)),
         ("锁定约束", build_locked_constraints_section(state)),
+        ("作者构思参考", build_author_craft_section(state, store, purpose, selected_chapter, selected_stage)),
         ("小说圣经", build_bible_section(state, store, mode="full")),
         ("当前任务 Artifact", build_artifact_section(state, store, purpose, selected_chapter, selected_stage)),
         ("项目上下文", store.load_project_context(state.project_id) or "暂无"),
@@ -222,6 +244,8 @@ def build_profile_section(
         return "当前任务", build_task_summary(profile.purpose, chapter, stage)
     if key == "locked_constraints":
         return "锁定约束", build_locked_constraints_section(state)
+    if key == "author_craft":
+        return "作者构思参考", build_author_craft_section(state, store, profile.purpose, chapter, stage)
     if key == "project_brief":
         return "项目简介", build_project_brief_section(state)
     if key == "recent_messages":
@@ -317,6 +341,32 @@ def build_project_brief_section(state: NovelState) -> str:
         lines.append("- 风格偏好：" + "，".join(state.style_preferences))
     return "\n".join(lines)
 
+
+def build_author_craft_section(
+    state: NovelState,
+    store: LocalStore,
+    purpose: str = "",
+    chapter: int | None = None,
+    stage: str | None = None,
+) -> str:
+    if state.craft_mode == "off":
+        return "暂无"
+    project_dir = store.project_dir(state.project_id)
+    candidates: list[str] = []
+    if state.active_craft_brief_path:
+        candidates.append(state.active_craft_brief_path)
+    record = get_latest_artifact(project_dir, "stage_craft_brief", chapter=chapter, stage=purpose if not stage else f"{purpose}:{stage}")
+    if record is None:
+        record = get_latest_artifact(project_dir, "stage_craft_brief", chapter=chapter)
+    if record is not None:
+        candidates.append(record.path)
+    for candidate in candidates:
+        path = project_dir / candidate
+        if path.exists():
+            return path.read_text(encoding="utf-8").strip() or "暂无"
+    if state.craft_context_digest:
+        return f"暂无可注入正文；最近 Author Craft digest: {state.craft_context_digest[:16]}"
+    return "暂无"
 
 def build_bible_section(state: NovelState, store: LocalStore, mode: str = "summary") -> str:
     if mode == "none":

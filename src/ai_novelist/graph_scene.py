@@ -7,6 +7,7 @@ from typing import Protocol
 from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
 from ai_novelist.artifacts import ArtifactRecord, get_latest_artifact, load_artifact_text, load_artifacts, register_artifact
 from ai_novelist.context_builder import build_context
+from ai_novelist.corpus.craft_resolver import resolve_author_craft
 from ai_novelist.pacing import parse_pacing_target_from_card, scene_required_fields
 from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, run_with_progress, run_with_progress, with_agent_metadata
 from ai_novelist.prompts import load_prompt
@@ -105,6 +106,8 @@ def load_chapter_card_node(data: dict, store: LocalStore) -> dict:
         store.save_state(state)
         return state.to_dict()
     state.current_chapter_card = chapter_card
+    state.director_task_args["pacing_target"] = parse_pacing_target_from_card(state.active_chapter or state.current_chapter or 1, chapter_card).to_dict()
+    state = resolve_author_craft(state, store, "scene_design", chapter=state.active_chapter)
     context = build_context(state, store, "scene_design", chapter=state.active_chapter, max_chars=14000)
     state.director_task_args["scene_design_context"] = context
     state.last_context_digest = context[:1200]

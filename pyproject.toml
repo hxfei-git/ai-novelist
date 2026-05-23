@@ -27,4 +27,4 @@ ai-novelist = "ai_novelist.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"ai_novelist.prompts" = ["*.md"]
+"ai_novelist.prompts" = ["*.md", "partials/*.md"]

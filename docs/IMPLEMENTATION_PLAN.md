@@ -29,6 +29,24 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
 - 多章节批量自动续写。
 - Web UI。
 
+### Author Craft Layer v1.0 已接入
+
+本次已按 `plan.md` 完成 Author Craft Layer 的端到端 v1：
+
+- 新增 `src/ai_novelist/corpus/`，包含 encoding、ingest、chunker、index、craft schema、mock extractor、query planner、retriever、brief、resolver、similarity guard 和 project memory。
+- 新增 `index-corpus`、`extract-craft`、`craft-status`、`craft-profiles`、`craft-brief`、`craft-similarity-check` CLI。
+- `chat`、`feishu`、`compose`、`write-chapter`、`review`、`finalize-chapter` 等生成入口支持 Author Craft 参数；`--local-corpus-dir` research 语义保持不变。
+- Outline Stage、Chapter Planning、Scene Design、Drafting、Review、Revision 在构建上下文或阶段 prompt 前调用 AuthorCraftResolver；Drafting、Revision、Finalize 保存后运行 Similarity Guard；Finalize 后沉淀 Project Craft Memory。
+- ContextBuilder 新增“作者构思参考”小节，位于锁定约束之后。
+- State 只保存 craft 轻量字段，StageCraftBrief、sources、similarity report 和 project memory 作为项目 artifact 保存。
+- Prompt loader 对核心创作 prompt 自动追加 `author_craft_policy.md`，统一声明不复刻、不模仿、Pacing Target 优先。
+
+当前 v1 边界：
+
+- 不引入数据库、向量库或 fine-tuning。
+- `extract-craft` 默认使用稳定规则提炼；真实模型提炼 prompt 已提供，后续可替换 extractor 实现。
+- StageCraftBrief 不注入长原文，只注入方法、适用条件、避免事项和来源摘要。
+
 ## 2. 总体架构
 
 ```text

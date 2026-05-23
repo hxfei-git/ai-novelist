@@ -11,6 +11,7 @@ from ai_novelist.agent_metrics import complete_with_metrics
 from ai_novelist.agent_parallel import AgentJob, run_agent_jobs
 from ai_novelist.artifacts import ArtifactRecord, get_latest_artifact, load_artifact_text, load_artifacts, register_artifact
 from ai_novelist.context_builder import build_context
+from ai_novelist.corpus.craft_resolver import resolve_author_craft
 from ai_novelist.graph_writer import parse_editor_review
 from ai_novelist.output_contracts import normalize_review_editor_report, normalize_review_synthesis
 from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, run_with_progress, run_with_progress, with_agent_metadata
@@ -97,6 +98,7 @@ def load_review_context_node(data: dict, store: LocalStore) -> dict:
         store.save_state(state)
         return state.to_dict()
     state.chapter_draft = draft
+    state = resolve_author_craft(state, store, "review", chapter=state.active_chapter)
     context = build_context(state, store, "review", chapter=state.active_chapter, max_chars=18000)
     state.director_task_args["review_context"] = context
     state.last_context_digest = context[:1200]

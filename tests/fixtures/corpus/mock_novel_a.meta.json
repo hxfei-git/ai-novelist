@@ -1,0 +1,6 @@
+{
+  "title": "示例小说A",
+  "author": "mock_author",
+  "genre": ["悬疑", "科幻"],
+  "permission": "user_provided"
+}

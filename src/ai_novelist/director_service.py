@@ -154,14 +154,19 @@ class DirectorService:
         adapter: AgentAdapter,
         search_backend: SearchBackend,
         progress: ProgressFunc | None = None,
+        default_craft_mode: str = "off",
+        default_craft_options: dict[str, Any] | None = None,
     ) -> None:
         self.store = store
         self.adapter = adapter
         self.search_backend = search_backend
         self.progress = progress
+        self.default_craft_mode = default_craft_mode if default_craft_mode in {"off", "assist", "strict"} else "off"
+        self.default_craft_options = dict(default_craft_options or {})
 
     def handle_turn(self, project_id: str, user_text: str, channel: Channel = "cli") -> DirectorTurnResult:
         state = load_or_create_project(self.store, project_id)
+        apply_default_craft_options(state, self.default_craft_mode, self.default_craft_options)
         text = user_text.strip()
         if not text:
             return DirectorTurnResult(immediate_message="请输入你的需求。", requires_followup=True, state=state)
@@ -437,6 +442,18 @@ def is_outline_transient_constraint(text: str) -> bool:
     if any(marker in stripped for marker in transient_markers):
         return True
     return len(stripped) > 300
+
+def apply_default_craft_options(state: NovelState, mode: str, options: dict[str, Any]) -> None:
+    if mode in {"assist", "strict"}:
+        state.craft_mode = mode
+    elif not state.craft_mode:
+        state.craft_mode = "off"
+    if options:
+        merged = dict(state.craft_options or {})
+        merged.update(options)
+        merged["craft_mode"] = state.craft_mode
+        state.craft_options = merged
+
 
 def load_or_create_project(store: LocalStore, project_id: str) -> NovelState:
     try:

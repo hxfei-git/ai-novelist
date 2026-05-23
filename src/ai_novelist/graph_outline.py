@@ -11,6 +11,7 @@ from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
 from ai_novelist.agent_metrics import complete_with_metrics, estimate_tokens
 from ai_novelist.agent_parallel import AgentJob, run_agent_jobs
 from ai_novelist.artifacts import ArtifactRecord, register_artifact
+from ai_novelist.corpus.craft_resolver import resolve_author_craft
 from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, with_agent_metadata
 from ai_novelist.prompts import load_prompt
 from ai_novelist.state import NovelState
@@ -324,11 +325,13 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
 
     label = STAGE_LABELS[stage]
     emit_progress(progress, "OutlineStage", f"正在准备第 {stage_number(stage)} 阶段「{label}」上下文...")
+    state = resolve_author_craft(state, store, "outline_stage", stage=stage)
+    author_craft = load_outline_stage_craft_brief(state, store)
     role_jobs = [
         AgentJob(
             key=role,
             agent="outline_stage_role",
-            prompt=build_outline_stage_role_prompt(state, stage, role),
+            prompt=build_outline_stage_role_prompt(state, stage, role, author_craft=author_craft),
             graph="outline",
             node="outline_stage_role",
             prompt_profile="outline_role",
@@ -366,7 +369,7 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
 
 
     emit_progress(progress, "大纲汇总 Agent", with_agent_metadata(f"正在汇总「{label}」阶段产物...", adapter, "outline_stage_synthesizer"))
-    synthesizer_prompt = build_outline_stage_synthesizer_prompt(state, stage, role_reviews)
+    synthesizer_prompt = build_outline_stage_synthesizer_prompt(state, stage, role_reviews, author_craft=author_craft)
     try:
         start = datetime.now(UTC)
         synthesis = complete_with_metrics(
@@ -812,7 +815,16 @@ def record_stage_history(state: NovelState, event: str, stage: str, user_text: s
     state.outline_stage_history = state.outline_stage_history[-80:]
 
 
-def build_outline_stage_role_prompt(state: NovelState, stage: str, role: str) -> str:
+def load_outline_stage_craft_brief(state: NovelState, store: LocalStore) -> str:
+    if state.craft_mode == "off" or not state.active_craft_brief_path:
+        return ""
+    path = store.project_dir(state.project_id) / state.active_craft_brief_path
+    if not path.exists():
+        return ""
+    return path.read_text(encoding="utf-8").strip()
+
+
+def build_outline_stage_role_prompt(state: NovelState, stage: str, role: str, author_craft: str = "") -> str:
     return (
         "AGENT: outline_stage_role\n"
         f"ROLE: {role}\n"
@@ -822,6 +834,7 @@ def build_outline_stage_role_prompt(state: NovelState, stage: str, role: str) ->
         f"用户最新输入：{state.user_request}\n"
         f"创意：{state.idea or '暂无'}\n"
         f"检索上下文：\n{state.retrieval_context or state.reference_brief or '暂无'}\n\n"
+        f"作者构思参考：\n{author_craft or '暂无'}\n\n"
         f"前序已保存阶段内容：\n{previous_stage_context(state, stage)}\n\n"
         f"当前阶段已有内容：\n{current_stage_context(state, stage)}\n\n"
         f"阶段连续性要求：\n{stage_continuity_requirement(stage)}\n\n"
@@ -838,7 +851,7 @@ def build_outline_stage_role_prompt(state: NovelState, stage: str, role: str) ->
     )
 
 
-def build_outline_stage_synthesizer_prompt(state: NovelState, stage: str, role_reviews: list[dict[str, str]]) -> str:
+def build_outline_stage_synthesizer_prompt(state: NovelState, stage: str, role_reviews: list[dict[str, str]], author_craft: str = "") -> str:
     reviews = "\n\n".join(f"## {item['role']}\n{item['content']}" for item in role_reviews)
     return (
         "AGENT: outline_stage_synthesizer\n"
@@ -846,6 +859,7 @@ def build_outline_stage_synthesizer_prompt(state: NovelState, stage: str, role_r
         f"STAGE_LABEL: {STAGE_LABELS[stage]}\n\n"
         f"创意：{state.idea or '暂无'}\n"
         f"用户最新输入：{state.user_request}\n"
+        f"作者构思参考：\n{author_craft or '暂无'}\n\n"
         f"前序已保存阶段内容：\n{previous_stage_context(state, stage)}\n\n"
         f"当前阶段已有内容：\n{current_stage_context(state, stage)}\n\n"
         f"阶段连续性要求：\n{stage_continuity_requirement(stage)}\n\n"

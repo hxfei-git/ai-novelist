@@ -87,6 +87,14 @@ class NovelState:
     outline_stage_status: OutlineStageStatus = "collecting"
     outline_stage_artifacts: dict[str, Any] = field(default_factory=dict)
     outline_stage_history: list[dict[str, Any]] = field(default_factory=list)
+    craft_mode: str = "off"
+    active_craft_brief_path: str = ""
+    craft_profile_ids: list[str] = field(default_factory=list)
+    craft_sources: list[dict[str, Any]] = field(default_factory=list)
+    craft_context_digest: str = ""
+    craft_updated_at: str = ""
+    project_craft_memory_path: str = ""
+    craft_options: dict[str, Any] = field(default_factory=dict)
     review_status: ReviewStatus = "draft"
     error: str = ""
 
@@ -159,6 +167,14 @@ class NovelState:
             outline_stage_status=normalize_outline_stage_status(data.get("outline_stage_status", "collecting")),
             outline_stage_artifacts=normalize_outline_stage_artifacts(data.get("outline_stage_artifacts", {})),
             outline_stage_history=normalize_dict_list(data.get("outline_stage_history", [])),
+            craft_mode=normalize_craft_mode(data.get("craft_mode", "off")),
+            active_craft_brief_path=str(data.get("active_craft_brief_path", "")),
+            craft_profile_ids=normalize_str_list(data.get("craft_profile_ids", [])),
+            craft_sources=normalize_dict_list(data.get("craft_sources", [])),
+            craft_context_digest=str(data.get("craft_context_digest", "")),
+            craft_updated_at=str(data.get("craft_updated_at", "")),
+            project_craft_memory_path=str(data.get("project_craft_memory_path", "")),
+            craft_options=normalize_dict(data.get("craft_options", {})),
             review_status=data.get("review_status", "draft"),
             error=str(data.get("error", "")),
         )
@@ -251,3 +267,7 @@ def normalize_outline_stage_artifacts(value: Any) -> dict[str, Any]:
                 item["label"] = "分卷大纲"
         artifacts[key] = item
     return artifacts
+
+def normalize_craft_mode(value: Any) -> str:
+    mode = str(value or "off").strip().lower()
+    return mode if mode in {"off", "assist", "strict"} else "off"

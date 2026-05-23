@@ -7,6 +7,8 @@ from typing import Protocol
 from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
 from ai_novelist.artifacts import ArtifactRecord, get_latest_artifact, load_artifact_text, load_artifacts, register_artifact
 from ai_novelist.context_builder import build_context
+from ai_novelist.corpus.craft_resolver import resolve_author_craft
+from ai_novelist.corpus.similarity_guard import save_similarity_report_for_state
 from ai_novelist.pacing import allow_hook_enhance, parse_pacing_target_from_card
 from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, run_with_progress, run_with_progress, with_agent_metadata
 from ai_novelist.prompts import load_prompt
@@ -102,6 +104,8 @@ def load_drafting_context_node(data: dict, adapter: AgentAdapter, store: LocalSt
 
     state.current_chapter_card = load_current_chapter_card(state, store)
     state.current_scene_cards = load_current_scene_cards(state, store)
+    state.director_task_args["pacing_target"] = parse_pacing_target_from_card(state.active_chapter or state.current_chapter or 1, state.current_chapter_card or "").to_dict()
+    state = resolve_author_craft(state, store, "drafting", chapter=state.active_chapter)
     context = build_context(state, store, "drafting", chapter=state.active_chapter, max_chars=18000)
     state.director_task_args["drafting_context"] = context
     state.last_context_digest = context[:1200]
@@ -224,6 +228,8 @@ def save_draft_node(data: dict, store: LocalStore) -> dict:
     state.director_message = f"第 {state.active_chapter} 章草稿已生成：{path}"
     state.artifact_registry = [item.to_dict() for item in load_artifacts(store.project_dir(state.project_id))][-20:]
     state.last_agent_reports = append_agent_report(state.last_agent_reports, "style_normalizer", "saved", {"artifact_id": record.id, "path": record.path})
+    state = save_similarity_report_for_state(state, store, f"draft_v{version}", state.chapter_draft)
+    state.artifact_registry = [item.to_dict() for item in load_artifacts(store.project_dir(state.project_id))][-20:]
     store.save_state(state)
     return state.to_dict()
 

@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
 from ai_novelist.adapters.codex_cli import CodexCLIAdapter
 from ai_novelist.adapters.deepseek import DeepSeekAdapter
+from ai_novelist.artifacts import save_json_artifact
 from ai_novelist.config import Settings, load_settings, search_api_key
+from ai_novelist.corpus.craft_extractor import extract_craft_profiles
+from ai_novelist.corpus.craft_resolver import resolve_author_craft
+from ai_novelist.corpus.index import build_corpus_index, load_chunks, load_profiles
+from ai_novelist.corpus.similarity_guard import check_similarity
 from ai_novelist.director_service import DirectorService
 from ai_novelist.feishu import FeishuBotService, FeishuConfigError, run_feishu_long_connection
 from ai_novelist.graph_minimal import build_minimal_graph
@@ -57,6 +63,18 @@ def main(argv: list[str] | None = None) -> int:
             return run_chat_command(args, store, settings)
         if args.command == "feishu":
             return run_feishu_command(args, store, settings)
+        if args.command == "index-corpus":
+            return run_index_corpus_command(args, settings)
+        if args.command == "extract-craft":
+            return run_extract_craft_command(args, settings)
+        if args.command == "craft-status":
+            return run_craft_status_command(args, store, settings)
+        if args.command == "craft-profiles":
+            return run_craft_profiles_command(args, settings)
+        if args.command == "craft-brief":
+            return run_craft_brief_command(args, store, settings)
+        if args.command == "craft-similarity-check":
+            return run_craft_similarity_check_command(args, store, settings)
         if args.command == "worldbuild":
             return run_writer_command(args, store, settings, "worldbuild")
         if args.command == "plan-outline":
@@ -116,6 +134,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("mock", "serpapi", "tavily", "exa"),
         help="搜索提供方，默认读 AI_NOVELIST_SEARCH_PROVIDER；--mock 会强制使用 mock",
     )
+    add_author_craft_flags(chat_parser)
 
     feishu_parser = subparsers.add_parser("feishu", help="启动飞书长连接机器人")
     feishu_parser.add_argument("--mock", action="store_true", help="使用本地 mock 输出，不调用真实模型")
@@ -131,6 +150,46 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("mock", "serpapi", "tavily", "exa"),
         help="搜索提供方，默认读 AI_NOVELIST_SEARCH_PROVIDER；--mock 会强制使用 mock",
     )
+    add_author_craft_flags(feishu_parser)
+
+    index_parser = subparsers.add_parser("index-corpus", help="索引本地作者小说语料")
+    index_parser.add_argument("--corpus-dir", help="本地小说语料目录，默认读 AI_NOVELIST_AUTHOR_CORPUS_DIR")
+    index_parser.add_argument("--index-dir", help="索引输出目录，默认读 AI_NOVELIST_CORPUS_INDEX_DIR")
+    index_parser.add_argument("--no-incremental", action="store_true", help="重新扫描全部文件")
+
+    extract_parser = subparsers.add_parser("extract-craft", help="从 corpus index 提炼作者构思方法")
+    extract_parser.add_argument("--index-dir", help="索引目录，默认读 AI_NOVELIST_CORPUS_INDEX_DIR")
+    extract_parser.add_argument("--mock", action="store_true", help="使用稳定规则提炼，不调用真实模型")
+    extract_parser.add_argument("--timeout", type=int, help="真实模型调用超时时间，单位秒")
+    extract_parser.add_argument("--provider", choices=("codex", "deepseek"), help="模型提供方，默认读 AI_NOVELIST_MODEL_PROVIDER")
+    extract_parser.add_argument("--model", help="模型名；DeepSeek 默认 deepseek-v4-pro")
+    extract_parser.add_argument("--limit-files", type=int, help="最多处理多少本作品")
+    extract_parser.add_argument("--limit-chunks", type=int, help="最多处理多少 chunk")
+    extract_parser.add_argument("--work-id", default="", help="只处理指定 work_id")
+    extract_parser.add_argument("--dry-run", action="store_true", help="只统计，不写 profile")
+    extract_parser.add_argument("--resume", action="store_true", help="保留已完成 profile 并继续")
+
+    craft_status_parser = subparsers.add_parser("craft-status", help="查看项目 Author Craft 状态")
+    craft_status_parser.add_argument("--project", required=True, help="项目 ID")
+    craft_status_parser.add_argument("--index-dir", help="索引目录，默认读 AI_NOVELIST_CORPUS_INDEX_DIR")
+
+    profiles_parser = subparsers.add_parser("craft-profiles", help="列出已提炼的 craft profiles")
+    profiles_parser.add_argument("--index-dir", help="索引目录，默认读 AI_NOVELIST_CORPUS_INDEX_DIR")
+    profiles_parser.add_argument("--limit", type=int, default=20, help="最多显示多少个 profile")
+
+    brief_parser = subparsers.add_parser("craft-brief", help="为指定阶段生成 StageCraftBrief")
+    brief_parser.add_argument("--project", required=True, help="项目 ID")
+    brief_parser.add_argument("--purpose", required=True, choices=("outline_stage", "chapter_planning", "scene_design", "drafting", "review", "revision"), help="阶段 purpose")
+    brief_parser.add_argument("--chapter", type=int, help="章节编号")
+    brief_parser.add_argument("--stage", help="大纲阶段名")
+    brief_parser.add_argument("--mock", action="store_true", help="兼容参数；brief 生成不调用模型")
+    add_author_craft_flags(brief_parser)
+
+    similarity_parser = subparsers.add_parser("craft-similarity-check", help="检查文本与 Author Craft 语料的相似风险")
+    similarity_parser.add_argument("--project", required=True, help="项目 ID")
+    similarity_parser.add_argument("--chapter", type=int, required=True, help="章节编号")
+    similarity_parser.add_argument("--draft", required=True, help="要检查的草稿路径")
+    add_author_craft_flags(similarity_parser)
 
     worldbuild_parser = subparsers.add_parser("worldbuild", help="生成世界观设定")
     worldbuild_parser.add_argument("--project", required=True, help="项目 ID")
@@ -174,6 +233,17 @@ def add_generation_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--timeout", type=int, help="真实模型调用超时时间，单位秒")
     parser.add_argument("--provider", choices=("codex", "deepseek"), help="模型提供方，默认读 AI_NOVELIST_MODEL_PROVIDER")
     parser.add_argument("--model", help="模型名；DeepSeek 默认 deepseek-v4-pro")
+    add_author_craft_flags(parser)
+
+
+def add_author_craft_flags(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--author-corpus-dir", help="本地作者小说语料目录，默认读 AI_NOVELIST_AUTHOR_CORPUS_DIR")
+    parser.add_argument("--corpus-index-dir", help="Author Craft 索引目录，默认读 AI_NOVELIST_CORPUS_INDEX_DIR")
+    parser.add_argument("--craft-mode", choices=("off", "assist", "strict"), help="Author Craft 使用模式")
+    parser.add_argument("--craft-max-chars", type=int, help="StageCraftBrief 最大字符数")
+    parser.add_argument("--craft-profile", action="append", default=[], help="限定 craft profile id，可重复")
+    parser.add_argument("--craft-genre", action="append", default=[], help="优先参考的类型标签，可重复")
+    parser.add_argument("--craft-exclude-work", action="append", default=[], help="排除指定 work_id，可重复")
 
 
 def init_project(args: argparse.Namespace, store: LocalStore) -> int:
@@ -181,6 +251,143 @@ def init_project(args: argparse.Namespace, store: LocalStore) -> int:
     print(f"项目已创建：{state.project_id}")
     print(f"目录：{store.project_dir(state.project_id)}")
     return 0
+
+
+def run_index_corpus_command(args: argparse.Namespace, settings: Settings) -> int:
+    corpus_dir = args.corpus_dir or settings.author_corpus_dir
+    if not corpus_dir:
+        print("错误：请通过 --corpus-dir 或 AI_NOVELIST_AUTHOR_CORPUS_DIR 指定语料目录", file=sys.stderr)
+        return 2
+    index_dir = args.index_dir or settings.corpus_index_dir
+    result = build_corpus_index(corpus_dir, index_dir, incremental=not args.no_incremental)
+    print(f"索引目录：{result.index_dir}")
+    print(f"作品：{result.works}，章节：{result.chapters}，场景：{result.scenes}，chunks：{result.chunks}")
+    print(f"未变化文件：{result.skipped_files}，错误：{result.errors}")
+    return 0 if result.errors == 0 else 1
+
+
+def run_extract_craft_command(args: argparse.Namespace, settings: Settings) -> int:
+    index_dir = args.index_dir or settings.corpus_index_dir
+    result = extract_craft_profiles(
+        index_dir,
+        mock=args.mock or settings.craft_extract_mock,
+        limit_files=args.limit_files,
+        limit_chunks=args.limit_chunks,
+        work_id=args.work_id,
+        dry_run=args.dry_run,
+        resume=args.resume,
+    )
+    prefix = "Dry run" if result.dry_run else "已提炼"
+    print(f"{prefix}：work={result.work_profiles}, chapter={result.chapter_profiles}, scene={result.scene_profiles}, genre={result.genre_profiles}")
+    print(f"索引目录：{result.index_dir}")
+    return 0
+
+
+def run_craft_status_command(args: argparse.Namespace, store: LocalStore, settings: Settings) -> int:
+    state = store.load_state(args.project)
+    index_dir = Path(args.index_dir or settings.corpus_index_dir)
+    print(f"项目：{state.project_id}")
+    print(f"craft_mode：{state.craft_mode}")
+    print(f"index_dir：{index_dir}")
+    print(f"active_craft_brief_path：{state.active_craft_brief_path or '暂无'}")
+    print(f"craft_context_digest：{state.craft_context_digest or '暂无'}")
+    memory_path = store.project_craft_memory_path(state.project_id)
+    print(f"project_craft_memory：{'已有' if memory_path.exists() else '暂无'} -> {memory_path}")
+    return 0
+
+
+def run_craft_profiles_command(args: argparse.Namespace, settings: Settings) -> int:
+    index_dir = Path(args.index_dir or settings.corpus_index_dir)
+    count = 0
+    for profile in load_profiles(index_dir):
+        print(f"{profile.profile_id}\t{profile.scope}\t{profile.work_id}\t{profile.title}\tnotes={len(profile.notes)}")
+        count += 1
+        if count >= args.limit:
+            break
+    if count == 0:
+        print("暂无 craft profiles。请先运行 index-corpus 和 extract-craft。")
+    return 0
+
+
+def run_craft_brief_command(args: argparse.Namespace, store: LocalStore, settings: Settings) -> int:
+    try:
+        state = store.load_state(args.project)
+    except LocalStoreError:
+        state = store.create_project(args.project, args.project)
+    if args.chapter:
+        state.current_chapter = args.chapter
+        state.active_chapter = args.chapter
+    apply_craft_args_to_state(state, args, settings)
+    if state.craft_mode == "off":
+        state.craft_mode = "assist"
+    state = resolve_author_craft(state, store, args.purpose, chapter=args.chapter, stage=args.stage, max_chars=state.craft_options.get("craft_max_chars"))
+    store.save_state(state)
+    if not state.active_craft_brief_path:
+        print("未生成 StageCraftBrief。请确认 index-dir 下已有 craft profiles。", file=sys.stderr)
+        return 1
+    path = store.project_dir(state.project_id) / state.active_craft_brief_path
+    print(f"StageCraftBrief：{path}")
+    print(path.read_text(encoding="utf-8"))
+    return 0
+
+
+def run_craft_similarity_check_command(args: argparse.Namespace, store: LocalStore, settings: Settings) -> int:
+    state = store.load_state(args.project)
+    apply_craft_args_to_state(state, args, settings)
+    draft_path = Path(args.draft)
+    if not draft_path.exists():
+        print(f"错误：草稿不存在：{draft_path}", file=sys.stderr)
+        return 2
+    index_dir = Path(state.craft_options.get("corpus_index_dir") or settings.corpus_index_dir)
+    chunks = list(load_chunks(index_dir))[:100]
+    report = check_similarity(
+        draft_path.read_text(encoding="utf-8"),
+        chunks,
+        artifact=draft_path.stem,
+        project_id=state.project_id,
+        chapter=args.chapter,
+    )
+    relative_path = store.craft_similarity_report_relative_path(args.chapter, draft_path.stem)
+    record = save_json_artifact(
+        store.project_dir(state.project_id),
+        relative_path,
+        report.to_dict(),
+        "craft_similarity_report",
+        chapter=args.chapter,
+        stage=draft_path.stem,
+        source_agent="similarity_guard",
+        graph="cli",
+        summary=f"risk={report.risk}",
+    )
+    output_path = store.project_dir(state.project_id) / record.path
+    print(f"risk：{report.risk}")
+    print(f"报告：{output_path}")
+    return 1 if report.risk == "high" else 0
+
+
+def apply_craft_args_to_state(state: NovelState, args: argparse.Namespace, settings: Settings) -> None:
+    mode = getattr(args, "craft_mode", None) or settings.craft_mode or "off"
+    state.craft_mode = mode if mode in {"off", "assist", "strict"} else "off"
+    options = dict(state.craft_options or {})
+    if getattr(args, "author_corpus_dir", None) or settings.author_corpus_dir:
+        options["author_corpus_dir"] = getattr(args, "author_corpus_dir", None) or settings.author_corpus_dir
+    if getattr(args, "corpus_index_dir", None) or settings.corpus_index_dir:
+        options["corpus_index_dir"] = getattr(args, "corpus_index_dir", None) or settings.corpus_index_dir
+    options["craft_mode"] = state.craft_mode
+    options["craft_max_chars"] = getattr(args, "craft_max_chars", None) or settings.craft_max_chars
+    if getattr(args, "craft_profile", None):
+        options["craft_profile"] = list(args.craft_profile)
+    if getattr(args, "craft_genre", None):
+        options["craft_genre"] = list(args.craft_genre)
+    if getattr(args, "craft_exclude_work", None):
+        options["craft_exclude_work"] = list(args.craft_exclude_work)
+    state.craft_options = options
+
+
+def craft_options_from_args(args: argparse.Namespace, settings: Settings) -> dict:
+    dummy = NovelState(project_id="_", title="_")
+    apply_craft_args_to_state(dummy, args, settings)
+    return dict(dummy.craft_options)
 
 
 def generate_project_outline(
@@ -197,6 +404,7 @@ def generate_project_outline(
     state.last_user_feedback = state.user_request
     state.review_status = "draft"
     state.error = ""
+    apply_craft_args_to_state(state, args, settings)
     append_message(state, "user", state.user_request)
     store.save_state(state)
 
@@ -300,6 +508,7 @@ def run_compose_command(
     state.next_action = "continue"
     state.review_status = "draft"
     state.error = ""
+    apply_craft_args_to_state(state, args, settings)
     store.save_state(state)
 
     effective_timeout = args.timeout or settings.codex_timeout_seconds
@@ -345,6 +554,8 @@ def run_chat_command(
         state = store.load_state(args.project)
     except LocalStoreError:
         state = store.create_project(args.project, args.project)
+    apply_craft_args_to_state(state, args, settings)
+    store.save_state(state)
 
     effective_timeout = args.timeout or settings.codex_timeout_seconds
     adapter = make_agent_adapter(args, settings, effective_timeout)
@@ -354,6 +565,8 @@ def run_chat_command(
         adapter=adapter,
         search_backend=make_search_backend(args, settings),
         progress=print_progress,
+        default_craft_mode=getattr(args, "craft_mode", None) or settings.craft_mode,
+        default_craft_options=craft_options_from_args(args, settings),
     )
 
     print(f"进入 ai-novelist chat：项目 {state.project_id}。输入 exit/quit/退出 结束。")
@@ -396,6 +609,8 @@ def run_feishu_command(
         adapter=adapter,
         search_backend=make_search_backend(args, settings),
         progress=print_progress,
+        default_craft_mode=getattr(args, "craft_mode", None) or settings.craft_mode,
+        default_craft_options=craft_options_from_args(args, settings),
     )
     bot = FeishuBotService(store=store, director=service)
     print("启动 ai-novelist 飞书长连接机器人。", file=sys.stderr)
@@ -583,6 +798,7 @@ def run_writer_command(
         state.current_chapter = args.chapter
     state.review_status = "draft"
     state.error = ""
+    apply_craft_args_to_state(state, args, settings)
     store.save_state(state)
 
     effective_timeout = args.timeout or settings.codex_timeout_seconds
@@ -632,6 +848,7 @@ def run_finalize_command(
     state.director_task_args = {"chapter": args.chapter, "explicit_finalize": True}
     state.user_request = f"定稿第 {args.chapter} 章"
     state.error = ""
+    apply_craft_args_to_state(state, args, settings)
     store.save_state(state)
 
     effective_timeout = args.timeout or settings.codex_timeout_seconds

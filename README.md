@@ -181,6 +181,31 @@ projects/<project>/research_sources.json
 
 已有 `reference_brief` 时，chat 不会重复强制调研；后续 outline prompt 会带上参考简报、原作事实和不确定点。
 
+## 真实作者构思方法库 Author Craft Layer
+
+Author Craft Layer 可把用户本地 `.txt/.md` 小说库离线提炼成“创作方法库”，在章节规划、场景规划、正文写作、审稿和修订阶段注入 StageCraftBrief。它只注入结构策略、冲突组织、信息释放、节奏控制等抽象方法，不把长原文塞进 prompt，也不要求模型模仿具体作者表达。
+
+```bash
+export AI_NOVELIST_AUTHOR_CORPUS_DIR=/path/to/novels
+export AI_NOVELIST_CORPUS_INDEX_DIR=corpus_index
+export AI_NOVELIST_CRAFT_MODE=assist
+
+.venv/bin/ai-novelist index-corpus --corpus-dir "$AI_NOVELIST_AUTHOR_CORPUS_DIR"
+.venv/bin/ai-novelist extract-craft --index-dir "$AI_NOVELIST_CORPUS_INDEX_DIR" --mock
+.venv/bin/ai-novelist craft-brief --project demo --purpose chapter_planning --chapter 1 --craft-mode assist
+.venv/bin/ai-novelist chat --project demo --mock --craft-mode assist --corpus-index-dir "$AI_NOVELIST_CORPUS_INDEX_DIR"
+```
+
+常用命令：
+
+- `index-corpus`：扫描本地作者语料并生成 JSONL 索引。
+- `extract-craft --mock`：稳定提炼 work/chapter/scene/genre craft profiles，不调用真实模型。
+- `craft-profiles`：查看已提炼 profile。
+- `craft-brief`：为指定阶段生成 `projects/<project>/craft/stage_briefs/*.md`。
+- `craft-similarity-check`：检查草稿与本地语料的复刻风险。
+
+`craft_mode` 语义：`off` 完全关闭；`assist` 注入简短参考；`strict` 注入更完整 brief，并在相似度高风险时要求修订。`AI_NOVELIST_LOCAL_CORPUS_DIR` 仍只用于 research，本功能使用 `AI_NOVELIST_AUTHOR_CORPUS_DIR` 和 `AI_NOVELIST_CORPUS_INDEX_DIR`。
+
 ## 交互式大纲共创
 
 大纲共创现在优先从 `chat` 进入。`outline` 命令仍保留，用于调试或单独验证 outline collaboration graph；它与 chat 共享同一个 `projects/<project>/state.json`。

@@ -21,6 +21,12 @@ class Settings:
     search_base_url: str = ""
     search_timeout_seconds: int = 20
     local_corpus_dir: str = ""
+    author_corpus_dir: str = ""
+    corpus_index_dir: str = "corpus_index"
+    craft_mode: str = "off"
+    craft_max_chars: int = 3000
+    craft_similarity_guard: bool = True
+    craft_extract_mock: bool = False
     feishu_app_id: str = ""
     feishu_app_secret: str = ""
     feishu_domain: str = "feishu"
@@ -40,6 +46,12 @@ def load_settings() -> Settings:
         search_base_url=os.getenv("AI_NOVELIST_SEARCH_BASE_URL", "").strip(),
         search_timeout_seconds=int(os.getenv("AI_NOVELIST_SEARCH_TIMEOUT", "20")),
         local_corpus_dir=os.getenv("AI_NOVELIST_LOCAL_CORPUS_DIR", "").strip(),
+        author_corpus_dir=os.getenv("AI_NOVELIST_AUTHOR_CORPUS_DIR", "").strip(),
+        corpus_index_dir=os.getenv("AI_NOVELIST_CORPUS_INDEX_DIR", "corpus_index").strip(),
+        craft_mode=os.getenv("AI_NOVELIST_CRAFT_MODE", "off").strip().lower(),
+        craft_max_chars=int(os.getenv("AI_NOVELIST_CRAFT_MAX_CHARS", "3000")),
+        craft_similarity_guard=parse_bool(os.getenv("AI_NOVELIST_CRAFT_SIMILARITY_GUARD", "true")),
+        craft_extract_mock=parse_bool(os.getenv("AI_NOVELIST_CRAFT_EXTRACT_MOCK", "false")),
         feishu_app_id=os.getenv("AI_NOVELIST_FEISHU_APP_ID", "").strip(),
         feishu_app_secret=os.getenv("AI_NOVELIST_FEISHU_APP_SECRET", "").strip(),
         feishu_domain=os.getenv("AI_NOVELIST_FEISHU_DOMAIN", "feishu").strip().lower(),
@@ -55,3 +67,6 @@ def search_api_key(provider: str | None = None) -> str:
     if provider == "exa":
         return os.getenv("EXA_API_KEY", "") or os.getenv("AI_NOVELIST_SEARCH_API_KEY", "")
     return os.getenv("AI_NOVELIST_SEARCH_API_KEY", "")
+
+def parse_bool(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}

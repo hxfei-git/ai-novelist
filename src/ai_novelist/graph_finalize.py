@@ -11,6 +11,8 @@ from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
 from ai_novelist.artifacts import ArtifactRecord, get_latest_artifact, load_artifact_text, load_artifacts, register_artifact
 from ai_novelist.bible import bible_to_dict, load_bible, merge_bible_updates, save_bible
 from ai_novelist.context_builder import build_context
+from ai_novelist.corpus.project_memory import extract_project_craft_memory
+from ai_novelist.corpus.similarity_guard import save_similarity_report_for_state
 from ai_novelist.pacing import infer_hook_strength, infer_function, parse_pacing_target_from_card
 from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, run_with_progress, with_agent_metadata
 from ai_novelist.prompts import load_prompt
@@ -126,6 +128,8 @@ def save_final_chapter_node(data: dict, store: LocalStore) -> dict:
     state.active_stage = "save_final_chapter"
     state.artifact_registry = [item.to_dict() for item in load_artifacts(store.project_dir(state.project_id))][-20:]
     state.last_agent_reports = append_agent_report(state.last_agent_reports, "finalize_graph", "final_saved", {"artifact_id": record.id, "path": record.path})
+    state = save_similarity_report_for_state(state, store, "final", state.current_final_chapter)
+    state.artifact_registry = [item.to_dict() for item in load_artifacts(store.project_dir(state.project_id))][-20:]
     store.save_state(state)
     return state.to_dict()
 
@@ -232,6 +236,8 @@ def update_bible_from_final_node(data: dict, store: LocalStore) -> dict:
         f"节奏报告已保存：{pacing_path}\n"
         f"小说圣经已更新到版本 {state.bible_version}。下一步可以说：导出小说。"
     )
+    if state.craft_mode in {"assist", "strict"}:
+        extract_project_craft_memory(state, store, state.active_chapter or state.current_chapter)
     state.artifact_registry = [item.to_dict() for item in load_artifacts(project_dir)][-20:]
     state.last_agent_reports = append_agent_report(state.last_agent_reports, "finalize", "bible_updated", {"artifact_id": bible_record.id})
     store.save_state(state)
