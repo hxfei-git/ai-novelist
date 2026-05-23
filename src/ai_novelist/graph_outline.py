@@ -871,8 +871,8 @@ OUTLINE_STAGE_BOUNDARIES = {
         "forbidden": "抽象剧情算法、代价红线式标题、人物小传、章节流程、结局安排、产品规则语言、模型自造机制",
     },
     "characters": {
-        "allowed": "主角缺陷与欲望、关键人物目标、动机、关系张力、阵营位置、阵营冲突、背叛/信任风险、成长矛盾、人物弧光",
-        "forbidden": "福利场景、擦边机制、亲密行为规则、亲密行为、双修审批、道侣流程、道侣绩效、暧昧规则、恋爱系统表格、世界规则清单、章节列表、完整剧情梗概、无主线功能的人设细节、与主线无关的角色堆砌",
+        "allowed": "主角缺陷与欲望、关键人物目标、动机、关系张力、成人亲密张力、情色/福利关系功能、阵营位置、阵营冲突、背叛/信任风险、成长矛盾、人物弧光",
+        "forbidden": "未成年性化、非自愿亲密、无主线功能成人内容、把亲密关系写成行政审批/绩效表格、世界规则清单、章节列表、完整剧情梗概、无主线功能的人设细节、与主线无关的角色堆砌",
     },
     "story_flow": {
         "allowed": "叙事流程中的主线阶段、阶段目标、关键转折、信息释放节奏、伏笔布置与回收方向、失败代价、高潮方向",
@@ -933,7 +933,7 @@ def worldbuilding_overfine_terms_guard(state: NovelState, stage: str) -> str:
 def characters_relationship_guard(state: NovelState, stage: str) -> str:
     if stage != "characters":
         return ""
-    controlled_terms = ("亲密行为", "双修审批", "道侣绩效", "道侣流程", "福利场景", "擦边机制", "暧昧规则", "恋爱系统")
+    controlled_terms = ("亲密行为", "双修", "道侣", "福利场景", "擦边", "暧昧", "恋爱", "色情", "情色")
     explicit_sources = [state.user_request, state.idea]
     for artifact in state.outline_stage_artifacts.values():
         if not isinstance(artifact, dict) or artifact.get("status") != "locked":
@@ -948,12 +948,13 @@ def characters_relationship_guard(state: NovelState, stage: str) -> str:
         return (
             "\nCHARACTER_RELATIONSHIP_TERMS:\n"
             f"- 用户原始输入或锁定产物已明确包含：{'、'.join(explicit_terms)}。\n"
-            "- 可以保留这些词的方向，但必须改写为目标、动机、阵营位置或主线冲突功能；不得生成亲密行为规则、道侣流程或福利场景。"
+            "- 可以保留并展开这些成人亲密方向；必须服务目标、动机、权力关系、诱惑、背叛、占有欲或主线冲突，不要改写成行政审批/绩效表格。"
         )
     return (
         "\nCHARACTER_RELATIONSHIP_TERMS:\n"
-        "- 默认不要生成亲密行为、双修审批、道侣绩效、道侣流程、暧昧规则、福利场景或恋爱系统表格。\n"
-        "- 每个角色必须有明确主线功能或冲突功能；无主线功能的人设细节一律删除。"
+        "- 默认允许成人角色之间的暧昧、色情、福利、双修和亲密张力；但必须服务人物关系或主线冲突，不要写成无功能卖点清单。\n"
+        "- 禁止未成年性化、非自愿亲密、剥削性内容，禁止把亲密关系写成审批/绩效/流程表格。\n"
+        "- 每个角色必须有明确主线功能、冲突功能或情欲张力功能；无功能的人设细节一律删除。"
     )
 
 
@@ -1121,15 +1122,12 @@ def format_stage_markdown(artifact: dict) -> str:
 
 
 DIRECTION_FORBIDDEN_REPLACEMENTS = {
-    "亲密行为申请表": "感情线必须服务主线冲突，不脱离类型爽点",
-    "双修项目审批": "关键关系必须推动主线冲突，不喧宾夺主",
-    "道侣绩效考评": "感情线必须服务主线冲突，不脱离类型爽点",
     "项目审批": "关键选择必须服务核心冲突",
-    "申请表": "感情线必须服务主线冲突",
+    "申请表": "关系把柄",
     "审批": "关键选择必须服务核心冲突",
     "考评": "关系压力必须服务主线推进",
-    "备案": "亲密关系不喧宾夺主",
-    "绩效": "情感线必须服务类型爽点",
+    "备案": "关系登记或把柄压力",
+    "绩效": "权力评价压力",
     "制度条款": "抽象规则边界",
     "规则清单": "原则边界",
     "KPI": "外部压力",

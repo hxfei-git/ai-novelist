@@ -16,8 +16,9 @@ def test_direction_proposer_prompt_marks_directions_as_candidates():
     assert "每个方向固定 6 个字段" in prompt
     assert "每字段不超过 60 中文字符" in prompt
     assert "建议选择不超过 120 中文字符" in prompt
-    for forbidden in ("审批", "备案", "绩效", "申请表", "KPI", "章节剧情", "人物亲密制度", "已锁定 canon 口吻"):
+    for forbidden in ("审批", "备案", "绩效", "申请表", "KPI", "章节剧情", "已锁定 canon 口吻"):
         assert forbidden in prompt
+    assert "成人亲密/福利方向可以作为风格气质或关系张力出现" in prompt
 
 
 def test_world_builder_prompt_limits_rules_to_conflict_principles():
@@ -217,8 +218,9 @@ def test_scene_synthesizer_prompt_requires_inherited_fields_and_scene_local_deta
     assert "source_hint" in prompt
     for field in ("location", "characters", "purpose", "character_goal", "conflict_target", "key_information", "emotional_shift", "turn", "exit_state"):
         assert field in prompt
-    for forbidden in ("新增全局地点", "组织", "规则", "未规划人物", "无依据感情机制", "正文", "对白"):
+    for forbidden in ("新增全局地点", "组织", "规则", "未规划人物", "正文", "对白"):
         assert forbidden in prompt
+    assert "允许继承已有成人感情、色情、福利、亲密张力" in prompt
 
 
 def test_chapter_writer_prompt_strictly_follows_cards_and_outputs_only_body():
@@ -348,8 +350,9 @@ def test_character_arc_editor_prompt_only_repairs_current_chapter_choices():
     assert "修复建议必须指向已有场景" in prompt
     assert "rewrite_tasks" in prompt
     assert "最多 5 个 top_issues" in prompt
-    for forbidden in ("感情机制", "恋爱机制", "长期承诺", "亲密规则", "新阵营关系", "未规划人物背景", "改变关系状态"):
+    for forbidden in ("新阵营关系", "未规划人物背景", "改变关系状态"):
         assert forbidden in prompt
+    assert "已规划的成人感情、色情、福利、亲密张力可以保留" in prompt
 
 
 def test_style_editor_prompt_only_diagnoses_language_layer():
@@ -371,8 +374,9 @@ def test_simulated_reader_prompt_feedback_does_not_add_story():
     assert "澄清已有内容、强化已有线索" in prompt
     assert "最想继续看的既有线索" in prompt
     assert "rewrite_tasks" in prompt
-    for forbidden in ("新增剧情走向", "新人物关系", "新世界机制", "CP 福利", "长评", "新增一个", "安排一个", "让他们恋爱"):
+    for forbidden in ("新增剧情走向", "新人物关系", "新世界机制", "长评", "新增一个", "安排一个", "让他们恋爱"):
         assert forbidden in prompt
+    assert "既有成人亲密/福利张力不足或过强" in prompt
 
 
 def test_review_synthesizer_prompt_limits_and_uses_upstream_only():

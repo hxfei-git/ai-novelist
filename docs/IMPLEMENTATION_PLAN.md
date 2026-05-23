@@ -2278,3 +2278,28 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - `concept` 仅保留 legacy artifact 兼容，不参与 active flow。
 - 质量门仍为启发式，后续可继续细化来源匹配与句式改写策略。
 
+
+
+## 90. 成人内容与亲密福利边界调整
+
+目标：按用户偏好开放成人角色之间的色情、福利、亲密和擦边内容，避免大纲与写作 prompt 将其一律压制。
+
+已完成：
+
+- outline/stage_contracts.py：人物关系阶段允许成人亲密张力与情色/福利关系功能，禁止项改为未成年性化、非自愿亲密和无主线功能成人内容。
+- graph_outline.py：人物关系阶段边界和 characters_relationship_guard 改为默认允许成人暧昧、色情、福利、双修和亲密张力，但要求服务人物关系、权力关系、诱惑、背叛、占有欲或主线冲突。
+- direction_proposer.md：方向提案允许成人亲密/福利方向作为风格气质或关系张力出现，不再把人物亲密制度作为默认禁区。
+- chapter_writer.md：正文写作允许在已规划成人亲密/色情/福利场景中增强身体距离、触感、欲望拉扯和氛围描写。
+- scene_synthesizer.md：场景卡允许继承已有成人感情、色情、福利和亲密张力，并要求标清来源。
+- character_arc_editor.md 与 simulated_reader.md：允许保留、修复和反馈既有成人亲密/福利张力，不再把 CP 福利类体验一律视为越权。
+
+保留底线：
+
+- 不支持未成年性化。
+- 不支持非自愿亲密或剥削性内容。
+- 不把成人内容写成无来源全局 canon、行政审批/绩效表格或无主线功能卖点清单。
+
+验证：
+
+    .venv/bin/python -m pytest tests/test_prompt_loader.py tests/test_outline_collaboration.py tests/test_outline_stage_controls.py
+    # 92 passed

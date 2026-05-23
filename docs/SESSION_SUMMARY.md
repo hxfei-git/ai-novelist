@@ -2052,3 +2052,17 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - 由于会话环境中 `apply_patch` 工具触发沙箱 `bwrap loopback` 错误，本轮改动通过提权脚本化编辑完成，并在每一步后执行语法检查与全量回归验证。
 
+
+
+## 94. 本轮更新：开放成人色情/福利/亲密内容
+
+- 按用户偏好调整创作边界：系统不再默认压制成人角色之间的色情、福利、亲密和擦边张力。
+- 人物关系阶段允许成人亲密张力与情色/福利关系功能；仍要求服务人物目标、权力关系、诱惑、背叛、占有欲或主线冲突。
+- 正文写作允许在已规划成人亲密/色情/福利场景中增强身体距离、触感、欲望拉扯和氛围描写。
+- 场景卡、人物弧光编辑和模拟读者 prompt 同步改为继承、修复和反馈既有成人亲密内容，而不是把它当作默认禁区。
+- 保留底线：不支持未成年性化、非自愿亲密、剥削性内容；不把成人内容写成无来源全局 canon 或行政审批/绩效表格。
+
+验证：
+
+    .venv/bin/python -m pytest tests/test_prompt_loader.py tests/test_outline_collaboration.py tests/test_outline_stage_controls.py
+    # 92 passed
