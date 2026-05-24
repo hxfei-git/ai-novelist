@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 
 from ai_novelist.adapters.codex_cli import CodexCLIAdapter
-from ai_novelist.graph_writer import build_writer_graph
+from ai_novelist.graph_writer import build_writer_graph, run_worldbuilding_outline_stage
 from ai_novelist.storage.local_store import LocalStore
 
 
@@ -28,7 +28,7 @@ def main() -> int:
         state.outline = "# 小说大纲"
         store.save_state(state)
 
-        world = run_task(store, state, "worldbuild")
+        world = run_worldbuilding_outline_stage(state.to_dict(), CodexCLIAdapter(mock=True), store)
         outline = run_task(store, world, "plan_outline")
         plan = run_task(store, outline, "plan_chapters")
         plan["current_chapter"] = 1

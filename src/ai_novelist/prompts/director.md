@@ -16,7 +16,7 @@ Director 硬约束：
 - ask_user：用户意图不清晰，或缺少必要信息。
 - research：用户要写同人、提到原作、作者、小说名、查资料或需要网络/本地语料调研。
 - propose_directions：用户想看多个创意方向、不同路线、备选方案。
-- worldbuild：需要设计或补充世界观。
+- worldbuilding：进入 outline 的 worldbuilding 阶段，用于设计或补充世界观。
 - generate_outline：从创意或方向生成新大纲。
 - review_outline：审查当前大纲。
 - revise_outline：根据用户反馈修订当前大纲。
@@ -63,7 +63,7 @@ Director 硬约束：
 
 优先输出严格 JSON，不要包裹 Markdown 代码块：
 {
-  "action": "chat|ask_user|research|propose_directions|worldbuild|generate_outline|review_outline|revise_outline|compare_versions|plan_chapters|plan_chapter|plan_scenes|write_chapter|review|review_chapter|revise_chapter|finalize_chapter|export_project|persist_outputs|init_bible|update_bible|show_bible|show_status|show_outline|show_reference|stop",
+  "action": "chat|ask_user|research|propose_directions|worldbuilding|generate_outline|review_outline|revise_outline|compare_versions|plan_chapters|plan_chapter|plan_scenes|write_chapter|review|review_chapter|revise_chapter|finalize_chapter|export_project|persist_outputs|init_bible|update_bible|show_bible|show_status|show_outline|show_reference|stop",
   "requires_confirmation": true,
   "confidence": 0,
   "user_message": "给用户看的简短回复",
@@ -79,11 +79,11 @@ Director 硬约束：
 
 确认策略：
 - 直接执行且 requires_confirmation=false：chat、ask_user、show_status、show_reference、show_outline、show_bible、stop。
-- 需要确认且 requires_confirmation=true：research、worldbuild、propose_directions、generate_outline、review_outline、revise_outline、compare_versions、plan_chapters、plan_chapter、plan_scenes、write_chapter、review、review_chapter、revise_chapter、finalize_chapter、export_project、persist_outputs、init_bible、update_bible。
+- 需要确认且 requires_confirmation=true：research、worldbuilding、propose_directions、generate_outline、review_outline、revise_outline、compare_versions、plan_chapters、plan_chapter、plan_scenes、write_chapter、review、review_chapter、revise_chapter、finalize_chapter、export_project、persist_outputs、init_bible、update_bible。
 - 用户意图不清晰时 action=ask_user，requires_confirmation=false。
 
 如果无法输出 JSON，才使用以下旧字段格式兜底：
-ACTION: chat|ask_user|research|propose_directions|worldbuild|generate_outline|review_outline|revise_outline|compare_versions|plan_chapters|plan_chapter|plan_scenes|write_chapter|review|review_chapter|revise_chapter|finalize_chapter|export_project|persist_outline|persist_outputs|show_status|show_outline|show_reference|stop
+ACTION: chat|ask_user|research|propose_directions|worldbuilding|generate_outline|review_outline|revise_outline|compare_versions|plan_chapters|plan_chapter|plan_scenes|write_chapter|review|review_chapter|revise_chapter|finalize_chapter|export_project|persist_outline|persist_outputs|show_status|show_outline|show_reference|stop
 TARGET: outline|worldbuilding|chapter|character|style|project|unknown
 INTENT: create|revise|review|approve|reject|lock|variant|save|status|stop|web_research|answer
 MESSAGE: 给用户看的简短回复

@@ -12,7 +12,7 @@ from ai_novelist.prompts import load_prompt
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
 
-AgentTask = Literal["worldbuild", "plan_outline", "plan_chapters", "write_chapter", "review"]
+AgentTask = Literal["plan_outline", "plan_chapters", "write_chapter", "review"]
 ReviewFunc = Callable[[NovelState, AgentTask], str]
 ComposerReviewFunc = Callable[[NovelState], str]
 ProgressFunc = Callable[[str, str], None]
@@ -49,7 +49,10 @@ class ComposerSequentialGraph:
 
     def invoke(self, state: dict) -> dict:
         current = dict(state)
-        for task in ("worldbuild", "plan_outline", "plan_chapters", "write_chapter"):
+        current.update(run_worldbuilding_outline_stage(current, self.adapter, self.store))
+        if current.get("review_status") == "error":
+            return current
+        for task in ("plan_outline", "plan_chapters", "write_chapter"):
             current.update(run_agent_task(current, self.adapter, self.store, task))
             if current.get("review_status") == "error":
                 return current
@@ -81,7 +84,6 @@ class TaskSpec:
 
 
 TASKS: dict[AgentTask, TaskSpec] = {
-    "worldbuild": TaskSpec("world_builder", "worldbuilding", "世界观设定"),
     "plan_outline": TaskSpec("outline_planner", "outline", "总大纲"),
     "plan_chapters": TaskSpec("chapter_planner", "chapter_plan", "章节细纲"),
     "write_chapter": TaskSpec("chapter_writer", "chapter_draft", "章节正文"),
@@ -129,7 +131,7 @@ def build_composer_graph(
         return ComposerSequentialGraph(adapter, store, review_func)
 
     graph = StateGraph(dict)
-    graph.add_node("worldbuild", lambda data: run_agent_task(data, adapter, store, "worldbuild"))
+    graph.add_node("worldbuilding", lambda data: run_worldbuilding_outline_stage(data, adapter, store))
     graph.add_node("plan_outline", lambda data: run_agent_task(data, adapter, store, "plan_outline"))
     graph.add_node("plan_chapters", lambda data: run_agent_task(data, adapter, store, "plan_chapters"))
     graph.add_node("write_chapter", lambda data: run_agent_task(data, adapter, store, "write_chapter"))
@@ -138,8 +140,8 @@ def build_composer_graph(
     graph.add_node("human_review", lambda data: human_review_compose(data, review_func))
     graph.add_node("persist_outputs", lambda data: persist_outputs(data, store))
 
-    graph.set_entry_point("worldbuild")
-    graph.add_edge("worldbuild", "plan_outline")
+    graph.set_entry_point("worldbuilding")
+    graph.add_edge("worldbuilding", "plan_outline")
     graph.add_edge("plan_outline", "plan_chapters")
     graph.add_edge("plan_chapters", "write_chapter")
     graph.add_edge("write_chapter", "editor_review")
@@ -167,6 +169,27 @@ def route_after_editor_review(data: dict) -> str:
     if state.next_action == "human_review":
         return "human_review"
     return "end"
+
+
+def run_worldbuilding_outline_stage(data: dict, adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc = noop_progress) -> dict:
+    state = NovelState.from_dict(data)
+    from ai_novelist.graph_outline import run_outline_stage_node
+
+    state.active_workflow = "outline"
+    state.outline_stage = "worldbuilding"  # type: ignore[assignment]
+    state.outline_stage_status = "collecting"
+    state.current_stage = "worldbuilding"
+    state.active_task = "worldbuilding_outline"
+    state.director_action = "worldbuilding"
+    progress("Worldbuilding", "正在生成世界观设定...")
+    result = NovelState.from_dict(run_outline_stage_node(state.to_dict(), adapter, store, progress))
+    result.director_action = "worldbuilding"
+    result.active_task = "worldbuilding_outline"
+    if result.error:
+        result.director_message = f"世界观阶段执行失败：{result.error}"
+    append_message(result, "assistant", result.director_message)
+    store.save_state(result)
+    return result.to_dict()
 
 
 def run_agent_task(data: dict, adapter: AgentAdapter, store: LocalStore, task: AgentTask, progress: ProgressFunc = noop_progress) -> dict:
@@ -272,9 +295,7 @@ def persist_task_output(data: dict, store: LocalStore, task: AgentTask) -> dict:
         store.save_state(state)
         return state.to_dict()
 
-    if task == "worldbuild":
-        store.save_worldbuilding(state)
-    elif task == "plan_outline":
+    if task == "plan_outline":
         store.save_outline(state)
     elif task == "plan_chapters":
         store.save_chapter_plan(state)
@@ -355,7 +376,7 @@ DIRECTOR_ACTIONS = {
     "chat",
     "ask_user",
     "research",
-    "worldbuild",
+    "worldbuilding",
     "propose_directions",
     "generate_outline",
     "review_outline",
@@ -382,7 +403,6 @@ DIRECTOR_ACTIONS = {
 }
 
 AGENT_ACTION_TO_TASK: dict[str, AgentTask] = {
-    "worldbuild": "worldbuild",
     "plan_outline": "plan_outline",
     "plan_chapters": "plan_chapters",
     "write_chapter": "write_chapter",
@@ -493,7 +513,7 @@ def director_node(data: dict, adapter: AgentAdapter, store: LocalStore, progress
 
 def route_after_director(data: dict) -> str:
     action = data.get("director_action", "")
-    if action in AGENT_ACTION_TO_TASK or action in {"revise_chapter", "plan_chapter", "plan_scenes"} or action in (OUTLINE_WORKFLOW_ACTIONS - {"show_outline"}):
+    if action == "worldbuilding" or action in AGENT_ACTION_TO_TASK or action in {"revise_chapter", "plan_chapter", "plan_scenes"} or action in (OUTLINE_WORKFLOW_ACTIONS - {"show_outline"}):
         return "run_selected_agent"
     if action == "persist_outputs":
         return "persist_outputs"
@@ -509,6 +529,8 @@ def route_after_director(data: dict) -> str:
 def run_selected_agent(data: dict, adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc = noop_progress) -> dict:
     state = NovelState.from_dict(data)
     action = state.director_action
+    if action == "worldbuilding":
+        return run_worldbuilding_outline_stage(state.to_dict(), adapter, store, progress)
     if action in (OUTLINE_WORKFLOW_ACTIONS - {"show_outline"}):
         return run_selected_outline_agent(state, adapter, store, action, progress)
     if action == "plan_chapter":
@@ -696,6 +718,8 @@ def persist_available_outputs(data: dict, store: LocalStore) -> dict:
     if state.editor_notes.strip():
         saved.append(str(store.save_editor_notes(state)))
     state.review_status = "approved" if saved else "draft"
+    state.director_action = "persist_outputs"
+    state.active_task = "persist_outputs"
     if saved and state.active_workflow == "outline" and state.outline.strip():
         state.active_workflow = ""
         state.current_stage = "chapter_plan"
@@ -815,8 +839,6 @@ def is_outline_stage_confirmation_text(text: str) -> bool:
 
 
 def task_progress_message(task: AgentTask) -> tuple[str, str]:
-    if task == "worldbuild":
-        return "WorldBuilder", "正在设计世界观..."
     if task == "plan_outline":
         return "OutlinePlanner", "正在生成大纲草案..."
     if task == "plan_chapters":
@@ -943,8 +965,6 @@ def append_message(state: NovelState, role: str, content: str) -> None:
 
 
 def summarize_agent_result(state: NovelState, task: AgentTask, revised: bool = False) -> str:
-    if task == "worldbuild":
-        return "世界观 Agent 已完成设定草案，包含世界规则、冲突来源和可持续写作素材。"
     if task == "plan_outline":
         return "大纲 Agent 已完成总大纲草案，包含主线、人物弧光、章节钩子和伏笔回收。"
     if task == "plan_chapters":

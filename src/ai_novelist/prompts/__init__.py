@@ -13,7 +13,6 @@ AUTHOR_CRAFT_POLICY_PROMPTS = {
     "director",
     "direction_proposer",
     "outline_planner",
-    "world_builder",
     "chapter_goal_agent",
     "chapter_conflict_agent",
     "chapter_hook_agent",

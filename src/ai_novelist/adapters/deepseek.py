@@ -53,7 +53,6 @@ THINKING_ENABLED_MEDIUM_AGENTS = frozenset(
         "outline_stage_synthesizer",
         "outline_planner",
         "outline_reviser",
-        "world_builder",
         "chapter_card_synthesizer",
         "scene_synthesizer",
         "chapter_writer",

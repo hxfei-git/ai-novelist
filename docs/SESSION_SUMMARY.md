@@ -31,7 +31,7 @@
 - `outline`：交互式大纲共创流程，支持方向、生成、审稿、修订、版本比较、查看、锁定和保存。
 - Director 交互转译增强：所有用户输入仍先进入 Director；Director prompt 现在包含最近编辑意见和待确认项，并能把“答案 + 接收/接受/同意”的多项确认合并成下游可执行约束。新一轮 turn 会清掉上一次残留的 `error`，避免历史超时在后续成功回复里反复出现；`quit/exit/退出/stop` 现在会在进入决策前直接结束当前 turn，避免被 outline 阶段继续消费。最近补了一条更泛化的引导式问句识别，像“目前我该做什么 / 接下来怎么办 / 下一步呢” 会优先引导用户继续对话，而不是硬推大纲阶段。
 - `compose`：一次性完整多 Agent 创作图。
-- 单步 Agent 命令：`worldbuild`、`plan-outline`、`plan-chapters`、`write-chapter`、`review`。
+- 单步 Agent 命令：`plan-outline`、`plan-chapters`、`write-chapter`、`review`。`worldbuilding` 已并入 outline 的 `worldbuilding` 阶段。
 - Phase 6+7：新增章节卡与场景卡管线，DirectorService 支持 `plan_chapter` 和 `plan_scenes`，旧 `plan-chapters` CLI 保持兼容。
 
 ### 世界观大纲框架修复：已完成
@@ -142,7 +142,7 @@ detect_research_need
 director
   |-- ask_user -> END
   |-- propose_directions -> human_feedback -> END
-  |-- worldbuild -> generate_outline -> review_outline -> human_feedback -> END
+  |-- worldbuilding -> generate_outline -> review_outline -> human_feedback -> END
   |-- generate_outline -> review_outline -> human_feedback -> END
   |-- review_outline -> human_feedback -> END
   |-- revise_outline -> compare_versions -> review_outline -> human_feedback -> END
@@ -187,7 +187,7 @@ load_chapter_card
 ```text
 director
   |-- ask_user -> END
-  |-- worldbuild / plan_chapters / write_chapter / review / revise_chapter -> run_selected_agent -> END
+  |-- worldbuilding / plan_chapters / write_chapter / review / revise_chapter -> run_selected_agent -> END
   |-- propose_directions / generate_outline / review_outline / revise_outline / compare_versions -> run_selected_outline_agent -> END
   |-- show_outline / show_status / persist_outputs -> END
   `-- stop -> END
@@ -196,7 +196,7 @@ director
 ### Compose 图
 
 ```text
-worldbuild
+worldbuilding
   -> plan_outline
   -> plan_chapters
   -> write_chapter
@@ -353,7 +353,7 @@ worldbuild
 - V3 证据质量与 Prompt 强化：在 `retrieval_context_synthesizer.md`、规则 fallback 和 `reference_brief` 中明确区分本地原文证据、网络摘要和 mock 测试资料；本地 chunk 位置应进入输出。
 - V4 索引缓存：为本地语料增加基于 `relative_path + mtime_ns + size + chunk 配置` 的缓存，首版优先进程内缓存，必要时再落盘。
 - V5 检索质量增强：整理 BM25 近似策略，增加标题/文件名/章节名权重，支持 chunk 参数配置，并评估是否需要向量检索。
-- V6 任务级深度检索：抽象 `RetrievalService`，让 writer/worldbuild/review 可按任务补充检索，但必须限制查询数和注入规模，保持未配置本地语料时行为不变。
+- V6 任务级深度检索：抽象 `RetrievalService`，让 writer/worldbuilding/review 可按任务补充检索，但必须限制查询数和注入规模，保持未配置本地语料时行为不变。
 
 推荐推进顺序：先做 V3-V4，保证证据可靠性和性能；再抽 service 层；最后根据实际语料规模决定 V5/V6 和飞书入口的先后。
 
@@ -532,7 +532,7 @@ Smoke 验证：`.venv/bin/python tests/smoke_phase2_chat.py`，结果 `phase2 ch
 
 ## 21. 本轮修复：确定世界观仍显示方向定位
 
-- 问题：某些对话会把世界观生成成普通 `worldbuild` 产物，写入 `state.worldbuilding`，但没有同步 `outline_stage=worldbuilding` 和阶段产物，导致用户说“确定世界观”时仍被提示处于方向定位。
+- 问题：某些对话会把世界观生成成普通 `worldbuilding` 产物，写入 `state.worldbuilding`，但没有同步 `outline_stage=worldbuilding` 和阶段产物，导致用户说“确定世界观”时仍被提示处于方向定位。
 - 修复：新增确定性阶段确认逻辑；“确定世界观/确认世界观/锁定世界观”等会按 `worldbuilding` 阶段确认执行。
 - 兼容：确认世界观时若缺少 `outline_stage_artifacts["worldbuilding"]`，自动由已有 `state.worldbuilding` 补建并落盘；同时锁定此前已有阶段。
 - 验证：`.venv/bin/python -m pytest tests/test_director_service.py tests/test_outline_collaboration.py`，结果 `23 passed`。
@@ -2058,7 +2058,7 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
   - guard 统一治理（越权/无来源 canon/公式句/抽象机制语言）。
   - 确认问题过滤，避免模型自造选项菜单。
 - 修复 Director 锁阶段 bug：`persist_outputs` 不再先改 `outline_stage`，始终锁当前阶段后推进。
-- `world_builder.md` 改为题材自适应结构与分类质量规则；去除旧“禁止词表中心”策略。
+- 旧 standalone `world_builder.md` 路线已移除；worldbuilding 只保留在 outline 阶段。
 - mock 输出同步到七阶段与新世界观结构，移除旧 worldbuilding 模板与公式化绝对因果句。
 
 测试结果：
@@ -2112,3 +2112,24 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
     .venv/bin/python -m pytest tests/test_director_service.py
     # 33 passed
+
+
+## 96. 本轮收尾：移除旧 worldbuild 对外动作残留
+
+- graph_outline.py 的可路由动作集合移除旧 `worldbuild`，统一使用 `worldbuilding` 进入 outline 世界观阶段。
+- README 和 writer chat 回归测试命名同步为 `worldbuilding`。
+- 旧 standalone `world_builder.md` prompt 已保持删除状态，prompt loader 回归测试继续断言该 prompt 不存在。
+
+验证：
+
+    .venv/bin/python -m pytest tests/test_prompt_loader.py tests/test_graph_writer.py tests/smoke_phase2.py tests/smoke_phase2_chat.py
+    # 32 passed（pytest 收集测试；两个 smoke 脚本另行执行）
+
+    .venv/bin/python tests/smoke_phase2.py
+    # phase2 smoke ok
+
+    .venv/bin/python tests/smoke_phase2_chat.py
+    # phase2 chat smoke ok
+
+    .venv/bin/python -m pytest
+    # 284 passed

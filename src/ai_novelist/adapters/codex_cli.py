@@ -132,8 +132,6 @@ class CodexCLIAdapter(AgentAdapter):
             return self._mock_outline_editor(revised="修订要求：暂无" not in prompt)
         if "AGENT: version_comparator" in prompt:
             return self._mock_version_comparison()
-        if "AGENT: world_builder" in prompt:
-            return self._mock_worldbuilding()
         if "AGENT: outline_planner" in prompt:
             return self._mock_outline_plan()
         if "AGENT: chapter_pacing_agent" in prompt:
@@ -685,7 +683,7 @@ class CodexCLIAdapter(AgentAdapter):
         if any(word in request for word in ("章节卡", "规划第", "章规划")) and "章" in request:
             return response("plan_chapter", "chapter_card", "create", f"我会为第 {chapter or 1} 章生成章节卡。", chapter_value=chapter or "1")
         if any(word in request for word in ("世界观", "设定", "背景")):
-            return response("worldbuild", "worldbuilding", "create", "我会先调度世界观 Agent，建立可持续写作的规则、冲突和素材。")
+            return response("worldbuilding", "worldbuilding", "create", "我会先进入 outline 的 worldbuilding 阶段，建立可持续写作的规则、冲突和素材。")
         if any(word in request for word in ("细纲", "章节规划", "章节计划")):
             return response("plan_chapters", "outline", "create", "我会调度章节细纲 Agent，把大纲拆成可执行章节。")
         if any(word in request for word in ("导出小说", "导出全文", "导出手稿", "export")):
@@ -774,23 +772,6 @@ class CodexCLIAdapter(AgentAdapter):
             "## 风格变化\n- 新版更黑暗、更悬疑。\n\n"
             "## 风险变化\n- 需更早保留林澈善意，避免读者反感。\n\n"
             "## 是否建议采用新版\n- 建议采用新版，但保留 locked_constraints。"
-        )
-
-    def _mock_worldbuilding(self) -> str:
-        return (
-            "# 世界观设定\n\n"
-            "## 世界背景\n月球城市银湾建在第谷环形山边缘，穹顶灯带模拟地球昼夜，地下三层保存着城市居民的授权记忆备份。城市表面繁荣，底层却存在被删除身份的灰籍居民。\n\n"
-            "## 世界规则\n"
-            "1. 任何记忆备份都必须留下审计编号。\n"
-            "2. 私人创作不允许被公共预测系统索引。\n"
-            "3. 穹顶事故会触发全城记忆锁定，期间无人能修改备份。\n"
-            "4. 纸质文本无法被城市系统即时追踪，因此成为地下写作者联盟的通信媒介。\n"
-            "5. 被删除的记忆不会消失，只会转存到月背冷库。\n\n"
-            "## 冲突来源\n档案局维护秩序，记忆公司出售安全感，地下写作者联盟追求自我叙事权。主角林澈夹在三方之间。\n\n"
-            "## 禁忌与代价\n私自读取月背冷库属于重罪；公开未审计记忆会让相关人员失去合法身份。\n\n"
-            "## 人物压力\n林澈既想找回自己的过去，又害怕发现自己是篡改事件的执行者。\n\n"
-            "## 可持续写作素材\n穹顶维修站、月背冷库、纸质手稿、失效审计编号、灰籍集市、记忆公司听证会。\n\n"
-            "## 自检\n规则能制造案件，禁忌能制造代价，地下素材能支撑连续追查。"
         )
 
     def _mock_outline_plan(self) -> str:

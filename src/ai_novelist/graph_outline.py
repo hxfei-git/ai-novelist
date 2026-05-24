@@ -40,7 +40,7 @@ class CompiledGraph(Protocol):
 OUTLINE_ACTIONS = {
     "ask_user",
     "propose_directions",
-    "worldbuild",
+    "worldbuilding",
     "generate_outline",
     "review_outline",
     "revise_outline",
@@ -213,19 +213,6 @@ def propose_directions_node(data: dict, adapter: AgentAdapter, store: LocalStore
     state.active_artifact = "outline"
     state.director_message = "已生成 3 个创作方向。你可以选择一个方向，或继续提出修改。"
     state.next_action = "wait_feedback"
-    store.save_state(state)
-    return state.to_dict()
-
-
-def outline_worldbuild_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
-    state = NovelState.from_dict(data)
-    try:
-        state.worldbuilding = adapter.complete(build_outline_prompt(state, "world_builder"), store.project_dir(state.project_id))
-    except AgentAdapterError as exc:
-        state.error = str(exc)
-        state.review_status = "error"
-    else:
-        state.director_message = "已补充世界观，接下来生成大纲。"
     store.save_state(state)
     return state.to_dict()
 
@@ -767,8 +754,8 @@ def detect_stage_reference(text: str) -> str | None:
 
 
 def stage_action_from_director(action: str, user_text: str, state: NovelState) -> str:
-    if action in {"propose_directions", "worldbuild", "generate_outline", "review_outline", "revise_outline", "compare_versions"}:
-        if action == "worldbuild":
+    if action in {"propose_directions", "worldbuilding", "generate_outline", "review_outline", "revise_outline", "compare_versions"}:
+        if action == "worldbuilding":
             state.outline_stage = "worldbuilding"
         elif action == "review_outline":
             state.outline_stage = "review_lock"

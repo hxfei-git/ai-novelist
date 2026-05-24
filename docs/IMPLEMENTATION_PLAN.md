@@ -61,7 +61,7 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
   |-- feishu: 飞书长连接单聊入口，复用 DirectorService
   |-- outline: 保留为大纲共创调试/兼容入口，共享同一 state
   |-- compose: 一次性多 Agent 创作
-  |-- worldbuild / plan-outline / plan-chapters / write-chapter / review: 单 Agent 兼容命令
+  |-- plan-outline / plan-chapters / write-chapter / review: 单 Agent 兼容命令；worldbuilding 由 outline 阶段处理
   |-- init
   `-- show
   |
@@ -96,7 +96,7 @@ LangGraph 编排层
   |
   |-- graph_outline.py
   |     director
-  |       -> ask_user / propose_directions / worldbuild / generate_outline
+  |       -> ask_user / propose_directions / worldbuilding / generate_outline
   |       -> review_outline / revise_outline / compare_versions
   |       -> show_outline / show_status / persist_outline / END
   |
@@ -122,7 +122,7 @@ Prompt 模板层
   |-- outline_editor.md
   |-- outline_reviser.md
   |-- version_comparator.md
-  |-- world_builder.md
+  |-- worldbuilding stage（无独立 world_builder prompt）
   |-- chapter_planner.md
   |-- chapter_writer.md
   `-- editor.md
@@ -230,7 +230,7 @@ START
   -> route_after_outline_director
       -> ask_user -> END
       -> propose_directions -> human_feedback -> END
-      -> worldbuild -> generate_outline -> review_outline -> human_feedback -> END
+      -> worldbuilding -> generate_outline -> review_outline -> human_feedback -> END
       -> generate_outline -> review_outline -> human_feedback -> END
       -> review_outline -> human_feedback -> END
       -> revise_outline -> compare_versions -> review_outline -> human_feedback -> END
@@ -260,7 +260,7 @@ outline prompt 已注入 retrieval/research 上下文：
 - `canon_facts`
 - `research_uncertainties`
 
-writer prompt（worldbuild、plan_outline、plan_chapters、write_chapter、review）也会注入通用检索上下文，复用已有 `/research` 搜索结果。
+writer prompt（plan_outline、plan_chapters、write_chapter、review）也会注入通用检索上下文，复用已有 `/research` 搜索结果。
 
 如果存在原作不确定点，prompt 要求先确认，不得擅自补完原作设定。
 
@@ -269,7 +269,7 @@ writer prompt（worldbuild、plan_outline、plan_chapters、write_chapter、revi
 ## 6. Compose 图
 
 ```text
-worldbuild
+worldbuilding
   -> plan_outline
   -> plan_chapters
   -> write_chapter
@@ -465,7 +465,7 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 - 仍是本地 CLI，不是长期运行服务。
 - research 未配置本地语料时默认只有 mock 搜索；真实搜索需要配置搜索 provider 和 API Key。CLI 使用 `--search-provider exa` 时会读取 `EXA_API_KEY`，也可用通用 `AI_NOVELIST_SEARCH_API_KEY`。
 - 本地 RAG 首版是轻量关键词/BM25 近似检索，没有向量检索、索引缓存、文件变更监听或任务级深度检索。
-- 当前不会基于大纲自动搜索，也不会为每个 worldbuild/write/review 任务自动搜索；只消费已有检索上下文。
+- 当前不会基于大纲自动搜索，也不会为每个 worldbuilding/write/review 任务自动搜索；只消费已有检索上下文。
 - chat/outline 的多轮共创由 CLI 循环驱动，不是后台会话服务。
 - 真实模式每个 Agent 独立调用一次模型，没有流式 token 展示。
 - `persist_outputs` 只保存当前已有产物，不会自动补齐缺失产物。
@@ -539,7 +539,7 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 计划：
 
 - 先抽象 `RetrievalService`，把 CLI 中 search backend 构造、查询生成、结果格式化和 graph 调用解耦。
-- 在 writer 任务中按任务类型生成检索 query：worldbuild 查设定，plan_chapters 查剧情线，write_chapter 查角色/地点/前文，review 查连续性。
+- 在 writer 任务中按任务类型生成检索 query：worldbuilding 查设定，plan_chapters 查剧情线，write_chapter 查角色/地点/前文，review 查连续性。
 - 避免每个 Agent 自动无界补搜；每个任务设定最大查询数和最大注入 token。
 - 将任务级检索结果写入 state 的通用 retrieval 字段或新增任务级临时字段，具体实现前再定 schema。
 - 增加测试：writer prompt 能拿到任务相关本地片段，且未配置本地语料时行为不变。
@@ -987,7 +987,7 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 当前默认策略：
 
 - thinking disabled medium：`director`、`research_intent`、`outline_stage_role`、`direction_proposer`、`version_comparator`、`chapter_summarizer`、`dialogue_enhancer`、`atmosphere_enhancer`、`hook_enhancer`、`style_normalizer`、`revision_self_check`、`outline_editor`、`chapter_goal_agent`、`chapter_conflict_agent`、`chapter_hook_agent`、`scene_breakdown_agent`、`scene_conflict_check_agent`、`style_editor`、`simulated_reader`、`bible_update_extractor`。
-- thinking enabled medium：`retrieval_context_synthesizer`、`outline_stage_synthesizer`、`outline_planner`、`outline_reviser`、`world_builder`、`chapter_card_synthesizer`、`scene_synthesizer`、`chapter_writer`、`continuity_editor`、`structure_editor`、`character_arc_editor`、`review_synthesizer`、`revision_planner`、`targeted_reviser`、`bible_conflict_checker`、`bible_update_synthesizer`、`final_bible_update_extractor`。
+- thinking enabled medium：`retrieval_context_synthesizer`、`outline_stage_synthesizer`、`outline_planner`、`outline_reviser`、`worldbuilding_outline_stage`、`chapter_card_synthesizer`、`scene_synthesizer`、`chapter_writer`、`continuity_editor`、`structure_editor`、`character_arc_editor`、`review_synthesizer`、`revision_planner`、`targeted_reviser`、`bible_conflict_checker`、`bible_update_synthesizer`、`final_bible_update_extractor`。
 - thinking enabled high：暂无默认 Agent。
 
 验证：
@@ -2329,3 +2329,23 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
     .venv/bin/python -m pytest tests/test_director_service.py
     # 33 passed
+
+
+## 92. 旧 worldbuild 路线收尾
+
+目标：彻底去掉旧 standalone worldbuild 路线的对外动作残留，只保留 outline 的 `worldbuilding` 阶段。
+
+已完成：
+
+- Director 可见动作和 mock 输出统一为 `worldbuilding`。
+- outline 路由动作集合不再接受旧 `worldbuild` 主动作。
+- README 与 writer chat 测试名称同步为 `worldbuilding`。
+- `prompts/world_builder.md` 保持删除，相关 prompt loader 测试断言缺失。
+
+验证：
+
+    rg -n "worldbuild\b|world_builder|AGENT: world_builder|worldbuildinging" src README.md -S
+    # 无命中
+
+    .venv/bin/python -m pytest
+    # 284 passed

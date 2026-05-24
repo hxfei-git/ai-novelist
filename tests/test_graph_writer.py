@@ -1,26 +1,22 @@
 from ai_novelist.adapters.codex_cli import CodexCLIAdapter, CodexCLIError
 from ai_novelist.cli import print_chat_turn_result, select_chat_graph, should_use_outline_graph
 from ai_novelist.graph_outline import build_outline_collaboration_graph
-from ai_novelist.graph_writer import build_chat_graph, build_composer_graph, build_task_prompt, build_writer_graph, parse_director_output, parse_editor_review
+from ai_novelist.graph_writer import build_chat_graph, build_composer_graph, build_task_prompt, build_writer_graph, parse_director_output, parse_editor_review, run_worldbuilding_outline_stage
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
 
 
-def test_writer_graph_worldbuild_approves_and_persists(tmp_path):
+def test_worldbuilding_outline_stage_persists_full_framework(tmp_path):
     store = LocalStore(tmp_path)
     state = store.create_project("Demo", "demo")
     state.idea = "失忆工程师"
 
-    graph = build_writer_graph(
-        CodexCLIAdapter(mock=True),
-        store,
-        "worldbuild",
-        review_func=lambda _state, _task: "approve",
-    )
-    result = graph.invoke(state.to_dict())
+    result = run_worldbuilding_outline_stage(state.to_dict(), CodexCLIAdapter(mock=True), store)
 
-    assert result["review_status"] == "approved"
-    assert "月球城市" in result["worldbuilding"]
+    assert result["review_status"] == "draft"
+    assert result["outline_stage"] == "worldbuilding"
+    assert "## 一、世界核心设定" in result["worldbuilding"]
+    assert "## 三十三、结局后的世界格局" in result["worldbuilding"]
     assert store.worldbuilding_path("demo").exists()
 
 
@@ -147,7 +143,7 @@ def test_parse_director_output_extracts_action_message_and_chapter():
     assert chapter == 1
 
 
-def test_chat_graph_routes_worldbuild_and_persist(tmp_path):
+def test_chat_graph_routes_worldbuilding_and_persist(tmp_path):
     store = LocalStore(tmp_path)
     state = store.create_project("Demo", "demo")
     adapter = CodexCLIAdapter(mock=True)
@@ -157,8 +153,9 @@ def test_chat_graph_routes_worldbuild_and_persist(tmp_path):
     state.messages.append({"role": "user", "content": state.user_request})
     result = graph.invoke(state.to_dict())
 
-    assert result["director_action"] == "worldbuild"
-    assert "月球城市" in result["worldbuilding"]
+    assert result["director_action"] == "worldbuilding"
+    assert "## 一、世界核心设定" in result["worldbuilding"]
+    assert "## 三十三、结局后的世界格局" in result["worldbuilding"]
 
     result["user_request"] = "保存当前结果"
     result["messages"].append({"role": "user", "content": "保存当前结果"})
@@ -172,10 +169,10 @@ class DirectorThenFailingAgentAdapter:
     def __init__(self):
         self.calls = 0
 
-    def complete(self, prompt, workspace):
+    def complete(self, prompt, workspace, **kwargs):
         self.calls += 1
         if self.calls == 1:
-            return "ACTION: worldbuild\nMESSAGE: 我先调度世界观 Agent。\nCHAPTER:"
+            return "ACTION: worldbuilding\nMESSAGE: 我先调度世界观 Agent。\nCHAPTER:"
         raise CodexCLIError("Codex CLI timed out after 30s")
 
 
@@ -190,7 +187,7 @@ def test_chat_graph_reports_selected_agent_error(tmp_path):
 
     assert result["review_status"] == "error"
     assert result["error"] == "Codex CLI timed out after 30s"
-    assert "世界观设定 Agent 执行失败" in result["director_message"]
+    assert "世界观阶段执行失败" in result["director_message"]
     assert "已完成" not in result["director_message"]
 
 
@@ -425,7 +422,7 @@ def test_writer_prompt_injects_retrieval_context_for_all_writer_tasks():
     state.retrieval_context = "# 检索上下文\n- 谨慎成长"
     state.retrieval_sources = [{"title": "来源", "url": "https://example.test/source", "source": "test"}]
 
-    for prompt_name in ["world_builder", "outline_planner", "chapter_planner", "chapter_writer", "editor"]:
+    for prompt_name in ["outline_planner", "chapter_planner", "chapter_writer", "editor"]:
         prompt = build_task_prompt(state, prompt_name)
         assert "## 检索上下文" in prompt
         assert "查询：苟在初圣" in prompt

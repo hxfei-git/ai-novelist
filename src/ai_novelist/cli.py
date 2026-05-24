@@ -75,8 +75,6 @@ def main(argv: list[str] | None = None) -> int:
             return run_craft_brief_command(args, store, settings)
         if args.command == "craft-similarity-check":
             return run_craft_similarity_check_command(args, store, settings)
-        if args.command == "worldbuild":
-            return run_writer_command(args, store, settings, "worldbuild")
         if args.command == "plan-outline":
             return run_writer_command(args, store, settings, "plan_outline")
         if args.command == "plan-chapters":
@@ -190,10 +188,6 @@ def build_parser() -> argparse.ArgumentParser:
     similarity_parser.add_argument("--chapter", type=int, required=True, help="章节编号")
     similarity_parser.add_argument("--draft", required=True, help="要检查的草稿路径")
     add_author_craft_flags(similarity_parser)
-
-    worldbuild_parser = subparsers.add_parser("worldbuild", help="生成世界观设定")
-    worldbuild_parser.add_argument("--project", required=True, help="项目 ID")
-    add_generation_flags(worldbuild_parser)
 
     outline_plan_parser = subparsers.add_parser("plan-outline", help="生成或重整总大纲")
     outline_plan_parser.add_argument("--project", required=True, help="项目 ID")
@@ -978,9 +972,7 @@ def make_compose_review_func(auto_approve: bool):
 
 
 def print_persisted_path(task: AgentTask, state: NovelState, store: LocalStore) -> None:
-    if task == "worldbuild":
-        print(f"世界观已保存：{store.worldbuilding_path(state.project_id)}")
-    elif task == "plan_outline":
+    if task == "plan_outline":
         print(f"总大纲已保存：{store.outline_path(state.project_id)}")
     elif task == "plan_chapters":
         print(f"章节细纲已保存：{store.chapter_plan_path(state.project_id)}")

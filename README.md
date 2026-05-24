@@ -84,7 +84,7 @@ DeepSeek 会按内部 Agent 自动启停 thinking，不需要新增 CLI 参数�
 Director 可路由动作：
 
 - `ask_user`：追问缺失信息。
-- `worldbuild`：调度世界观 Agent。
+- `worldbuilding`：进入 outline 的 `worldbuilding` 阶段。
 - `generate_outline` / `revise_outline` / `review_outline`：调度交互式大纲共创节点。
 - `plan_chapter` / `plan_scenes`：生成章节卡和场景卡。
 - `write_chapter`：自动补齐章节卡/场景卡并生成章节草稿。
@@ -254,7 +254,7 @@ export AI_NOVELIST_CRAFT_MODE=assist
 工作流：
 
 ```text
-worldbuild -> plan_outline -> plan_chapters -> write_chapter -> editor_review
+worldbuilding -> plan_outline -> plan_chapters -> write_chapter -> editor_review
   -> pass: human_review -> persist_outputs
   -> revise 且未超过 max_revisions: rewrite_chapter -> editor_review
   -> stop / revise 超限: END
@@ -378,7 +378,6 @@ export AI_NOVELIST_MAX_PARALLEL_AGENTS=3
 ```bash
 .venv/bin/ai-novelist init --title demo
 .venv/bin/ai-novelist outline --project demo --idea "小说创意" --mock --auto-approve
-.venv/bin/ai-novelist worldbuild --project demo --mock --auto-approve
 .venv/bin/ai-novelist plan-outline --project demo --mock --auto-approve
 .venv/bin/ai-novelist plan-chapters --project demo --mock --auto-approve
 .venv/bin/ai-novelist write-chapter --project demo --chapter 1 --mock --auto-approve

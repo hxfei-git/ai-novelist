@@ -32,7 +32,7 @@ Channel = Literal["cli", "feishu", "test"] | str
 
 MUTATING_ACTIONS = {
     "research",
-    "worldbuild",
+    "worldbuilding",
     "propose_directions",
     "generate_outline",
     "review_outline",
@@ -89,6 +89,7 @@ class DirectorDecision:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "DirectorDecision":
         action = str(data.get("action", "ask_user")).strip().lower()
+        should_advance_outline_stage = action == "advance_current_stage"
         if action == "persist_outline":
             action = "persist_outputs"
         if action == "plan_outline":
@@ -108,6 +109,9 @@ class DirectorDecision:
         if action not in DIRECTOR_ACTIONS:
             action = "ask_user"
         task_args = data.get("task_args") if isinstance(data.get("task_args"), dict) else {}
+        if should_advance_outline_stage:
+            task_args = dict(task_args)
+            task_args["advance_outline_stage"] = True
         chapter = normalize_chapter(data.get("chapter") or task_args.get("chapter"))
         return cls(
             action=action,
@@ -260,7 +264,7 @@ class DirectorService:
         if decision.action == "research":
             result_state = self._run_research(state)
         elif decision.action == "persist_outputs":
-            if state.active_workflow == "outline" and state.outline_stage != "done" and not state.outline.strip():
+            if state.active_workflow == "outline" and state.outline_stage != "done" and not state.outline.strip() and decision.task_args.get("advance_outline_stage") or decision.task_args.get("stage"):
                 from ai_novelist.graph_outline import advance_outline_stage_node
 
                 result_state = NovelState.from_dict(advance_outline_stage_node(state.to_dict(), self.adapter, self.store, self.progress or noop_progress))
@@ -1074,8 +1078,17 @@ def delegates_outline_stage_decision(text: str) -> bool:
     return any(marker in text for marker in markers) and wants_advance
 
 
+def looks_like_persist_outputs_request(text: str) -> bool:
+    stripped = text.strip()
+    lowered = stripped.lower()
+    exact = {"保存", "保存当前结果", "保存当前产物", "落盘", "persist outputs", "save outputs"}
+    if lowered in exact:
+        return True
+    return any(marker in stripped for marker in ("保存当前", "落盘当前", "写入文件", "保存结果", "保存产物"))
+
+
 def answers_pending_outline_questions(text: str) -> bool:
-    if asks_outline_next_step(text):
+    if asks_outline_next_step(text) or looks_like_persist_outputs_request(text):
         return False
     if is_simple_outline_stage_confirmation(text) or delegates_outline_stage_decision(text):
         return False
@@ -1090,7 +1103,7 @@ def looks_like_plain_pending_answer(text: str) -> bool:
     stripped = text.strip()
     if not stripped:
         return False
-    if asks_outline_next_step(stripped):
+    if asks_outline_next_step(stripped) or looks_like_persist_outputs_request(stripped):
         return False
     if is_simple_outline_stage_confirmation(stripped) or delegates_outline_stage_decision(stripped):
         return False
@@ -1467,7 +1480,7 @@ def is_stop_request(text: str) -> bool:
 
 OUTLINE_STAGE_EDIT_ACTIONS = {
     "propose_directions",
-    "worldbuild",
+    "worldbuilding",
     "generate_outline",
     "review_outline",
     "revise_outline",

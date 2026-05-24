@@ -24,27 +24,17 @@ def main() -> int:
         graph = build_chat_graph(CodexCLIAdapter(mock=True), store)
 
         world = run_turn(graph, store, state, "帮我先设计世界观：月球城市失忆工程师的悬疑科幻")
-        assert world["director_action"] == "worldbuild"
-        assert world["worldbuilding"]
-
-        state = store.load_state("demo")
-        outline = run_turn(graph, store, state, "生成大纲")
-        assert outline["director_action"] == "run_outline_stage"
-        assert outline["outline_stage"] == "direction"
-        assert outline["outline_stage_status"] == "options_ready"
-        assert not outline["outline"]
-        assert not store.outline_path("demo").exists()
+        assert world["director_action"] == "worldbuilding"
+        assert world["outline_stage"] == "worldbuilding"
+        assert world["outline_stage_status"] == "options_ready"
+        assert "## 一、世界核心设定" in world["worldbuilding"]
+        assert "## 三十三、结局后的世界格局" in world["worldbuilding"]
 
         state = store.load_state("demo")
         advanced = run_turn(graph, store, state, "确认进入下一阶段")
-        assert advanced["outline_stage"] == "concept"
-        assert "concept" in advanced["outline_stage_artifacts"]
-        assert not store.outline_path("demo").exists()
-
-        state = store.load_state("demo")
-        advanced = run_turn(graph, store, state, "确认进入下一阶段")
-        assert advanced["outline_stage"] == "worldbuilding"
-        assert "worldbuilding" in advanced["outline_stage_artifacts"]
+        assert advanced["outline_stage"] == "characters"
+        assert advanced["outline_stage_artifacts"]["worldbuilding"]["status"] == "locked"
+        assert advanced["outline_stage_artifacts"]["characters"]["status"] == "options_ready"
         assert not store.outline_path("demo").exists()
 
     print("phase2 chat smoke ok")
