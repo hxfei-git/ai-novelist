@@ -19,6 +19,7 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
 - Director 确认门增强：`chat/ask_user/show_* /stop` 直接返回；research、大纲修订/推进、章节规划、写作、审稿、修订、定稿、导出、保存、小说圣经更新等写操作都会先返回 1/2 确认选项，用户确认后才执行工作流。
 - mock 模式：不依赖外部模型即可端到端验证。
 - 真实模式：Codex CLI 或 DeepSeek API。
+- 真实模型调用默认不再设置内部硬超时；只有显式传入 `--timeout` 时才启用。Codex 进度提示的上下文容量现在显示为 `258K`。
 - 阶段 3 飞书长连接机器人最小闭环：支持飞书单聊文本、`/project` 项目切换、纯文本确认选项和同步调用 DirectorService。
 - 阶段 6+7 章节卡与场景卡管线：新增 Chapter Planning Graph 和 Scene Design Graph，可从锁定大纲/NovelBible 生成 `chapter_card.md`，再拆成 `scene_cards.md`。
 

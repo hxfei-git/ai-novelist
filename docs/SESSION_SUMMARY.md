@@ -1,6 +1,6 @@
 # 会话摘要与上下文压缩记录
 
-更新时间：2026-05-23
+更新时间：2026-05-24
 项目路径：`/home/ubuntu/1.project/ai-novelist-v1`
 
 ## 1. 项目目标
@@ -24,6 +24,7 @@
 
 能力：
 
+- 真实模型调用默认不再设置内部硬超时；只有显式传入 `--timeout` 时才启用。Codex 进度提示的上下文容量标注已改为 `258K`。
 - `chat`：唯一推荐主入口，Director Agent 连续对话并调度 research、outline 和写作子工作流。
 - `research/retrieval`：搜索原始资料，生成通用 `retrieval_context`，并继续生成兼容旧流程的参考简报、原作事实、来源列表和不确定点。
 - 本地小说知识库优先 RAG：可通过 `AI_NOVELIST_LOCAL_CORPUS_DIR` 或 `chat --local-corpus-dir` 指定 `.txt/.md` 语料目录，research 本地命中时不调用 mock/web。

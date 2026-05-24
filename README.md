@@ -46,7 +46,7 @@ export AI_NOVELIST_DEEPSEEK_MODEL=deepseek-chat
 - `DEEPSEEK_API_KEY`：DeepSeek API Key，不要提交到仓库。
 - `AI_NOVELIST_DEEPSEEK_MODEL`：DeepSeek 模型名，默认 `deepseek-chat`。
 - `AI_NOVELIST_DEEPSEEK_BASE_URL`：默认 `https://api.deepseek.com`。
-- `AI_NOVELIST_CODEX_BIN`、`AI_NOVELIST_CODEX_TIMEOUT`：Codex CLI 路径与超时。
+- `AI_NOVELIST_CODEX_BIN`、`AI_NOVELIST_CODEX_TIMEOUT`：Codex CLI 路径与可选超时；未设置时不启用内部硬超时。
 
 DeepSeek 会按内部 Agent 自动启停 thinking，不需要新增 CLI 参数或环境变量。轻量判断类 Agent 使用 `thinking: {"type": "disabled"}` 并保留 `temperature`；综合、规划、写作和审稿汇总类 Agent 使用 `thinking: {"type": "enabled"}` 与 `reasoning_effort: "medium"`，且不发送 `temperature`。DeepSeek 官方会把 `medium` 映射为 `high`，项目内部仍以 `medium` 表达策略意图。Codex CLI 不受该策略影响，也不会增加 reasoning 配置。
 
@@ -415,7 +415,7 @@ projects/<project>/chapters/chapter_001_review.md
 codex doctor
 ```
 
-真实模式会多次调用 `codex exec`，耗时明显长于 mock。`--timeout` 是每次 Codex 调用的最长等待秒数。
+真实模式会多次调用 `codex exec`，耗时明显长于 mock。`--timeout` 只在你显式传入时生效；不传时不设置内部硬超时。
 
 ## 验证
 

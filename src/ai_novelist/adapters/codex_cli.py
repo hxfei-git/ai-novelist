@@ -18,7 +18,7 @@ class CodexCLIError(AgentAdapterError):
 @dataclass
 class CodexCLIAdapter(AgentAdapter):
     codex_bin: str = "codex"
-    timeout_seconds: int = 180
+    timeout_seconds: int | None = None
     mock: bool = False
 
     def complete(self, prompt: str, workspace: Path, options: AgentCallOptions | None = None) -> str:

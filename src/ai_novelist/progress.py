@@ -84,6 +84,8 @@ def estimate_context_tokens(context_chars: int) -> int:
 
 def context_capacity_label(model: str) -> str:
     normalized = model.strip().lower()
+    if normalized in {"codex", "codex-cli"} or "codex" in normalized:
+        return "258K"
     if normalized in {"deepseek-v4-pro", "deepseek-v4-flash"}:
         return "1M"
     if normalized == "deepseek-chat":

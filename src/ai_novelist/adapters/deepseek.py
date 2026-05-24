@@ -79,7 +79,7 @@ class DeepSeekAdapter(AgentAdapter):
     api_key: str = ""
     model: str = "deepseek-v4-pro"
     base_url: str = "https://api.deepseek.com"
-    timeout_seconds: int = 180
+    timeout_seconds: int | None = None
     temperature: float = 0.7
 
     def complete(self, prompt: str, workspace: Path, options: AgentCallOptions | None = None) -> str:

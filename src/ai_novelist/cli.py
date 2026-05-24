@@ -408,7 +408,7 @@ def generate_project_outline(
     append_message(state, "user", state.user_request)
     store.save_state(state)
 
-    effective_timeout = args.timeout or settings.codex_timeout_seconds
+    effective_timeout = args.timeout if args.timeout is not None else settings.codex_timeout_seconds
     adapter = make_agent_adapter(args, settings, effective_timeout)
     print_real_mode_notice(args.mock, adapter, effective_timeout)
     graph = build_outline_collaboration_graph(adapter, store, progress=print_progress)
@@ -511,7 +511,7 @@ def run_compose_command(
     apply_craft_args_to_state(state, args, settings)
     store.save_state(state)
 
-    effective_timeout = args.timeout or settings.codex_timeout_seconds
+    effective_timeout = args.timeout if args.timeout is not None else settings.codex_timeout_seconds
     adapter = make_agent_adapter(args, settings, effective_timeout)
     print_real_mode_notice(args.mock, adapter, effective_timeout)
     if not state.outline.strip() or not store.outline_path(state.project_id).exists():
@@ -557,7 +557,7 @@ def run_chat_command(
     apply_craft_args_to_state(state, args, settings)
     store.save_state(state)
 
-    effective_timeout = args.timeout or settings.codex_timeout_seconds
+    effective_timeout = args.timeout if args.timeout is not None else settings.codex_timeout_seconds
     adapter = make_agent_adapter(args, settings, effective_timeout)
     print_real_mode_notice(args.mock, adapter, effective_timeout)
     service = DirectorService(
@@ -601,7 +601,7 @@ def run_feishu_command(
     store: LocalStore,
     settings: Settings,
 ) -> int:
-    effective_timeout = args.timeout or settings.codex_timeout_seconds
+    effective_timeout = args.timeout if args.timeout is not None else settings.codex_timeout_seconds
     adapter = make_agent_adapter(args, settings, effective_timeout)
     print_real_mode_notice(args.mock, adapter, effective_timeout)
     service = DirectorService(
@@ -801,7 +801,7 @@ def run_writer_command(
     apply_craft_args_to_state(state, args, settings)
     store.save_state(state)
 
-    effective_timeout = args.timeout or settings.codex_timeout_seconds
+    effective_timeout = args.timeout if args.timeout is not None else settings.codex_timeout_seconds
     adapter = make_agent_adapter(args, settings, effective_timeout)
     print_real_mode_notice(args.mock, adapter, effective_timeout)
     if task == "plan_outline":
@@ -851,7 +851,7 @@ def run_finalize_command(
     apply_craft_args_to_state(state, args, settings)
     store.save_state(state)
 
-    effective_timeout = args.timeout or settings.codex_timeout_seconds
+    effective_timeout = args.timeout if args.timeout is not None else settings.codex_timeout_seconds
     adapter = make_agent_adapter(args, settings, effective_timeout)
     print_real_mode_notice(args.mock, adapter, effective_timeout)
     from ai_novelist.graph_finalize import build_finalize_graph
@@ -900,7 +900,7 @@ def make_search_backend(args: argparse.Namespace, settings: Settings) -> SearchB
     return LocalFirstSearchBackend(LocalRAGSearchBackend(local_corpus_dir), fallback_backend)
 
 
-def make_agent_adapter(args: argparse.Namespace, settings: Settings, timeout_seconds: int) -> AgentAdapter:
+def make_agent_adapter(args: argparse.Namespace, settings: Settings, timeout_seconds: int | None) -> AgentAdapter:
     if args.mock:
         return CodexCLIAdapter(timeout_seconds=timeout_seconds, mock=True)
 
@@ -917,16 +917,24 @@ def make_agent_adapter(args: argparse.Namespace, settings: Settings, timeout_sec
     raise LocalStoreError(f"Unsupported model provider: {provider}")
 
 
-def print_real_mode_notice(mock: bool, adapter: AgentAdapter, timeout_seconds: int) -> None:
+def print_real_mode_notice(mock: bool, adapter: AgentAdapter, timeout_seconds: int | None) -> None:
     if mock:
         return
     if isinstance(adapter, DeepSeekAdapter):
+        if timeout_seconds is None:
+            detail = "不设置内部超时"
+        else:
+            detail = f"最长等待 {timeout_seconds} 秒"
         print(
-            f"正在调用 DeepSeek API，模型 {adapter.model}，最长等待 {timeout_seconds} 秒。",
+            f"正在调用 DeepSeek API，模型 {adapter.model}，{detail}。",
             file=sys.stderr,
         )
         return
-    print(f"正在调用 Codex CLI，最长等待 {timeout_seconds} 秒。首次运行可能需要先完成 codex login。", file=sys.stderr)
+    if timeout_seconds is None:
+        detail = "不设置内部超时"
+    else:
+        detail = f"最长等待 {timeout_seconds} 秒"
+    print(f"正在调用 Codex CLI，{detail}。首次运行可能需要先完成 codex login。", file=sys.stderr)
 
 
 def make_outline_review_func(auto_approve: bool):
