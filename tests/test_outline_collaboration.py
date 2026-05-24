@@ -241,7 +241,7 @@ def test_direction_synthesizer_prompt_demands_control_brief():
     assert "## 方向定位稿" in prompt
     assert "## 方向定位稿" in prompt
     assert "## 仍需确认的问题" in prompt
-    assert "类型定位" in prompt
+    assert "类型题材" in prompt
     assert "世界观阶段多写角色能看见、听见、触碰、承受的事物" in prompt
 
 
@@ -332,7 +332,7 @@ def test_worldbuilding_prompt_uses_saved_direction_context():
     assert "前序已保存阶段内容" in prompt
     assert "方向定位（options_ready）" in prompt
     assert "主角以低调求生方式追查师傅吞噬气运" in prompt
-    assert "世界观必须承接方向定位提出的类型、冲突和情绪边界" in prompt
+    assert "世界观必须承接方向定位提出的一句话梗概、类型题材、目标读者、故事承诺、主题表达、主角方向、核心冲突、故事基调和篇幅结构" in prompt
 
 
 def test_worldbuilding_prompt_blocks_default_administrative_mechanisms():
@@ -557,7 +557,7 @@ def test_direction_sanitizer_removes_nested_titles_and_institutional_terms():
     assert markdown.splitlines()[0] == "## 方向定位稿"
     for forbidden in ("申请表", "审批", "考评", "备案", "绩效", "项目审批", "亲密行为申请表"):
         assert forbidden not in markdown
-    for marker in ("类型定位", "主角行动原则", "核心冲突", "情绪基调", "禁区"):
+    for marker in ("一句话梗概", "核心卖点", "主角方向", "核心冲突", "故事基调", "篇幅结构"):
         assert marker in markdown
 
 

@@ -37,7 +37,7 @@ def test_direction_guard_demotes_unsupported_concrete_memory_cost():
     result = guard_stage_output(text, "direction", state)
     assert "每一次" not in result.text
     assert "消耗生命力" not in result.text
-    assert "具体限制留" in result.text
+    assert result.text.strip() == "## 方向定位稿"
 
 
 def test_direction_guard_preserves_user_explicit_cost_at_high_level():

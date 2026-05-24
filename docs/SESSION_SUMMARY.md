@@ -29,6 +29,7 @@
 - `research/retrieval`：搜索原始资料，生成通用 `retrieval_context`，并继续生成兼容旧流程的参考简报、原作事实、来源列表和不确定点。
 - 本地小说知识库优先 RAG：可通过 `AI_NOVELIST_LOCAL_CORPUS_DIR` 或 `chat --local-corpus-dir` 指定 `.txt/.md` 语料目录，research 本地命中时不调用 mock/web。
 - `outline`：交互式大纲共创流程，支持方向、生成、审稿、修订、版本比较、查看、锁定和保存。
+- direction 阶段已从 5 项旧结构升级为 10 项完整方向合同，兼容补全、守卫和 demo 输出同步更新。
 - Director 交互转译增强：所有用户输入仍先进入 Director；Director prompt 现在包含最近编辑意见和待确认项，并能把“答案 + 接收/接受/同意”的多项确认合并成下游可执行约束。新一轮 turn 会清掉上一次残留的 `error`，避免历史超时在后续成功回复里反复出现；`quit/exit/退出/stop` 现在会在进入决策前直接结束当前 turn，避免被 outline 阶段继续消费。最近补了一条更泛化的引导式问句识别，像“目前我该做什么 / 接下来怎么办 / 下一步呢” 会优先引导用户继续对话，而不是硬推大纲阶段。
 - `compose`：一次性完整多 Agent 创作图。
 - 单步 Agent 命令：`plan-outline`、`plan-chapters`、`write-chapter`、`review`。`worldbuilding` 已并入 outline 的 `worldbuilding` 阶段。

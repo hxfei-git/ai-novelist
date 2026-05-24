@@ -83,6 +83,8 @@ DeepSeek 会按内部 Agent 自动启停 thinking，不需要新增 CLI 参数�
 
 Director 可路由动作：
 
+方向定位阶段固定输出 10 项：一句话梗概、核心卖点、类型题材、目标读者、故事承诺、主题表达、主角方向、核心冲突、故事基调、篇幅结构。
+
 - `ask_user`：追问缺失信息。
 - `worldbuilding`：进入 outline 的 `worldbuilding` 阶段。
 - `generate_outline` / `revise_outline` / `review_outline`：调度交互式大纲共创节点。

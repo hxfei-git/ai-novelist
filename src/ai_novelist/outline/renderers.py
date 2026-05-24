@@ -2,10 +2,117 @@
 
 from __future__ import annotations
 
+import re
+
 from ai_novelist.characters_framework import full_characters_headings
 from ai_novelist.outline.stage_contracts import StageSlot, get_stage_contract
 from ai_novelist.state import NovelState
 from ai_novelist.worldbuilding_framework import full_worldbuilding_headings
+
+
+
+
+def _normalize_direction_key(value: str) -> str:
+    return re.sub(r"[\s·•、/()（）【】\[\]{}:：,，.;；]+", "", value).strip().lower()
+DIRECTION_SECTION_SPECS = [
+    {
+        "heading": "一、一句话梗概",
+        "aliases": ("一句话梗概", "一句话故事", "一句话概念", "故事一句话"),
+        "fields": (("一句话梗概", "暂定：请补充主角、处境、目标和主要吸引点。", ("一句话梗概", "一句话故事", "一句话概念", "故事一句话")),),
+    },
+    {
+        "heading": "二、核心卖点",
+        "aliases": ("核心卖点", "核心看点", "核心爽点", "卖点"),
+        "fields": (("核心卖点", "暂定：请补充本书最值得读者期待的看点。", ("核心卖点", "核心看点", "核心爽点", "卖点")),),
+    },
+    {
+        "heading": "三、类型题材",
+        "aliases": ("类型题材", "类型定位", "题材", "题材定位"),
+        "fields": (
+            ("主类型", "待确认", ("主类型", "类型定位", "类型", "题材定位")),
+            ("子类型 / 题材元素", "待确认", ("子类型 / 题材元素", "子类型/题材元素", "子类型", "题材元素")),
+            ("读者预期", "待确认", ("读者预期",)),
+        ),
+    },
+    {
+        "heading": "四、目标读者",
+        "aliases": ("目标读者", "受众", "读者群", "读者画像"),
+        "fields": (("目标读者", "暂定：请明确主要写给谁看。", ("目标读者", "受众", "读者群", "读者画像")),),
+    },
+    {
+        "heading": "五、故事承诺",
+        "aliases": ("故事承诺", "阅读承诺", "叙事承诺"),
+        "fields": (("故事承诺", "暂定：请补充读者继续读下去会持续看到什么。", ("故事承诺", "阅读承诺", "叙事承诺")),),
+    },
+    {
+        "heading": "六、主题表达",
+        "aliases": ("主题表达", "主题", "命题"),
+        "fields": (
+            ("表层主题", "待确认", ("表层主题", "表层")),
+            ("深层命题", "待确认", ("深层命题", "深层")),
+            ("价值取向", "待确认", ("价值取向", "价值", "价值观")),
+        ),
+    },
+    {
+        "heading": "七、主角方向",
+        "aliases": ("主角方向", "主角姿态", "主角行动原则", "主角定位"),
+        "fields": (
+            ("主角原型", "待确认", ("主角原型", "主角定位")),
+            ("初始处境", "待确认", ("初始处境",)),
+            ("外在目标", "待确认", ("外在目标",)),
+            ("内在缺口", "待确认", ("内在缺口",)),
+            ("成长方向", "待确认", ("成长方向", "主角姿态", "主角行动原则")),
+            ("核心冲突", "待确认", ("核心冲突",)),
+        ),
+    },
+    {
+        "heading": "八、核心冲突",
+        "aliases": ("核心冲突", "冲突", "冲突结构"),
+        "fields": (
+            ("外部冲突", "待确认", ("外部冲突", "外在冲突")),
+            ("内部冲突", "待确认", ("内部冲突", "内在冲突")),
+            ("关系冲突", "待确认", ("关系冲突",)),
+        ),
+    },
+    {
+        "heading": "九、故事基调",
+        "aliases": ("故事基调", "情绪边界", "情绪基调", "氛围"),
+        "fields": (
+            ("整体基调", "待确认", ("整体基调", "故事基调", "情绪边界", "情绪基调", "氛围")),
+            ("情绪比例 / 阅读体验", "待确认", ("情绪比例 / 阅读体验", "情绪比例/阅读体验", "阅读体验")),
+            ("可以强化的情绪", "待确认", ("可以强化的情绪",)),
+            ("需要避免的情绪", "待确认", ("需要避免的情绪",)),
+        ),
+    },
+    {
+        "heading": "十、篇幅结构",
+        "aliases": ("篇幅结构", "篇幅", "结构", "体量"),
+        "fields": (
+            ("预计体量", "待确认", ("预计体量", "篇幅", "体量")),
+            ("叙事结构", "待确认", ("叙事结构", "结构")),
+            ("节奏特点", "待确认", ("节奏特点",)),
+            ("展开方式", "待确认", ("展开方式",)),
+        ),
+    },
+]
+
+DIRECTION_SECTION_LOOKUP = {
+    _normalize_direction_key(alias): spec["heading"]
+    for spec in DIRECTION_SECTION_SPECS
+    for alias in (spec["heading"], *spec["aliases"])
+}
+
+DIRECTION_FIELD_LOOKUP = {
+    _normalize_direction_key(alias): (spec["heading"], field[0])
+    for spec in DIRECTION_SECTION_SPECS
+    for field in spec["fields"]
+    for alias in field[2]
+}
+
+DIRECTION_QUESTION_ALIASES = {
+    _normalize_direction_key(alias)
+    for alias in ("仍需确认的问题", "待确认问题", "待确认的问题")
+}
 
 
 def build_stage_output_rule(stage: str, state: NovelState | None = None) -> str:
@@ -26,16 +133,7 @@ def build_stage_output_rule(stage: str, state: NovelState | None = None) -> str:
 
 def _stage_structure(stage: str, slots: tuple[StageSlot, ...]) -> str:
     if stage == "direction":
-        return (
-            "## 方向定位稿\n"
-            "- 类型定位：...\n"
-            "- 主角姿态：...\n"
-            "- 核心看点：...\n"
-            "- 核心冲突：...\n"
-            "- 情绪边界：...\n"
-            "\n## 仍需确认的问题\n"
-            "- 最多 1 条；若无写“暂无，当前阶段可继续修改或确认进入下一阶段”。"
-        )
+        return _direction_stage_structure()
     if stage == "worldbuilding":
         heading_lines = "\n".join(f"- `## {heading}`" for heading in full_worldbuilding_headings())
         return (
@@ -93,3 +191,235 @@ def _stage_structure(stage: str, slots: tuple[StageSlot, ...]) -> str:
     lines.append("## 仍需确认的问题")
     lines.append("- 只列真正影响下一步写作的问题。")
     return "\n".join(lines)
+
+
+def _direction_stage_structure() -> str:
+    return (
+        "## 方向定位稿\n\n"
+        "### 一、一句话梗概\n"
+        "- ...\n\n"
+        "### 二、核心卖点\n"
+        "- ...\n\n"
+        "### 三、类型题材\n"
+        "- 主类型：...\n"
+        "- 子类型 / 题材元素：...\n"
+        "- 读者预期：...\n\n"
+        "### 四、目标读者\n"
+        "- ...\n\n"
+        "### 五、故事承诺\n"
+        "- ...\n\n"
+        "### 六、主题表达\n"
+        "- 表层主题：...\n"
+        "- 深层命题：...\n"
+        "- 价值取向：...\n\n"
+        "### 七、主角方向\n"
+        "- 主角原型：...\n"
+        "- 初始处境：...\n"
+        "- 外在目标：...\n"
+        "- 内在缺口：...\n"
+        "- 成长方向：...\n"
+        "- 核心冲突：...\n\n"
+        "### 八、核心冲突\n"
+        "- 外部冲突：...\n"
+        "- 内部冲突：...\n"
+        "- 关系冲突：...\n\n"
+        "### 九、故事基调\n"
+        "- 整体基调：...\n"
+        "- 情绪比例 / 阅读体验：...\n"
+        "- 可以强化的情绪：...\n"
+        "- 需要避免的情绪：...\n\n"
+        "### 十、篇幅结构\n"
+        "- 预计体量：...\n"
+        "- 叙事结构：...\n"
+        "- 节奏特点：...\n"
+        "- 展开方式：...\n\n"
+        "## 仍需确认的问题\n"
+        "- 暂无，当前阶段可继续修改或确认进入下一阶段。"
+    )
+
+
+def render_direction_stage_markdown(markdown: str, pending_questions: list[str] | None = None) -> str:
+    parsed = _parse_direction_markdown(markdown or "")
+    lines = ["## 方向定位稿", ""]
+    for spec in DIRECTION_SECTION_SPECS:
+        lines.append(f"### {spec['heading']}")
+        section = parsed[spec["heading"]]
+        generic = [item for item in section["generic"] if item.strip()]
+        for index, field in enumerate(spec["fields"]):
+            label, placeholder, _aliases = field
+            value = section["fields"][label].strip()
+            if not value:
+                if len(spec["fields"]) == 1 and generic:
+                    value = generic[0]
+                elif index == 0 and generic:
+                    value = generic[0]
+                else:
+                    value = placeholder
+            lines.append(f"- {label}：{value}")
+        lines.append("")
+    if pending_questions is not None:
+        lines.append("## 仍需确认的问题")
+        questions = [str(item).strip() for item in pending_questions if str(item).strip()]
+        if questions:
+            for question in questions[:5]:
+                lines.append(f"- {question}")
+        else:
+            lines.append("- 暂无，当前阶段可继续修改或确认进入下一阶段。")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def summarize_direction_outline(text: str, max_chars: int = 1800) -> str:
+    parsed = _parse_direction_markdown(text or "")
+    parts = []
+    for spec in DIRECTION_SECTION_SPECS:
+        section = parsed[spec["heading"]]
+        if len(spec["fields"]) == 1:
+            field_label, placeholder, _aliases = spec["fields"][0]
+            value = _compact_text(section["fields"][field_label]) or _first_generic_value(section["generic"]) or placeholder
+            parts.append(f"{field_label}：{value}")
+            continue
+        field_parts = []
+        for field_label, placeholder, _aliases in spec["fields"]:
+            value = _compact_text(section["fields"][field_label]) or placeholder
+            field_parts.append(f"{field_label}：{value}")
+        parts.append(f"{spec['heading']}：{'；'.join(field_parts)}")
+    summary = "；".join(parts)
+    if len(summary) > max_chars:
+        return summary[:max_chars].rstrip() + "..."
+    return summary
+
+
+def extract_direction_memory(text: str, max_items: int = 12, max_chars: int = 1800) -> list[str]:
+    parsed = _parse_direction_markdown(text or "")
+    result: list[str] = []
+    total = 0
+    for spec in DIRECTION_SECTION_SPECS:
+        section = parsed[spec["heading"]]
+        if len(spec["fields"]) == 1:
+            field_label, placeholder, _aliases = spec["fields"][0]
+            value = _compact_text(section["fields"][field_label]) or _first_generic_value(section["generic"]) or placeholder
+            item = f"{field_label}：{value}"
+            if item not in result:
+                if total + len(item) > max_chars and result:
+                    break
+                result.append(item)
+                total += len(item)
+            continue
+        for field_label, placeholder, _aliases in spec["fields"]:
+            value = _compact_text(section["fields"][field_label]) or placeholder
+            item = f"{field_label}：{value}"
+            if item in result:
+                continue
+            if total + len(item) > max_chars and result:
+                return result
+            result.append(item)
+            total += len(item)
+            if len(result) >= max_items:
+                return result
+    return result
+
+
+def _parse_direction_markdown(text: str) -> dict[str, dict[str, dict[str, str] | list[str]]]:
+    parsed: dict[str, dict[str, dict[str, str] | list[str]]] = {}
+    for spec in DIRECTION_SECTION_SPECS:
+        parsed[spec["heading"]] = {
+            "fields": {field[0]: "" for field in spec["fields"]},
+            "generic": [],
+        }
+    current_heading: str | None = None
+    in_questions = False
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if re.match(r"^#{1,6}\s*(.+)$", line):
+            heading = _resolve_direction_heading(line)
+            if heading == "__questions__":
+                in_questions = True
+                current_heading = None
+                continue
+            if heading:
+                current_heading = heading
+                in_questions = False
+                continue
+            continue
+        if in_questions:
+            continue
+        pair = _split_label_value(line)
+        if pair:
+            label, value = pair
+            mapping = DIRECTION_FIELD_LOOKUP.get(_normalize_direction_key(label))
+            if mapping:
+                section_heading, field_label = mapping
+                parsed[section_heading]["fields"][field_label] = _clean_direction_value(value)
+                current_heading = section_heading
+                continue
+        bullet = _strip_markdown_bullet(line)
+        if not bullet:
+            continue
+        if current_heading and current_heading in parsed:
+            parsed[current_heading]["generic"].append(_clean_direction_value(bullet))
+        else:
+            parsed[DIRECTION_SECTION_SPECS[0]["heading"]]["generic"].append(_clean_direction_value(bullet))
+    return parsed
+
+
+def _resolve_direction_heading(line: str) -> str | None:
+    match = re.match(r"^#{1,6}\s*(.+)$", line)
+    if not match:
+        return None
+    title = match.group(1).strip()
+    key = _normalize_direction_key(title)
+    if key in DIRECTION_SECTION_LOOKUP:
+        return DIRECTION_SECTION_LOOKUP[key]
+    if key in DIRECTION_QUESTION_ALIASES:
+        return "__questions__"
+    if key in {
+        _normalize_direction_key("方向定位稿"),
+        _normalize_direction_key("方向定位"),
+        _normalize_direction_key("方向控制稿"),
+        _normalize_direction_key("方向控制"),
+    }:
+        return None
+    return None
+
+
+def _split_label_value(line: str) -> tuple[str, str] | None:
+    cleaned = _strip_markdown_bullet(line)
+    match = re.match(r"^([^：:]{2,40})[：:]\s*(.+)$", cleaned)
+    if not match:
+        return None
+    label = match.group(1).strip()
+    value = match.group(2).strip()
+    if not label or not value:
+        return None
+    return label, value
+
+
+def _strip_markdown_bullet(line: str) -> str:
+    cleaned = re.sub(r"^[-*+•\s]*", "", line)
+    cleaned = re.sub(r"^\d+[.、)]\s*", "", cleaned).strip()
+    return cleaned
+
+
+def _clean_direction_value(text: str) -> str:
+    value = text.strip()
+    value = re.sub(r"[（(]来源[:：].*?[）)]$", "", value)
+    value = re.sub(r"(?:\s|。)?来源[:：].*$", "", value).strip()
+    return value or "待确认"
+
+
+def _first_generic_value(values: list[str]) -> str:
+    for value in values:
+        compact = _compact_text(value)
+        if compact and compact not in {"待确认", "暂定：请补充主角、处境、目标和主要吸引点。"}:
+            return compact
+    return values[0] if values else ""
+
+
+def _compact_text(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip())
+
+
+def _normalize_direction_key(value: str) -> str:
+    return re.sub(r"[^0-9A-Za-z一-鿿]+", "", (value or "").strip()).lower()

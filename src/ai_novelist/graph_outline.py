@@ -18,7 +18,7 @@ from ai_novelist.characters_framework import (
 from ai_novelist.corpus.craft_resolver import resolve_author_craft
 from ai_novelist.outline.legacy_migration import ensure_outline_stage, normalize_legacy_outline_artifacts
 from ai_novelist.outline.question_filter import filter_stage_confirmation_questions
-from ai_novelist.outline.renderers import build_stage_output_rule
+from ai_novelist.outline.renderers import build_stage_output_rule, extract_direction_memory, render_direction_stage_markdown, summarize_direction_outline
 from ai_novelist.outline.stage_contracts import (
     LEGACY_OUTLINE_STAGES,
     OUTLINE_STAGES,
@@ -641,7 +641,7 @@ def should_defer_stage_confirmation_to_director(text: str, state: NovelState) ->
 def should_run_outline_stage(text: str, state: NovelState) -> bool:
     if state.active_workflow == "outline":
         return True
-    markers = ("生成大纲", "写大纲", "大纲", "方向", "概念", "核心冲突", "反转", "世界观", "人物", "故事流程", "主线", "分卷", "章节", "审稿", "锁定")
+    markers = ("生成大纲", "写大纲", "大纲", "方向", "概念", "核心冲突", "反转", "世界观", "人物", "故事流程", "主线", "分卷", "章节", "审稿", "锁定", "卖点", "读者", "承诺", "主题", "基调", "篇幅", "一句话梗概")
     return any(marker in text for marker in markers)
 
 
@@ -739,7 +739,7 @@ def is_stage_switch_request(text: str) -> bool:
 
 def detect_stage_reference(text: str) -> str | None:
     mapping = [
-        ("direction", ("方向", "定位", "类型", "卖点", "故事概念", "概念", "一句话故事", "核心概念")),
+        ("direction", ("方向", "定位", "类型", "卖点", "故事概念", "概念", "一句话故事", "一句话梗概", "核心概念", "核心卖点", "目标读者", "故事承诺", "主题表达", "主角方向", "故事基调", "篇幅结构")),
         ("worldbuilding", ("世界观", "设定", "规则")),
         ("characters", ("人物", "人设", "关系", "反派", "势力")),
         ("story_flow", ("故事流程", "流程", "主线", "节奏", "伏笔")),
@@ -903,8 +903,8 @@ def build_outline_stage_synthesizer_prompt(state: NovelState, stage: str, role_r
 
 OUTLINE_STAGE_BOUNDARIES = {
     "direction": {
-        "allowed": "类型定位、主角行动原则、核心爽点、核心冲突方向、情绪基调、主题边界、反转原则、禁区",
-        "forbidden": "具体世界观规则、宗门/组织流程、制度条款、申请表、审批、考评、备案、绩效、KPI、具体人物关系细则、具体剧情桥段、章节安排、专有名词清单",
+        "allowed": "一句话梗概、核心卖点、类型题材、目标读者、故事承诺、主题表达、主角方向、核心冲突、故事基调、篇幅结构",
+        "forbidden": "展开完整世界观规则、编写人物完整档案、制定分卷 / 章节大纲、生成具体剧情桥段、生成复杂组织、境界、势力、地图、制度细则、强行绑定平台、为信息不足处编造确定性设定",
     },
     "concept": {
         "allowed": "故事钩子、一句话概念、主角欲望、核心冲突、主要悬念、叙事承诺、主题问题、反转原则、待后续阶段展开的确认点",
@@ -1216,6 +1216,8 @@ def first_worldbuilding_bullet(section_text: str) -> str:
 
 
 def summarize_outline_stage_for_artifact(stage: str, synthesis: str) -> str:
+    if stage == "direction":
+        return summarize_direction_outline(synthesis)
     if stage == "worldbuilding":
         return summarize_worldbuilding_outline(synthesis)
     if stage == "characters":
@@ -1224,6 +1226,8 @@ def summarize_outline_stage_for_artifact(stage: str, synthesis: str) -> str:
 
 
 def extract_outline_stage_memory_for_artifact(stage: str, synthesis: str) -> list[str]:
+    if stage == "direction":
+        return extract_direction_memory(synthesis)
     if stage == "worldbuilding":
         return extract_worldbuilding_memory(synthesis)
     if stage == "characters":
@@ -1313,8 +1317,8 @@ def current_stage_context(state: NovelState, stage: str, max_chars: int = 2400) 
 
 def role_focus_instruction(stage: str, role: str) -> str:
     focus_map = {
-        "类型定位 Agent": "从类型承诺、读者预期和市场识别度判断方向是否清晰；重点检查开篇钩子、中段升级、终局承诺是否属于同一种故事体验，避免只给出氛围标签。",
-        "主题卖点 Agent": "从主题表达、情绪卖点和主角核心欲望判断方向是否有长线吸引力；重点提炼一句能驱动后续概念、人物和流程的核心卖点。",
+        "类型定位 Agent": "从一句话梗概、类型题材、目标读者和篇幅结构判断方向是否清晰；重点检查这本书想讲什么、写给谁看、为什么值得读，以及整体体量是否匹配。",
+        "主题卖点 Agent": "从核心卖点、故事承诺、主题表达、主角方向和核心冲突判断方向是否有长线吸引力；重点提炼能驱动后续世界观、人物和剧情的核心卖点。",
         "故事概念 Agent": "专注故事概念本身：主角在什么异常局面中采取什么行动，故事以什么长期问题牵引读者。必须把方向定位转成可连续展开的故事发动机。",
         "世界架构 Agent": "负责世界核心设定、世界格局、地理环境、历史背景和时代背景；必须把主舞台、空间边界、历史遗留问题和时代压力写成后续剧情可复用的世界基座。",
         "规则力量 Agent": "负责世界规则、力量体系、成长体系、能力分类体系和危险体系；必须说明力量来源、获得条件、代价、克制、寿命影响和强者尺度，避免无代价万能规则。",
@@ -1345,9 +1349,9 @@ def role_focus_instruction(stage: str, role: str) -> str:
 
 def stage_continuity_requirement(stage: str) -> str:
     requirements = {
-        "direction": "方向定位是后续所有阶段的源头：只锁定宏观创作原则，具体规则、人物细则和剧情桥段留到后续阶段展开。",
+        "direction": "方向定位是后续所有阶段的源头：只锁定故事的一句话梗概、核心卖点、类型题材、目标读者、故事承诺、主题表达、主角方向、核心冲突、故事基调和篇幅结构等宏观创作原则，具体世界规则、人物细则和剧情桥段留到后续阶段展开。",
         "concept": "故事概念为旧版兼容阶段，新流程不再主动进入。",
-        "worldbuilding": "世界观必须承接方向定位提出的类型、冲突和情绪边界；按世界组成部分建立完整基座，每项都要影响主角生存、制造冲突或服务后续剧情。",
+        "worldbuilding": "世界观必须承接方向定位提出的一句话梗概、类型题材、目标读者、故事承诺、主题表达、主角方向、核心冲突、故事基调和篇幅结构；按世界组成部分建立完整基座，每项都要影响主角生存、制造冲突或服务后续剧情。",
         "characters": "人物关系必须承接方向定位和世界观规则；本阶段输出全文关系蓝图，区分作者侧真相、角色侧认知、读者侧认知和剧情侧演化；阵营/组织只能从世界观已有设定提取。",
         "story_flow": "故事流程必须承接方向定位、世界观代价和人物关系冲突；这里的流程只表示叙事流程，转折不能脱离已建立的规则和人物动机。",
         "volume_outline": "分卷大纲必须整合方向、世界观、人物关系和故事流程，只做卷级目标、卷内高潮、代价和卷间钩子，不拆逐章细纲。",
@@ -1377,7 +1381,9 @@ def format_stage_markdown(artifact: dict) -> str:
             str(artifact.get("synthesis", "")).strip(),
             str(artifact.get("user_feedback", "")).strip(),
         )
-        return synthesis.rstrip() + "\n" if synthesis else ""
+        questions = artifact.get("pending_questions")
+        pending_questions = [str(item).strip() for item in questions if str(item).strip()] if isinstance(questions, list) else None
+        return render_direction_stage_markdown(synthesis, pending_questions=pending_questions)
     lines = [f"# {artifact.get('label') or STAGE_LABELS.get(stage, '阶段产物')}", ""]
     user_feedback = str(artifact.get("user_feedback", "")).strip()
     if user_feedback and stage != "direction":
@@ -1415,7 +1421,7 @@ def sanitize_direction_stage_output(markdown: str, user_text: str = "") -> str:
     result = guard_stage_output(markdown or "", "direction", state)
     text = result.text.strip()
     if not text:
-        return "## 方向定位稿\n"
+        return render_direction_stage_markdown("")
 
     cleaned_lines: list[str] = []
     for raw_line in text.splitlines():
@@ -1434,10 +1440,7 @@ def sanitize_direction_stage_output(markdown: str, user_text: str = "") -> str:
             line = line.replace(forbidden, replacement)
         cleaned_lines.append(line)
 
-    if not cleaned_lines:
-        return "## 方向定位稿\n"
-    body = "\n".join(cleaned_lines)
-    return "## 方向定位稿\n" + body
+    return render_direction_stage_markdown("\n".join(cleaned_lines))
 
 
 def stage_ready_message(stage: str, questions: list[str] | None = None) -> str:

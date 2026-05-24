@@ -104,25 +104,15 @@ def rewrite_or_demote_issues(text: str, issues: list[GuardIssue], stage: str, le
 
     if stage == "direction":
         lines = []
-        stripped = False
         for raw in content.splitlines():
             line = raw.strip()
             if not line:
                 lines.append(raw)
                 continue
             if direction_line_should_strip(line, ledger):
-                stripped = True
                 continue
             lines.append(raw)
-        content = "\n".join(lines).strip()
-        if stripped:
-            tail = "具体限制留待世界观或故事流程阶段确认。"
-            if tail not in content:
-                if "## 方向定位稿" in content:
-                    content += f"\n- {tail}"
-                else:
-                    content += f"\n{tail}"
-        content = ensure_direction_heading(content)
+        content = ensure_direction_heading("\n".join(lines).strip())
 
     if stage == "worldbuilding":
         content = content.replace("有债必偿", "具体代价需基于场景确认")
