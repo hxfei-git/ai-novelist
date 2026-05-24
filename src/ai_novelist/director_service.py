@@ -167,6 +167,7 @@ class DirectorService:
     def handle_turn(self, project_id: str, user_text: str, channel: Channel = "cli") -> DirectorTurnResult:
         state = load_or_create_project(self.store, project_id)
         apply_default_craft_options(state, self.default_craft_mode, self.default_craft_options)
+        state.error = ""
         text = user_text.strip()
         if not text:
             return DirectorTurnResult(immediate_message="请输入你的需求。", requires_followup=True, state=state)
@@ -1205,6 +1206,7 @@ def deterministic_view_decision(state: NovelState) -> DirectorDecision | None:
     text = state.user_request.strip()
     lowered = text.lower()
     wants_view = any(marker in text for marker in ("查看", "展示", "看一下", "看下", "看看", "显示")) or lowered.startswith("show ")
+    wants_status = any(marker in text for marker in ("状态", "当前状态", "项目状态")) or lowered in {"status", "show status"}
     stage = detect_outline_stage_request(text)
     if wants_view and stage:
         return DirectorDecision(
@@ -1221,6 +1223,14 @@ def deterministic_view_decision(state: NovelState) -> DirectorDecision | None:
             user_message="我会展示当前大纲阶段内容。",
             confidence=90,
             target="outline",
+            intent="status",
+        )
+    if wants_status:
+        return DirectorDecision(
+            "show_status",
+            user_message="我会展示当前项目状态。",
+            confidence=90,
+            target="project",
             intent="status",
         )
     return None
@@ -1247,7 +1257,7 @@ def fallback_decision(state: NovelState) -> DirectorDecision:
     if direct is not None:
         return direct
     text = state.user_request
-    if any(marker in text for marker in ("查看状态", "项目状态", "显示状态")) or text.lower() in {"status", "show status"}:
+    if any(marker in text for marker in ("查看状态", "查看当前状态", "项目状态", "显示状态", "当前状态")) or text.lower() in {"status", "show status"}:
         return DirectorDecision("show_status", user_message="我会展示当前项目状态。", confidence=60)
     if any(marker in text for marker in ("查看小说圣经", "展示小说圣经", "更新小说圣经", "小说圣经")) or text.lower() in {"show bible", "update bible"}:
         action = "update_bible" if "更新" in text or "update" in text.lower() else "show_bible"

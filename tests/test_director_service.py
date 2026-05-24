@@ -164,6 +164,27 @@ def test_director_service_direct_status_does_not_require_confirmation(tmp_path):
     assert not store.load_state("demo").pending_director_decision
 
 
+def test_director_service_current_status_clears_stale_error_without_model_call(tmp_path):
+    class FailingAdapter:
+        def complete(self, prompt, workspace):
+            raise AssertionError("model should not be called for status queries")
+
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.outline = "# 大纲"
+    state.error = "Codex CLI timed out after 180s"
+    store.save_state(state)
+    service = DirectorService(store, FailingAdapter(), MockSearchBackend())
+
+    result = service.handle_turn("demo", "查看当前状态", channel="cli")
+
+    assert result.immediate_message == ""
+    assert result.state.director_action == "show_status"
+    assert result.state.error == ""
+    assert "项目：demo" in result.final_message
+    assert not store.load_state("demo").pending_director_decision
+
+
 def test_director_service_can_cancel_with_choice_number(tmp_path):
     store = LocalStore(tmp_path)
     store.create_project("Demo", "demo")
