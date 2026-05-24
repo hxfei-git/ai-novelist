@@ -2350,3 +2350,30 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
     .venv/bin/python -m pytest
     # 284 passed
+
+
+## 93. Codex CLI stdin 调用与 chat 错误恢复
+
+目标：修复真实 Codex 模式下，阶段 Agent 偶发失败时 stderr 只显示 `Reading additional input from stdin...`，并导致 `ai-novelist chat` 直接退出的问题。
+
+已完成：
+
+- `CodexCLIAdapter` 不再把完整 prompt 放在命令行参数里并传空 stdin；改为调用 `codex exec ... -`，通过 stdin 传入 prompt。
+- 该调用方式避免 Codex CLI 把空 stdin 识别为“追加输入”，减少误导性的 `Reading additional input from stdin...` stderr。
+- `chat` 交互循环遇到单轮 `state.error` 时只打印错误并继续等待下一轮输入，不再直接 `return 1` 退出整个会话。
+- Codex adapter 回归测试断言命令最后一个参数为 `-`，prompt 只通过 subprocess `input` 传入，且仍不添加 reasoning 相关 `-c` 配置。
+
+当前边界：
+
+- Codex CLI 自身的真实模型、网络、鉴权或服务端失败仍会作为 `state.error` 展示；本修复只保证交互会话不因一次 Agent 失败直接退出。
+- 非交互式批处理命令仍按各自命令的错误码策略返回。
+
+验证：
+
+```bash
+.venv/bin/python -m pytest tests/test_codex_adapter.py
+# 6 passed
+
+.venv/bin/python -m pytest tests/test_codex_adapter.py tests/test_director_service.py
+# 41 passed
+```

@@ -584,7 +584,7 @@ def run_chat_command(
             print(f"Director> {turn.final_message}")
         if turn.state and turn.state.error:
             print(f"错误：{turn.state.error}", file=sys.stderr)
-            return 1
+            continue
         if turn.state and turn.state.director_action == "stop":
             break
     return 0

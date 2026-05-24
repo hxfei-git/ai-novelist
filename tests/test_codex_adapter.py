@@ -32,6 +32,7 @@ def test_adapter_command_does_not_add_reasoning_config(monkeypatch, tmp_path):
 
     def fake_run(command, **kwargs):
         captured["command"] = command
+        captured["input"] = kwargs.get("input")
         return subprocess.CompletedProcess(command, 0, stdout='{"message":"final"}\n', stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -45,6 +46,9 @@ def test_adapter_command_does_not_add_reasoning_config(monkeypatch, tmp_path):
     ) == "final"
     assert "-c" not in captured["command"]
     assert not any("reasoning" in part for part in captured["command"])
+    assert captured["command"][-1] == "-"
+    assert "prompt" not in captured["command"]
+    assert captured["input"] == "prompt"
 
 
 def test_adapter_extracts_json_message(monkeypatch, tmp_path):

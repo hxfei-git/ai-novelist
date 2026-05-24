@@ -33,7 +33,7 @@ class CodexCLIAdapter(AgentAdapter):
             "--skip-git-repo-check",
             "-C",
             str(workspace),
-            prompt,
+            "-",
         ]
         try:
             result = subprocess.run(
@@ -41,7 +41,7 @@ class CodexCLIAdapter(AgentAdapter):
                 check=False,
                 capture_output=True,
                 text=True,
-                input="",
+                input=prompt,
                 timeout=self.timeout_seconds,
             )
         except FileNotFoundError as exc:
