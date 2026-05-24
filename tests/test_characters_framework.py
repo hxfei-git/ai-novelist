@@ -26,6 +26,8 @@ def test_render_characters_framework_contains_relationship_blueprint_rules():
     assert "角色侧认知" in text
     assert "读者侧认知" in text
     assert "阵营 / 组织关系" in text
+    assert "A 级" in text
+    assert "关系事件种子" in text
 
 
 def test_validate_characters_outline_reports_missing_headings():

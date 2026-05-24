@@ -72,7 +72,7 @@
 
 能力：
 
-- 新增 `src/ai_novelist/characters_framework.py`，提供 14 项完整人物关系蓝图、full/compact 标题清单、结构校验、摘要、stage memory 和兜底补节。
+- 新增 `src/ai_novelist/characters_framework.py`，提供 14 项完整人物关系蓝图、full/compact 标题清单、结构校验、摘要、stage memory 和兜底补节，并在 prompt 中显式注入 A/B/C/D 级角色提示、关系卡 / 认知进度 / 秘密 / 阵营 schema 线索。
 - `graph_outline.py` 在 `characters` 阶段接入专用 framework prompt、结构修复和 artifact summary/memory，角色/合成 prompt 统一注入关系信息差、世界观继承和关系约束。
 - `outline/stage_contracts.py`、`outline/renderers.py`、`outline/question_filter.py` 以及 `adapters/codex_cli.py` 已同步改造，`characters` 阶段现在以关系演化、秘密揭露、阵营继承和最多 4 个确认问题为核心。
 - `tests/` 已补充人物关系框架与 outline 协作的覆盖，确保提示词和标题顺序都按新蓝图输出。
