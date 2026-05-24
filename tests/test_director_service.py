@@ -185,6 +185,27 @@ def test_director_service_current_status_clears_stale_error_without_model_call(t
     assert not store.load_state("demo").pending_director_decision
 
 
+def test_director_service_quit_short_circuits_in_outline_mode_without_model_call(tmp_path):
+    class FailingAdapter:
+        def complete(self, prompt, workspace):
+            raise AssertionError("model should not be called for stop requests")
+
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.active_workflow = "outline"
+    state.outline_stage = "worldbuilding"
+    state.outline_stage_status = "options_ready"
+    store.save_state(state)
+    service = DirectorService(store, FailingAdapter(), MockSearchBackend())
+
+    result = service.handle_turn("demo", "quit", channel="cli")
+
+    assert result.state.director_action == "stop"
+    assert result.state.review_status == "stopped"
+    assert result.final_message == "已结束本次创作对话。"
+    assert not store.load_state("demo").pending_director_decision
+
+
 def test_director_service_can_cancel_with_choice_number(tmp_path):
     store = LocalStore(tmp_path)
     store.create_project("Demo", "demo")

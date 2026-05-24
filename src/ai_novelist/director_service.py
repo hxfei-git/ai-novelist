@@ -171,6 +171,19 @@ class DirectorService:
         text = user_text.strip()
         if not text:
             return DirectorTurnResult(immediate_message="请输入你的需求。", requires_followup=True, state=state)
+        if is_stop_request(text):
+            append_user_message_once(state, text)
+            state.pending_director_decision = {}
+            state.pending_question = ""
+            state.director_action = "stop"
+            state.director_intent = "stop"
+            state.director_message = "已结束本次创作对话。"
+            state.next_action = "stop"
+            state.review_status = "stopped"
+            state.active_task = "stop"
+            append_message(state, "assistant", state.director_message)
+            self.store.save_state(state)
+            return DirectorTurnResult(final_message=state.director_message, state=state, decision=DirectorDecision(action="stop", user_message=state.director_message, intent="stop"))
 
         prune_outline_transient_constraints(state)
         pending = DirectorDecision.from_dict(state.pending_director_decision) if state.pending_director_decision else None
@@ -1437,6 +1450,11 @@ def should_prompt_for_confirmation(decision: DirectorDecision, state: NovelState
     if state.active_workflow == "outline" and decision.action == "revise_outline" and decision.intent == "answer_pending_questions":
         return False
     return decision.action in MUTATING_ACTIONS or decision.requires_confirmation
+
+
+def is_stop_request(text: str) -> bool:
+    lowered = text.strip().lower()
+    return lowered in {"stop", "exit", "quit", "退出", "结束"}
 
 
 OUTLINE_STAGE_EDIT_ACTIONS = {
