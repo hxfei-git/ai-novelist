@@ -485,6 +485,7 @@ def build_service_director_prompt(state: NovelState, store: LocalStore, channel:
         "task_args 可包含 research_query, work_title, author, chapter, instruction, stage, default_discretion_summary。\n"
         "大纲共创阶段可用动作语义：run_current_stage（继续重写/补充当前阶段）、advance_current_stage（锁定当前阶段并进入下一阶段）、answer_pending_questions（吸收用户对待确认问题的回答后重跑当前阶段）、show_stage（查看当前或指定阶段）、ask_user（信息不足再追问）。输出时也可使用等价旧动作 revise_outline、persist_outputs、show_outline。\n"
         "判断大纲阶段意图时必须区分：用户提供新修改意见、用户回答问题、用户把剩余问题交给系统裁量并要求推进、用户只是查看状态。待确认问题不是必须逐项回答的阻塞项；只有用户明确要求进入/推进下一阶段，或明确锁定当前阶段并继续，才选择 advance_current_stage。不要因为句子里出现‘确定/确认/同意’就推进；如果用户是在确定某个设定、回答问题或补充细节，应留在当前阶段处理。若用户明确交给系统裁量并推进，请选择 advance_current_stage，并在 default_discretion_summary 中写一段简短裁量摘要。\n"
+        "像‘我现在该做什么’、‘接下来怎么办’、‘下一步呢’这类问句，应优先理解为状态引导或追问，而不是阶段推进。\n"
         "如果无法输出 JSON，才使用旧的 ACTION/MESSAGE 字段格式。\n\n"
         "## 当前通道\n"
         f"{channel}\n\n"
@@ -1127,13 +1128,20 @@ def asks_outline_next_step(text: str) -> bool:
     compact = re.sub(r"[\s？?。！!，,；;：:、~～…]+", "", stripped)
     if not compact:
         return False
-    if "接下来" in compact and any(marker in compact for marker in ("做什么", "干什么", "怎么办", "怎么做", "该做", "应该做", "下一步")):
-        return True
-    if "下一步" in compact and any(marker in compact for marker in ("呢", "是什么", "做什么", "干什么", "怎么办", "怎么做", "该", "建议", "可以")):
-        return True
-    if "现在" in compact and any(marker in compact for marker in ("怎么办", "怎么做", "做什么", "干什么", "该做", "应该做")):
-        return True
-    return compact in {"下一步", "怎么办", "现在怎么办", "接下来呢", "然后呢"}
+    return looks_like_outline_guidance_question(compact, stripped)
+
+
+def looks_like_outline_guidance_question(compact: str, original: str) -> bool:
+    if not any(marker in original for marker in ("？", "?", "呢", "吗", "么")):
+        return False
+
+    guidance_patterns = (
+        r"(我|我们|现在|目前|接下来|下一步).{0,6}(该|应该|要|需要).{0,8}(做什么|干什么|怎么办|怎么做)",
+        r"(我|我们|现在|目前|接下来|下一步).{0,12}(做什么|干什么|怎么办|怎么做)",
+        r"^(接下来|下一步|现在|目前)(呢|怎么办|做什么|干什么|怎么做|该做什么|应该做什么)?$",
+        r"^(我|我们)(现在|目前)?(该做什么|应该做什么|做什么|干什么|怎么办|怎么做)$",
+    )
+    return any(re.search(pattern, compact) for pattern in guidance_patterns)
 
 
 def should_explicitly_advance_outline_stage(text: str) -> bool:

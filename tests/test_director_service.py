@@ -734,7 +734,7 @@ def test_outline_next_step_question_reports_status_without_rerun(tmp_path):
 
 
 def test_outline_next_step_variants_do_not_trigger_agent(tmp_path):
-    for text in ("下一步呢？", "现在怎么办？"):
+    for text in ("下一步呢？", "现在怎么办？", "目前我该做什么？"):
         store = LocalStore(tmp_path / text.strip("？"))
         make_review_lock_options_ready_state(store)
         service = DirectorService(store, CodexCLIAdapter(mock=True), MockSearchBackend())
