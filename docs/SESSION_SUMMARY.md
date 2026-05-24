@@ -1,7 +1,7 @@
 # 会话摘要与上下文压缩记录
 
 更新时间：2026-05-24
-项目路径：`/home/ubuntu/1.project/ai-novelist-v1`
+项目路径：`/home/ubuntu/1.project/ai-novelist`
 
 ## 1. 项目目标
 
@@ -67,6 +67,21 @@
 - `.venv/bin/python -m pytest`：288 passed。
 - `.venv/bin/python tests/smoke_author_craft_mock.py`：1 passed。
 - CLI 手工验证：`index-corpus`、`extract-craft --mock`、`craft-profiles`、`craft-brief` 均成功。
+
+### 人物关系蓝图整改：已完成
+
+能力：
+
+- 新增 `src/ai_novelist/characters_framework.py`，提供 14 项完整人物关系蓝图、full/compact 标题清单、结构校验、摘要、stage memory 和兜底补节。
+- `graph_outline.py` 在 `characters` 阶段接入专用 framework prompt、结构修复和 artifact summary/memory，角色/合成 prompt 统一注入关系信息差、世界观继承和关系约束。
+- `outline/stage_contracts.py`、`outline/renderers.py`、`outline/question_filter.py` 以及 `adapters/codex_cli.py` 已同步改造，`characters` 阶段现在以关系演化、秘密揭露、阵营继承和最多 4 个确认问题为核心。
+- `tests/` 已补充人物关系框架与 outline 协作的覆盖，确保提示词和标题顺序都按新蓝图输出。
+
+验证：
+
+- `python3 -m py_compile src/ai_novelist/characters_framework.py src/ai_novelist/outline/stage_contracts.py src/ai_novelist/outline/renderers.py src/ai_novelist/outline/question_filter.py src/ai_novelist/graph_outline.py src/ai_novelist/adapters/codex_cli.py tests/test_characters_framework.py tests/test_outline_collaboration.py`：通过。
+- 轻量导入检查：人物关系框架标题校验通过，`characters` 阶段合成提示词包含 `## 人物关系稿`、`## 十三、待确认问题` 和关系蓝图约束，问题过滤上限为 4。
+- 当前环境缺少可用的 `.venv` 和 `pytest`，因此未运行完整 pytest / smoke 套件。
 
 ## 3. 最新架构摘要
 

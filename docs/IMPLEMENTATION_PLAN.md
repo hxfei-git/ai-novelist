@@ -15,6 +15,7 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
 - 本地小说知识库优先 RAG：chat 可配置本地 `.txt/.md` 语料目录，research 优先检索本地语料；本地无命中时回退 mock 或真实联网搜索。
 - 大纲共创增强：outline collaboration graph，支持方向提案、生成、审稿、用户反馈、修订、版本比较、锁定约束、查看正文和保存。
 - 世界观大纲框架修复：`worldbuilding` 阶段已改为 33 项完整小说世界大纲，按世界组成部分组织，并接入 prompt、结构校验、一次 repair、兜底补节、专用摘要和 `worldbuilding.md` 同步保存。
+- 人物关系蓝图整改：`characters` 阶段已升级为完整“人物关系稿”蓝图，新增 `src/ai_novelist/characters_framework.py` 负责 14 个顶级标题、结构校验、兜底补节、摘要和 stage memory；`graph_outline.py` 的角色/合成 prompt 注入专用框架、关系约束 guard 和结构修复；`stage_contracts.py`、`outline/renderers.py`、`outline/question_filter.py`、`adapters/codex_cli.py` 与测试同步改造为以关系演化、秘密信息差、阵营继承和最多 4 个确认问题为核心。
 - Director 交互增强：用户始终只和 Director 对话；每轮 chat 自然语言输入优先调用 LLM Director prompt 做意图判断，确定性规则只作为模型失败兜底；Director 会把口语化、多项确认和“接收/接受/同意”等回复转译为下游 Agent 可执行的 `instruction` 与 `locked_constraints`。状态类请求如“查看当前状态”会先走确定性直达路由，退出类请求如 `quit/exit/退出/stop` 会在进入图之前硬短路，避免无谓调用模型或误触发大纲阶段。
 - Director 确认门增强：`chat/ask_user/show_* /stop` 直接返回；research、大纲修订/推进、章节规划、写作、审稿、修订、定稿、导出、保存、小说圣经更新等写操作都会先返回 1/2 确认选项，用户确认后才执行工作流。
 - mock 模式：不依赖外部模型即可端到端验证。
@@ -437,7 +438,8 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 - `tests/test_graph_chapter_plan.py`：章节卡生成、必需小节、状态更新、artifact 注册、`plan_chapters` alias。
 - `tests/test_graph_scene.py`：场景卡生成、必需字段、状态更新、artifact 注册、缺章节卡提示。
 - `tests/test_worldbuilding_framework.py`：33 项世界观框架标题、渲染、结构校验和兜底补节。
-- `tests/test_outline_collaboration.py`：大纲 approve、revise、lock、variant、旧 state 兼容、chat 路由到大纲修订，并覆盖 worldbuilding prompt 注入、结构 repair、mock 生成和根目录 `worldbuilding.md` 同步。
+- `tests/test_characters_framework.py`：14 项人物关系蓝图标题、渲染、结构校验、缺失补齐、摘要和 memory 提取。
+- `tests/test_outline_collaboration.py`：大纲 approve、revise、lock、variant、旧 state 兼容、chat 路由到大纲修订，并覆盖 worldbuilding / characters prompt 注入、结构 repair、mock 生成和根目录 `worldbuilding.md`、`outline/characters.md` 同步。
 - `tests/test_research_workflow.py`：research 触发、mock 搜索、参考简报持久化、research 后进入 outline、本地优先后端配置和回退。
 - `tests/test_search_backend.py`：WebSearchBackend、本地 `.txt/.md` 检索、切片 metadata、关键词排序、本地优先 fallback。
 - `tests/test_research_workflow.py` 覆盖 CLI `--search-provider` 与 provider 专用 API Key 的组合，例如 `--search-provider exa` 读取 `EXA_API_KEY`。
@@ -2239,11 +2241,13 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
   - `stage_guard.py`：阶段越权、无来源 canon、公式绝对因果、抽象机制语言检测与改写降级。
   - `question_filter.py`：过滤模型自造二选一确认问题。
   - `renderers.py`：阶段输出规则统一渲染。
+  - `characters_framework.py`：人物关系蓝图的 14 项标题、结构校验、兜底补节、摘要和 stage memory。
 - `graph_outline.py`：
   - `OUTLINE_STAGES` 切换为七阶段，`STAGE_ROLES` 删除 `concept`。
   - `detect_stage_reference` 将“故事概念/核心概念/一句话故事”映射到 `direction`。
   - `ensure_outline_stage`/legacy 逻辑改为复用新模块。
   - `run_outline_stage_node` 接入 `guard_stage_output` + `filter_stage_confirmation_questions`。
+  - `characters` 阶段接入专用 framework prompt、结构修复和 artifact summary/memory；人物关系输出从静态角色表升级为全文关系蓝图。
   - `outline_stage_synthesizer_output_rule` 改为委托 `build_stage_output_rule`，移除旧世界观模板结构（`世界运行原则/关键边界/冲突资源/代价红线`）。
   - `sanitize_direction_stage_output` 改为委托统一质量门并做标题/行政词兜底清洗。
   - 最终锁定文案改为七阶段；最终合并按 active stages 排序，并兼容追加“旧版故事概念参考”。

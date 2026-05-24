@@ -252,9 +252,10 @@ def test_non_direction_synthesizer_prompt_avoids_fake_choice_menu():
 
     assert "请按以下 Markdown 结构输出" in prompt
     assert "## 人物关系稿" in prompt
-    assert "人物关系稿" in prompt
-    assert "## 仍需确认的问题" in prompt
-    assert "## 仍需确认的问题" in prompt
+    assert "## 一、全角色总表" in prompt
+    assert "## 十三、待确认问题" in prompt
+    assert "作者侧真相" in prompt
+    assert "读者侧认知" in prompt
 
 
 def test_outline_role_prompts_include_stage_boundaries_for_all_stages():
@@ -275,17 +276,21 @@ def test_outline_synthesizer_prompts_use_stage_specific_structures():
 
     concept_prompt = build_outline_stage_synthesizer_prompt(state, "direction", [])
     world_prompt = build_outline_stage_synthesizer_prompt(state, "worldbuilding", [])
+    characters_prompt = build_outline_stage_synthesizer_prompt(state, "characters", [])
     chapter_prompt = build_outline_stage_synthesizer_prompt(state, "chapter_outline", [])
 
     assert "## 方向定位稿" in concept_prompt
     assert "## 一、世界核心设定" in world_prompt
     assert "## 三十三、结局后的世界格局" in world_prompt
+    assert "## 人物关系稿" in characters_prompt
+    assert "## 四、核心人物关系卡" in characters_prompt
     assert "## 章节大纲稿" in chapter_prompt
     assert "STAGE_CONTRACT" in concept_prompt
     assert "不要按题材分类" in world_prompt
+    assert "人物关系不是人物小传" in characters_prompt
     assert "章节编号" in chapter_prompt
     assert "主要冲突" in chapter_prompt
-    assert len({concept_prompt, world_prompt, chapter_prompt}) == 3
+    assert len({concept_prompt, world_prompt, characters_prompt, chapter_prompt}) == 4
 
 
 def test_concept_stage_prompt_limits_output_to_core_concept():
@@ -377,6 +382,9 @@ def test_characters_prompt_uses_direction_and_worldbuilding_context():
     assert "世界观设定（options_ready）" in prompt
     assert "气运可以被观测、借贷和吞噬" in prompt
     assert "人物关系必须承接方向定位和世界观规则" in prompt
+    assert "作者侧真相" in prompt
+    assert "角色侧认知" in prompt
+    assert "读者侧认知" in prompt
 
 
 def test_characters_prompt_requires_mainline_conflict_function():
@@ -386,10 +394,13 @@ def test_characters_prompt_requires_mainline_conflict_function():
     synth_prompt = build_outline_stage_synthesizer_prompt(state, "characters", [])
 
     assert "STAGE_CONTRACT" in role_prompt
+    assert "关系演化时间轴" in role_prompt
     assert "人物关系稿" in synth_prompt
-    assert "主角" in synth_prompt
-    assert "关键关系" in synth_prompt
-    assert "对立面" in synth_prompt
+    assert "全角色总表" in synth_prompt
+    assert "核心人物关系卡" in synth_prompt
+    assert "秘密与信息差网络" in synth_prompt
+    assert "关系事件种子" in synth_prompt
+    assert "锁定项与可变项" in synth_prompt
 
 
 def test_characters_prompt_preserves_user_requested_terms_as_conflict_function():
@@ -400,6 +411,8 @@ def test_characters_prompt_preserves_user_requested_terms_as_conflict_function()
 
     assert "人物关系稿" in prompt
     assert "STAGE_CONTRACT" in prompt
+    assert "用户原始输入或锁定产物已明确包含" in prompt
+    assert "必须服务目标、动机、权力关系" in prompt
 
 
 def test_story_flow_prompt_uses_all_prior_stage_contexts():

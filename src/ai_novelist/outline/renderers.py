@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ai_novelist.characters_framework import full_characters_headings
 from ai_novelist.outline.stage_contracts import StageSlot, get_stage_contract
 from ai_novelist.state import NovelState
 from ai_novelist.worldbuilding_framework import full_worldbuilding_headings
@@ -51,6 +52,25 @@ def _stage_structure(stage: str, slots: tuple[StageSlot, ...]) -> str:
             "- 最后可追加 `## 仍需确认的问题`，最多 5 条，只问会影响后续剧情的大问题。\n"
             "- 不要按题材分类。\n"
             "- 不得只输出“世界运行原则、关键边界、冲突资源、代价红线”。\n\n"
+            "必须包含并按顺序输出这些标题：\n"
+            f"{heading_lines}"
+        )
+    if stage == "characters":
+        heading_lines = "\n".join(f"- `## {heading}`" for heading in full_characters_headings())
+        return (
+            "人物关系阶段不是人物小传，也不是静态人设表。必须输出覆盖全文的关系蓝图，"
+            "并严格使用以下 14 个顶级小节作为 Markdown 二级标题。\n\n"
+            "输出格式：\n"
+            "- 只输出 Markdown。\n"
+            "- 顶部不要写评审报告、分析过程或“以下是”。\n"
+            "- 从 `## 人物关系稿` 开始，依次写到 `## 十三、待确认问题`。\n"
+            "- 每个小节写 2-6 条 bullet；关系卡、时间轴和表格可用紧凑 Markdown 表格。\n"
+            "- 必须继承 direction 与 worldbuilding，不得凭空新增世界规则、组织或阵营。\n"
+            "- 阵营 / 组织关系只能从 worldbuilding 已有设定提取；没有相关设定时写“暂无，不强行生成”。\n"
+            "- 核心关系必须写清作者侧真相、角色侧认知、读者侧认知和剧情侧演化。\n"
+            "- 重要秘密必须有伏笔、部分揭露、完整揭露和关系后果。\n"
+            "- `## 十三、待确认问题` 最多 4 条，只问会影响全文结构的问题；若无写“暂无，当前阶段可继续修改或确认进入下一阶段”。\n"
+            "- 不得写章节正文、完整故事流程、场景卡或无主线功能角色堆砌。\n\n"
             "必须包含并按顺序输出这些标题：\n"
             f"{heading_lines}"
         )

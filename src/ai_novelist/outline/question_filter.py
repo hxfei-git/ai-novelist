@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from ai_novelist.outline.source_ledger import build_source_ledger, looks_like_concrete_canon
+from ai_novelist.outline.stage_contracts import get_stage_contract
 from ai_novelist.state import NovelState
 
 
@@ -28,7 +29,10 @@ def filter_stage_confirmation_questions(stage: str, questions: list[str], state:
                 q = "该具体设定缺少来源，是否先保留为待确认项？"
         if q not in filtered:
             filtered.append(q)
-    max_questions = 1 if stage == "direction" else 3
+    try:
+        max_questions = get_stage_contract(stage).max_questions
+    except KeyError:
+        max_questions = 1 if stage == "direction" else 3
     return filtered[:max_questions]
 
 
