@@ -50,8 +50,8 @@ def test_outline_editor_prompt_keeps_parseable_status_and_review_boundary():
     assert "QUALITY_SCORE: 0-100" in prompt
     assert "只审稿，不重写大纲，不新增 canon" in prompt
     assert "修改建议必须指向已有大纲位置" in prompt
-    assert "主要问题最多 5 条" in prompt
-    assert "修改建议最多 5 条" in prompt
+    assert "主要问题最多 10 条" in prompt
+    assert "修改建议最多 10 条" in prompt
     assert "每条不超过 80 中文字符" in prompt
     assert "不得把建议写成新的稳定设定" in prompt
     for forbidden in ("完整重写大纲", "新增世界观", "人物关系新机制", "章节正文", "长篇分析过程"):
@@ -70,7 +70,7 @@ def test_outline_reviser_prompt_defaults_to_minimal_revision():
     assert "只有调用方明确要求" in prompt
     assert "变更项最多 8 条" in prompt
     assert "每条不超过 100 中文字符" in prompt
-    assert "待确认最多 3 条" in prompt
+    assert "待确认最多 10 条" in prompt
     assert "修订摘要" in prompt
     assert "保留约束" in prompt
     for forbidden in ("无依据大改", "重写锁定约束", "改动未被要求的世界观/人物关系", "扩写正文"):

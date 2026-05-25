@@ -231,12 +231,20 @@ def _stage_structure(stage: str, slots: tuple[StageSlot, ...]) -> str:
         return (
             "STATUS: pass|revise|stop\n"
             "## 阶段承接检查\n"
+            "- 必须逐项核对前序阶段继承链：direction -> worldbuilding -> characters -> story_flow -> volume_outline -> chapter_outline。\n"
+            "- 只写能回指到前序阶段或已锁定产物的稳定项，不要把候选内容写成 canon。\n"
             "## 已锁定 canon 清单\n"
-            "## 未解决风险\n"
+            "- 每条必须包含：项目 / 来源阶段或锁定产物 / 依据 / 当前用途。\n"
+            "- 无法回指来源的内容必须移到风险或回改阶段，不得留在锁定清单。\n"
+            "## 风险分级\n"
+            "- 阻塞型结构问题：会影响最终锁定或章节卡开工。\n"
+            "- 非阻塞细节问题：可先锁定，但需要在章节卡前补齐或继续校准。\n"
             "## 需要回改的阶段\n"
+            "- 按最小回改成本排序，说明回改目标与原因。\n"
             "## 是否可进入章节卡\n"
-            "\n## 仍需确认的问题\n"
-            "- 最多 10 条，仅允许锁定/回改决策问题。"
+            "- 只写 pass / revise / stop 之一，并给出简短理由。\n\n"
+            "## 仍需确认的问题\n"
+            "- 只保留仍会影响锁定或回改判断的问题，最多 10 条。"
         )
     lines = [f"## {get_stage_contract(stage).label}稿"]
     for slot in slots:

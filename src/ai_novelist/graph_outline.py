@@ -442,6 +442,52 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
     synthesis = guarded.text
     if stage == "worldbuilding":
         state.worldbuilding = synthesis
+
+    if stage == "review_lock":
+        issue_buckets = extract_review_lock_issue_buckets(synthesis)
+        combined_issues = review_lock_issue_lines(issue_buckets)
+        artifact = {
+            "stage": stage,
+            "label": STAGE_LABELS[stage],
+            "status": "options_ready",
+            "path": f"outline/{stage}.md",
+            "role_reviews": role_reviews,
+            "synthesis": synthesis,
+            "summary": summarize_outline_stage_for_artifact(stage, synthesis),
+            "stage_memory": extract_outline_stage_memory_for_artifact(stage, synthesis),
+            "pending_questions": [],
+            "review_lock_issues": issue_buckets,
+            "question_round": 0,
+            "max_question_rounds": MAX_STAGE_QUESTION_ROUNDS,
+            "guard_issues": [
+                {
+                    "code": issue.code,
+                    "severity": issue.severity,
+                    "message": issue.message,
+                    "excerpt": issue.excerpt,
+                }
+                for issue in guarded.issues
+            ],
+            "user_feedback": state.user_request,
+            "updated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        }
+        state.outline_stage_artifacts[stage] = artifact
+        state.outline_stage_status = "options_ready"
+        state.review_status = "revision_requested" if issue_buckets["blocking"] else "draft"
+        state.active_workflow = "outline"
+        state.current_stage = stage
+        state.active_artifact = "outline_stage"
+        state.director_action = "run_outline_stage"
+        state.outline_stage_summaries[stage] = artifact["summary"]
+        state.pending_questions = combined_issues
+        state.pending_question = review_lock_pending_question_text(issue_buckets)
+        state.director_message = stage_ready_message(stage, combined_issues, artifact)
+        record_stage_history(state, "run", stage, state.user_request)
+        emit_progress(progress, "OutlineStage", f"正在保存「{label}」阶段产物...")
+        save_outline_stage_outputs(state, stage, format_stage_markdown(artifact), store)
+        store.save_state(state)
+        return state.to_dict()
+
     questions = extract_stage_confirmation_questions(synthesis)
     questions = filter_stage_confirmation_questions(stage, questions, state, synthesis)
     question_round = stage_question_round(state, stage, bool(questions))
@@ -496,7 +542,7 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
     state.active_artifact = "outline_stage"
     state.director_action = "run_outline_stage"
     state.outline_stage_summaries[stage] = artifact["summary"]
-    state.director_message = stage_ready_message(stage, questions)
+    state.director_message = stage_ready_message(stage, questions, artifact)
     if questions:
         state.pending_questions = questions
         state.pending_question = "\n".join(f"{index}. {question}" for index, question in enumerate(questions, start=1))
@@ -599,6 +645,83 @@ def advance_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalSt
         return run_outline_stage_node(state.to_dict(), adapter, store, progress)
 
     artifact = dict(state.outline_stage_artifacts[stage])
+    if stage == "review_lock":
+        issue_buckets = review_lock_issue_buckets_from_artifact(artifact)
+        blocking_issues = review_lock_blocking_issues(issue_buckets)
+        detail_issues = review_lock_detail_issues(issue_buckets)
+        combined_issues = review_lock_issue_lines(issue_buckets)
+        artifact["review_lock_issues"] = issue_buckets
+        if blocking_issues:
+            artifact["pending_questions"] = []
+            artifact["status"] = "options_ready"
+            state.outline_stage_artifacts[stage] = artifact
+            state.outline_stage_status = "options_ready"
+            state.review_status = "revision_requested"
+            state.active_workflow = "outline"
+            state.current_stage = stage
+            state.active_artifact = "outline_stage"
+            state.director_action = "revise_outline"
+            state.outline_stage_summaries[stage] = artifact["summary"]
+            state.pending_questions = combined_issues
+            state.pending_question = review_lock_pending_question_text(issue_buckets)
+            state.director_message = review_lock_blocking_message(issue_buckets)
+            record_stage_history(state, "review_lock_blocked", stage, state.user_request)
+            store.save_state(state)
+            return state.to_dict()
+        default_summary = ""
+        if detail_issues:
+            default_summary = answer_stage_unresolved_questions(
+                state=state,
+                stage=stage,
+                artifact=artifact,
+                questions=detail_issues,
+                user_text=state.user_request,
+                adapter=adapter,
+                store=store,
+                progress=progress,
+            )
+            artifact["default_discretion_answers"] = default_summary
+            artifact["default_discretion_summary"] = default_summary
+            append_artifact_memory(artifact, default_summary)
+        artifact["pending_questions"] = []
+        artifact["status"] = "locked"
+        artifact["locked_at"] = datetime.now(UTC).isoformat(timespec="seconds")
+        state.outline_stage_artifacts[stage] = artifact
+        state.pending_question = ""
+        state.pending_questions = []
+        record_stage_history(state, "lock", stage, default_summary or state.user_request)
+
+        next_stage = next_outline_stage(stage)
+        if next_stage is None:
+            emit_progress(progress, "OutlineStage", "正在合并七阶段产物并保存最终大纲...")
+            finalize_locked_outline(state, store)
+            store.save_state(state)
+            outline_message = state.director_message
+            try:
+                from ai_novelist.graph_bible import build_bible_graph
+
+                emit_progress(progress, "Bible", "正在基于锁定大纲更新小说圣经...")
+                bible_state = NovelState.from_dict(build_bible_graph(adapter, store).invoke(state.to_dict()))
+                bible_state.director_action = "advance_outline_stage"
+                bible_state.director_message = outline_message + "\n" + bible_state.director_message
+                store.save_state(bible_state)
+                return bible_state.to_dict()
+            except Exception as exc:  # pragma: no cover - defensive fallback keeps outline locking usable.
+                state.last_agent_reports.append({"agent": "graph_bible", "status": "error", "error": str(exc)})
+                state.last_agent_reports = state.last_agent_reports[-20:]
+                store.save_state(state)
+                return state.to_dict()
+
+        emit_progress(progress, "OutlineStage", f"正在进入第 {stage_number(next_stage)} 阶段「{STAGE_LABELS[next_stage]}」...")
+        state.outline_stage = next_stage  # type: ignore[assignment]
+        state.outline_stage_status = "collecting"
+        state.current_stage = next_stage
+        state.director_action = "run_outline_stage"
+        state.director_message = f"已锁定{STAGE_LABELS[stage]}，进入第 {stage_number(next_stage)} 阶段：{STAGE_LABELS[next_stage]}。"
+        state.pending_question = f"请确认是否锁定{STAGE_LABELS[next_stage]}并进入下一阶段，或继续提出修改。"
+        state.pending_questions = [state.pending_question]
+        store.save_state(state)
+        return run_outline_stage_node(state.to_dict(), adapter, store, progress)
     unresolved = stage_unresolved_questions(state, artifact)
     director_summary = str(state.director_task_args.get("default_discretion_summary") or "").strip()
     default_summary = ""
@@ -1953,8 +2076,113 @@ def sanitize_direction_stage_output(markdown: str, user_text: str = "") -> str:
     return render_direction_stage_markdown("\n".join(cleaned_lines))
 
 
-def stage_ready_message(stage: str, questions: list[str] | None = None) -> str:
+def extract_review_lock_issue_buckets(markdown: str) -> dict[str, list[str]]:
+    buckets: dict[str, list[str]] = {
+        "blocking": [],
+        "detail": [],
+        "rework": [],
+        "questions": [],
+    }
+    current: str | None = None
+    headings = {
+        "阻塞型结构问题": "blocking",
+        "结构阻塞问题": "blocking",
+        "非阻塞细节问题": "detail",
+        "细节问题": "detail",
+        "需要回改的阶段": "rework",
+        "回改阶段": "rework",
+        "仍需确认的问题": "questions",
+        "待确认问题": "questions",
+        "待确认的问题": "questions",
+    }
+    for raw_line in (markdown or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith(("## ", "### ")):
+            title = line.lstrip("#").strip()
+            current = headings.get(title)
+            continue
+        if current is None:
+            continue
+        if line in {"暂无", "暂无。", "无", "无。"} or "暂无" in line:
+            continue
+        cleaned = re.sub(r"^[-*+•\s]*", "", line)
+        cleaned = re.sub(r"^\d+[.、)]\s*", "", cleaned).strip(" ：:-")
+        if cleaned and cleaned not in buckets[current]:
+            buckets[current].append(cleaned)
+    return {key: value[:10] for key, value in buckets.items()}
+
+
+def review_lock_blocking_issues(issue_buckets: dict[str, list[str]]) -> list[str]:
+    blocking = list(dict.fromkeys((issue_buckets.get("blocking") or []) + (issue_buckets.get("rework") or [])))
+    return blocking[:10]
+
+
+def review_lock_detail_issues(issue_buckets: dict[str, list[str]]) -> list[str]:
+    detail = list(dict.fromkeys((issue_buckets.get("detail") or []) + (issue_buckets.get("questions") or [])))
+    return detail[:10]
+
+
+def review_lock_issue_lines(issue_buckets: dict[str, list[str]]) -> list[str]:
+    combined = review_lock_blocking_issues(issue_buckets) + review_lock_detail_issues(issue_buckets)
+    return list(dict.fromkeys(item for item in combined if item))[:10]
+
+
+def review_lock_pending_question_text(issue_buckets: dict[str, list[str]]) -> str:
+    blocking = review_lock_blocking_issues(issue_buckets)
+    detail = review_lock_detail_issues(issue_buckets)
+    if blocking:
+        detail_note = f"，另有 {len(detail)} 项非阻塞细节问题" if detail else ""
+        return f"审稿锁定仍有 {len(blocking)} 项阻塞型结构问题{detail_note}；请先回改前序阶段，再确认是否锁定。"
+    if detail:
+        return f"审稿锁定剩余 {len(detail)} 项非阻塞细节问题；可以补齐后再锁定，或明确接受当前风险并进入章节卡。"
+    return "审稿锁定未发现阻塞型结构问题，可以确认锁定并进入章节卡。"
+
+
+def review_lock_blocking_message(issue_buckets: dict[str, list[str]]) -> str:
+    blocking = review_lock_blocking_issues(issue_buckets)
+    detail = review_lock_detail_issues(issue_buckets)
+    lines = ["审稿锁定暂不通过，需要先回改前序阶段。"]
+    if blocking:
+        lines.append("阻塞型结构问题：")
+        lines.extend(f"- {item}" for item in blocking)
+    if detail:
+        lines.append("非阻塞细节问题：")
+        lines.extend(f"- {item}" for item in detail)
+    lines.append("请先回改这些阶段，再重新进入审稿锁定。")
+    return "\n".join(lines)
+
+
+def review_lock_issue_buckets_from_artifact(artifact: dict) -> dict[str, list[str]]:
+    buckets = artifact.get("review_lock_issues")
+    if isinstance(buckets, dict):
+        normalized: dict[str, list[str]] = {"blocking": [], "detail": [], "rework": [], "questions": []}
+        for key in normalized:
+            value = buckets.get(key)
+            if isinstance(value, list):
+                normalized[key] = [str(item).strip() for item in value if str(item).strip()][:10]
+        return normalized
+    synthesis = str(artifact.get("synthesis") or "")
+    return extract_review_lock_issue_buckets(synthesis)
+
+
+def stage_ready_message(stage: str, questions: list[str] | None = None, artifact: dict | None = None) -> str:
     message = f"第 {stage_number(stage)} 阶段「{STAGE_LABELS[stage]}」已完成本轮共创。"
+    if stage == "review_lock":
+        issue_buckets = review_lock_issue_buckets_from_artifact(artifact or {})
+        blocking = review_lock_blocking_issues(issue_buckets)
+        detail = review_lock_detail_issues(issue_buckets)
+        if blocking or detail:
+            message += "\n\n本阶段分为阻塞型结构问题和非阻塞细节问题。"
+            if blocking:
+                message += f"\n- 阻塞型结构问题：{len(blocking)} 项。"
+            if detail:
+                message += f"\n- 非阻塞细节问题：{len(detail)} 项。"
+            message += "\n\n你可以先回改阻塞项；细节项可以在锁定前补齐，或明确接受当前风险后继续。"
+        else:
+            message += "\n\n暂未发现阻塞型结构问题；你可以确认锁定并进入章节卡。"
+        return message
     if questions:
         question_lines = "\n".join(f"{index}. {question}" for index, question in enumerate(questions, start=1))
         return (

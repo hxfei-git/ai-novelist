@@ -32,4 +32,5 @@ def test_volume_outline_framework_sets_volume_level_boundaries():
     assert "不要写逐章细纲" in prompt
     assert "不要替代 chapter_outline" in prompt
     assert "未确认信息写成候选方向" in prompt
+    assert "仍需确认的问题`，但最多 10 条" in prompt
     assert "卷级约束只在确有必要时附加" in prompt
