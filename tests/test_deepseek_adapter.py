@@ -1,4 +1,5 @@
 import json
+import ssl
 import urllib.error
 
 import pytest
@@ -134,3 +135,24 @@ def test_deepseek_adapter_raises_on_http_error(monkeypatch, tmp_path):
 
     with pytest.raises(DeepSeekAPIError, match="HTTP 401"):
         adapter.complete("prompt", tmp_path)
+
+def test_deepseek_adapter_wraps_ssl_read_errors(monkeypatch, tmp_path):
+    class BrokenResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def read(self):
+            raise ssl.SSLError("DECRYPTION_FAILED_OR_BAD_RECORD_MAC")
+
+    def fake_urlopen(request, timeout):
+        return BrokenResponse()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    adapter = DeepSeekAdapter(api_key="sk-test")
+
+    with pytest.raises(DeepSeekAPIError, match="connection failed"):
+        adapter.complete("prompt", tmp_path)
+

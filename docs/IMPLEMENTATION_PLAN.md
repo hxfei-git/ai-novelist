@@ -25,6 +25,7 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
 - 阶段 3 飞书长连接机器人最小闭环：支持飞书单聊文本、`/project` 项目切换、纯文本确认选项和同步调用 DirectorService。
 - 阶段 6+7 章节卡与场景卡管线：新增 Chapter Planning Graph 和 Scene Design Graph，可从锁定大纲/NovelBible 生成 `chapter_card.md`，再拆成 `scene_cards.md`。
 - 工作流错误保护：chapter planning、scene design、drafting、review、revision 的关键节点在下游 Agent 失败时会直接短路返回，避免继续保存空白或半成品 artifact，并保持 `review_status="error"` 供 CLI/上层处理。
+- DeepSeek 适配器现在会把底层连接和 SSL 读失败包装为 `DeepSeekAPIError`，确保真实模型网络波动进入统一 AgentAdapterError/error-state 路径，而不是让 CLI traceback 退出。
 
 未完成：
 - 真实联网搜索后端已实现：`WebSearchBackend` 支持 SerpAPI、Tavily、Exa；默认仍是 mock，需要 API Key 才会联网。

@@ -35,6 +35,7 @@
 - 单步 Agent 命令：`plan-outline`、`plan-chapters`、`write-chapter`、`review`。`worldbuilding` 已并入 outline 的 `worldbuilding` 阶段。
 - Phase 6+7：新增章节卡与场景卡管线，DirectorService 支持 `plan_chapter` 和 `plan_scenes`，旧 `plan-chapters` CLI 保持兼容。
 - 本次补充了工作流错误短路：chapter planning、scene design、drafting、review、revision 的关键节点在下游 Agent 失败时会直接返回 error，避免继续写入空白或半成品 artifact；对应失败路径测试已补充。
+- 修复 DeepSeek 响应读取阶段的 SSL/连接异常未被包装的问题；`ssl.SSLError` 现在会转为 `DeepSeekAPIError`，由上层 chat/graph 错误处理路径展示并保留会话。验证：`.venv/bin/python -m pytest tests/test_deepseek_adapter.py tests/test_cli_chat.py` 通过。
 
 ### 世界观大纲框架修复：已完成
 

@@ -108,6 +108,8 @@ class DeepSeekAdapter(AgentAdapter):
             raise DeepSeekAPIError(f"DeepSeek API request failed: {exc.reason}") from exc
         except TimeoutError as exc:
             raise DeepSeekAPIError(f"DeepSeek API timed out after {self.timeout_seconds}s") from exc
+        except OSError as exc:
+            raise DeepSeekAPIError(f"DeepSeek API connection failed: {exc}") from exc
 
         text = self._extract_text(body)
         if not text.strip():
