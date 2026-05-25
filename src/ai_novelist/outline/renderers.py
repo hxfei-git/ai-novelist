@@ -7,6 +7,7 @@ import re
 from ai_novelist.characters_framework import full_characters_headings
 from ai_novelist.outline.stage_contracts import StageSlot, get_stage_contract
 from ai_novelist.state import NovelState
+from ai_novelist.story_flow_framework import story_flow_required_headings
 from ai_novelist.worldbuilding_framework import full_worldbuilding_headings
 
 
@@ -169,6 +170,23 @@ def _stage_structure(stage: str, slots: tuple[StageSlot, ...]) -> str:
             "- 重要秘密必须有伏笔、部分揭露、完整揭露和关系后果。\n"
             "- `## 十三、待确认问题` 最多 4 条，只问会影响全文结构的问题；若无写“暂无，当前阶段可继续修改或确认进入下一阶段”。\n"
             "- 不得写章节正文、完整故事流程、场景卡或无主线功能角色堆砌。\n\n"
+            "必须包含并按顺序输出这些标题：\n"
+            f"{heading_lines}"
+        )
+    if stage == "story_flow":
+        heading_lines = "\n".join(f"- `### {heading}`" for heading in story_flow_required_headings())
+        return (
+            "故事流程阶段不是章节大纲，也不是分卷细纲。必须输出全书级故事流程蓝图，"
+            "并严格使用以下 14 个模块作为 Markdown 三级标题。\n\n"
+            "输出格式：\n"
+            "- 只输出 Markdown。\n"
+            "- 顶部不要写评审报告、分析过程或“以下是”。\n"
+            "- 必须以 `## 故事流程稿` 开始。\n"
+            "- 每个必填标题下必须有具体、可执行的内容，不能只有空泛概念或空标题。\n"
+            "- 允许使用简洁表格，但不要输出逐章列表，不要写正文。\n"
+            "- 必须承接 direction、worldbuilding、characters 已锁定内容；未锁定信息写成候选或待确认。\n"
+            "- `### 仍需确认的问题` 最多 3 条，只问会影响主线阶段、核心代价、关键反转或终局选择的问题；若无写“暂无”。\n"
+            "- 不得替代 volume_outline 输出完整分卷细纲。\n\n"
             "必须包含并按顺序输出这些标题：\n"
             f"{heading_lines}"
         )

@@ -2379,3 +2379,24 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest tests/test_codex_adapter.py tests/test_director_service.py
 # 41 passed
 ```
+
+
+## 12. 本轮更新：story_flow 生成整改完成
+
+- `story_flow` 阶段契约已从 5 个短摘要槽扩展为 14 个全书级流程模块，并将 `max_total_chars` 提升到 8000，`max_questions` 调整为 3。
+- 新增 `src/ai_novelist/story_flow_framework.py`，统一定义 14 个必需模块、框架渲染和输出边界，供角色短评与合成器 Prompt 复用。
+- 新增 `src/ai_novelist/outline/story_flow_structure.py`，提供标题别名归一、结构校验、空节检测、确定性兜底补齐、摘要和 stage memory 提取。
+- `graph_outline.py` 已将 `story_flow` 框架注入到角色 Prompt 和 Synthesizer Prompt，扩展角色分工为主线结构、冲突升级、人物弧光、悬念伏笔、爽点情绪和终局回收，并在保存前接入结构修复。
+- `renderers.py` 已将 `story_flow` 输出规则改为 `## 故事流程稿` + 14 个 `###` 模块，避免继续产出短摘要。
+- `adapters/codex_cli.py` 的 mock 输出已补齐完整 `story_flow`，并支持 `story_flow_structure_repair` 的修复提示。
+- 新增测试：`tests/test_story_flow_contract.py`、`tests/test_story_flow_framework.py`、`tests/test_story_flow_structure.py`，并更新 `tests/test_outline_collaboration.py`、`tests/test_graph_writer.py` 的相关断言。
+
+验证：
+
+```bash
+.venv/bin/python -m compileall src tests
+.venv/bin/python -m pytest
+.venv/bin/python tests/smoke_outline_collaboration.py
+```
+
+结果：`302 passed`，`outline collaboration smoke ok`。

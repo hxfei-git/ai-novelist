@@ -427,6 +427,8 @@ def test_story_flow_prompt_uses_all_prior_stage_contexts():
     assert "气运规则造成修行代价" in prompt
     assert "师徒关系隐藏吞噬冲突" in prompt
     assert "故事流程必须承接方向定位、世界观代价和人物关系冲突" in prompt
+    assert "STORY_FLOW_FRAMEWORK" in prompt
+    assert "故事主线推进" in prompt
 
 
 def test_story_flow_prompt_limits_flow_to_narrative_structure():
@@ -435,11 +437,11 @@ def test_story_flow_prompt_limits_flow_to_narrative_structure():
     role_prompt = build_outline_stage_role_prompt(state, "story_flow", "主线结构 Agent")
     synth_prompt = build_outline_stage_synthesizer_prompt(state, "story_flow", [])
 
-    assert "流程只表示叙事流程" in role_prompt
+    assert "这里的流程是全书级主线骨架" in role_prompt
     assert "故事流程稿" in synth_prompt
-    assert "开局压力" in synth_prompt
-    assert "中段升级" in synth_prompt
-    assert "终局方向" in synth_prompt
+    assert "故事主线推进" in synth_prompt
+    assert "故事阶段划分" in synth_prompt
+    assert "结局路径" in synth_prompt
 
 
 def test_volume_outline_prompt_limits_output_to_volume_level():

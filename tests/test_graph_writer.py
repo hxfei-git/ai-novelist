@@ -308,7 +308,7 @@ def test_chat_prints_outline_body_after_generate_outline(tmp_path, capsys):
 
     assert result["director_action"] == "run_outline_stage"
     assert "当前大纲阶段：方向定位 / options_ready" in captured
-    assert "重生魔门苟道成长" in captured
+    assert "失忆是先天缺陷" in captured
     assert result["outline"] == ""
 
 

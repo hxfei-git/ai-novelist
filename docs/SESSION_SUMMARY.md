@@ -2155,3 +2155,23 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 .venv/bin/python -m pytest tests/test_director_service.py
 # 35 passed
 ```
+
+
+## 98. 本轮更新：story_flow 生成整改
+
+- `story_flow` 已从短摘要阶段整改为 14 模块的全书级故事流程蓝图，产物可直接为 `volume_outline` 提供骨架。
+- 新增 `src/ai_novelist/story_flow_framework.py` 与 `src/ai_novelist/outline/story_flow_structure.py`，分别负责框架注入和结构修复。
+- `graph_outline.py` 已完成 `story_flow` 的角色分工扩展、Prompt 注入、结构校验与保存前修复；`renderers.py` 也同步收紧输出规则。
+- mock adapter、单元测试和集成测试已同步更新，确保不完整 `story_flow` 也会被修到完整结构并注册 artifact。
+
+验证：
+
+```bash
+.venv/bin/python -m compileall src tests
+.venv/bin/python -m pytest
+.venv/bin/python tests/smoke_outline_collaboration.py
+```
+
+结果：`302 passed`，`outline collaboration smoke ok`。
+
+说明：本轮代码与文档修改在当前沙箱中通过提权脚本化编辑完成，`apply_patch` 在既有文件更新时曾触发 bwrap loopback 错误，因此采用了等价的定向文本替换。

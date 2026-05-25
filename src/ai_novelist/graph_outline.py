@@ -58,7 +58,7 @@ STAGE_ROLES = {
     "direction": ["类型定位 Agent", "主题卖点 Agent"],
     "worldbuilding": ["世界架构 Agent", "规则力量 Agent", "社会权力 Agent", "剧情服务 Agent"],
     "characters": ["主角弧光 Agent", "关系冲突 Agent", "反派/势力 Agent"],
-    "story_flow": ["主线结构 Agent", "节奏悬念 Agent", "伏笔 Agent"],
+    "story_flow": ["主线结构 Agent", "冲突升级 Agent", "人物弧光 Agent", "悬念伏笔 Agent", "爽点情绪 Agent", "终局回收 Agent"],
     "volume_outline": ["分卷策划 Agent", "卷内高潮 Agent", "卷间钩子 Agent"],
     "chapter_outline": ["章节拆分 Agent", "章节钩子 Agent", "连续性编辑 Agent"],
     "review_lock": ["总编辑 Agent", "约束审计 Agent", "章节准备 Agent"],
@@ -381,6 +381,15 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
             adapter=adapter,
             store=store,
             author_craft=author_craft,
+        )
+    elif stage == "story_flow":
+        synthesis = ensure_story_flow_outline_structure(
+            synthesis=synthesis,
+            state=state,
+            adapter=adapter,
+            store=store,
+            author_craft=author_craft,
+            role_reviews=role_reviews,
         )
     emit_progress(
         progress,
@@ -828,6 +837,20 @@ def characters_framework_prompt(stage: str) -> str:
         f"{render_characters_framework(mode='full')}\n"
     )
 
+
+def story_flow_framework_prompt(stage: str) -> str:
+    if stage != "story_flow":
+        return ""
+    from ai_novelist.story_flow_framework import render_story_flow_framework
+
+    return (
+        "\nSTORY_FLOW_FRAMEWORK:\n"
+        "你必须按下面的故事流程蓝图框架生成。故事流程不是章节大纲，"
+        "而是覆盖全书主线因果、阶段升级、冲突递进、人物弧光、信息释放和终局回收的骨架。\n"
+        f"{render_story_flow_framework(mode='full')}\n"
+    )
+
+
 def build_outline_stage_role_prompt(state: NovelState, stage: str, role: str, author_craft: str = "") -> str:
     contract = get_stage_contract(stage)
     return (
@@ -855,6 +878,7 @@ def build_outline_stage_role_prompt(state: NovelState, stage: str, role: str, au
         f"阶段连续性要求：\n{stage_continuity_requirement(stage)}\n\n"
         f"{worldbuilding_framework_prompt(stage)}\n"
         f"{characters_framework_prompt(stage)}\n"
+        f"{story_flow_framework_prompt(stage)}\n"
         f"{worldbuilding_overfine_terms_guard(state, stage)}\n"
         f"{characters_relationship_guard(state, stage)}\n"
         f"{outline_stage_boundary_prompt(stage)}\n\n"
@@ -893,6 +917,7 @@ def build_outline_stage_synthesizer_prompt(state: NovelState, stage: str, role_r
         f"阶段连续性要求：\n{stage_continuity_requirement(stage)}\n\n"
         f"{worldbuilding_framework_prompt(stage)}\n"
         f"{characters_framework_prompt(stage)}\n"
+        f"{story_flow_framework_prompt(stage)}\n"
         f"{worldbuilding_overfine_terms_guard(state, stage)}\n"
         f"{characters_relationship_guard(state, stage)}\n"
         f"{outline_stage_boundary_prompt(stage)}\n\n"
@@ -919,8 +944,8 @@ OUTLINE_STAGE_BOUNDARIES = {
         "forbidden": "新世界规则、凭空新增阵营/组织、章节列表、章节正文、完整剧情流程、场景卡、无主线功能人设细节、与主线无关的角色堆砌、未成年性化、非自愿亲密、把人物关系写成审批/绩效/流程表",
     },
     "story_flow": {
-        "allowed": "叙事流程中的主线阶段、阶段目标、关键转折、信息释放节奏、伏笔布置与回收方向、失败代价、高潮方向",
-        "forbidden": "完整章节正文、细场景动作、未在前序确立的新世界规则、新增世界观 canon、突然新增人物关系、人物长期关系机制、无依据专有名词、行政流程、办理、审批、备案、绩效、申请表、逐章正文、世界百科、分卷篇幅表",
+        "allowed": "全书主线因果链、故事阶段划分、阶段目标升级、冲突升级路径、关键剧情节点、人物弧光嵌入流程、关系变化流程、伏笔悬念与揭示节奏、爽点/卖点兑现节奏、情绪节奏、世界观展开顺序、阵营与势力推进、代价与失败机制、反转与认知升级、分卷衔接方向、结局路径、待确认问题",
+        "forbidden": "直接写章节正文、逐章拆解章节清单、替代 volume_outline 输出完整分卷细纲、新增与 worldbuilding 冲突的世界规则、新增与 characters 冲突的人物设定、无来源地把候选内容写成已锁定正典、只输出模板标题不填充实际内容、行政流程、办理、审批、备案、绩效、申请表、世界百科",
     },
     "volume_outline": {
         "allowed": "卷名、卷目标、卷内主要矛盾、卷级高潮事件、失败/胜利代价、主角能力或认知变化、卷间钩子",
@@ -1113,6 +1138,66 @@ def ensure_characters_outline_structure(
     return append_missing_characters_sections(repaired, missing)
 
 
+def ensure_story_flow_outline_structure(
+    synthesis: str,
+    state: NovelState,
+    adapter: AgentAdapter,
+    store: LocalStore,
+    author_craft: str = "",
+    role_reviews: list[dict[str, str]] | None = None,
+) -> str:
+    from ai_novelist.outline.story_flow_structure import (
+        STORY_FLOW_REQUIRED_HEADINGS,
+        append_missing_story_flow_sections,
+        empty_story_flow_sections,
+        validate_story_flow_outline,
+    )
+    from ai_novelist.story_flow_framework import render_story_flow_framework
+
+    ok, issues = validate_story_flow_outline(synthesis)
+    if ok:
+        return synthesis
+
+    empty = empty_story_flow_sections(synthesis)
+    role_outputs = "\n\n".join(
+        f"## {item.get('role', '角色短评')}\n{item.get('content', '')}" for item in (role_reviews or [])
+    )
+    headings = "\n".join(f"- {heading}" for heading in STORY_FLOW_REQUIRED_HEADINGS)
+    repair_prompt = (
+        "AGENT: story_flow_structure_repair\n"
+        "你正在修复 story_flow 阶段输出。当前输出结构不完整。不要分析，不要解释，只输出完整 Markdown。\n"
+        f"缺失、过短或异常项：{issues}\n"
+        f"空内容模块：{empty}\n\n"
+        "请在不写章节正文、不替代分卷大纲的前提下，重写为完整故事流程稿。\n"
+        "必须以 `## 故事流程稿` 开始，并包含以下 14 个标题：\n"
+        f"{headings}\n\n"
+        "必须承接 direction、worldbuilding、characters 的已锁定内容。未锁定信息只能写为“候选方向”或“待确认”。\n"
+        "保留当前草稿和角色短评中有价值的剧情方向。每个模块写具体、可执行的内容。\n\n"
+        f"框架：\n{render_story_flow_framework(mode='full')}\n\n"
+        f"作者构思参考：\n{author_craft or '暂无'}\n\n"
+        f"前序已保存阶段内容：\n{previous_stage_context(state, 'story_flow')}\n\n"
+        f"角色短评：\n{role_outputs or '暂无'}\n\n"
+        f"原始故事流程草稿：\n{synthesis}\n"
+    )
+    try:
+        repaired = complete_with_metrics(
+            adapter=adapter,
+            prompt=repair_prompt,
+            project_dir=store.project_dir(state.project_id),
+            project_id=state.project_id,
+            graph="outline",
+            node="story_flow_structure_repair",
+            agent="story_flow_structure_repair",
+            prompt_profile="outline_story_flow_repair",
+        )
+    except AgentAdapterError:
+        repaired = synthesis
+
+    ok, issues = validate_story_flow_outline(repaired)
+    if ok:
+        return repaired
+    return append_missing_story_flow_sections(repaired, issues)
+
 def summarize_worldbuilding_outline(text: str, max_chars: int = 1800) -> str:
     sections = split_worldbuilding_sections(text)
     key_headings = [
@@ -1222,6 +1307,10 @@ def summarize_outline_stage_for_artifact(stage: str, synthesis: str) -> str:
         return summarize_worldbuilding_outline(synthesis)
     if stage == "characters":
         return summarize_characters_outline(synthesis)
+    if stage == "story_flow":
+        from ai_novelist.outline.story_flow_structure import summarize_story_flow_outline
+
+        return summarize_story_flow_outline(synthesis)
     return summarize_stage_text(synthesis)
 
 
@@ -1232,6 +1321,10 @@ def extract_outline_stage_memory_for_artifact(stage: str, synthesis: str) -> lis
         return extract_worldbuilding_memory(synthesis)
     if stage == "characters":
         return extract_characters_memory(synthesis)
+    if stage == "story_flow":
+        from ai_novelist.outline.story_flow_structure import extract_story_flow_memory
+
+        return extract_story_flow_memory(synthesis)
     return extract_stage_memory(synthesis)
 
 
@@ -1329,9 +1422,12 @@ def role_focus_instruction(stage: str, role: str) -> str:
         "主角弧光 Agent": "专注主角如何在关系中被改变：开局关系缺失、信任能力、关键压力源、最终关系观变化；不得写成升级小传。",
         "关系冲突 Agent": "专注核心关系卡、关系演化时间轴、读者认知进度和秘密信息差；每条核心关系必须有起点、变化、终点和主线作用。",
         "反派/势力 Agent": "专注反派、阵营和组织关系：只能从 worldbuilding 已有势力中提取，说明组织如何压迫人物关系、制造背叛和终局选择。",
-        "主线结构 Agent": "专注主线推进链：开端事件、中段升级、低谷反击和终局兑现必须互相因果连接。",
-        "节奏悬念 Agent": "专注信息释放、章节钩子和阶段悬念；避免连续解释设定，确保每个阶段都有新的问题和压力。",
-        "伏笔 Agent": "专注伏笔埋设、回收路径和线索可追踪性；每个重大转折都应有前文依据，并为后续章节留下可验证线索。",
+        "主线结构 Agent": "重点检查故事起点、引发事件、初始目标、主线问题、目标升级、终局目标是否形成清晰因果链。",
+        "冲突升级 Agent": "重点检查冲突是否从个人困境升级到组织阵营、制度规则和终极价值矛盾，并记录胜利代价与失败损失。",
+        "人物弧光 Agent": "重点检查主角和关键人物的变化如何被剧情推动，关系链如何变化，反派是否形成镜像。",
+        "悬念伏笔 Agent": "重点检查核心悬念、阶段悬念、伏笔布置和真相揭示顺序，避免硬反转。",
+        "爽点情绪 Agent": "重点检查核心卖点如何在各阶段持续升级兑现，以及紧张、爽感、心疼、燃、满足等情绪节奏。",
+        "终局回收 Agent": "重点检查终局是否回答主线问题、回收人物关系与伏笔，并为分卷衔接和结局路径提供稳定骨架。",
         "分卷策划 Agent": "专注分卷目标和卷间递进；每卷必须有独立高潮，同时推动全书核心谜团或主题更进一步。",
         "卷内高潮 Agent": "专注单卷内部高潮、失败点和反击点；高潮必须来自前文积累，而不是外部硬插事件。",
         "卷间钩子 Agent": "专注卷末悬念和下一卷启动条件；钩子要改变角色处境或认知，而不是只抛新名词。",
@@ -1353,7 +1449,7 @@ def stage_continuity_requirement(stage: str) -> str:
         "concept": "故事概念为旧版兼容阶段，新流程不再主动进入。",
         "worldbuilding": "世界观必须承接方向定位提出的一句话梗概、类型题材、目标读者、故事承诺、主题表达、主角方向、核心冲突、故事基调和篇幅结构；按世界组成部分建立完整基座，每项都要影响主角生存、制造冲突或服务后续剧情。",
         "characters": "人物关系必须承接方向定位和世界观规则；本阶段输出全文关系蓝图，区分作者侧真相、角色侧认知、读者侧认知和剧情侧演化；阵营/组织只能从世界观已有设定提取。",
-        "story_flow": "故事流程必须承接方向定位、世界观代价和人物关系冲突；这里的流程只表示叙事流程，转折不能脱离已建立的规则和人物动机。",
+        "story_flow": "故事流程必须承接方向定位、世界观代价和人物关系冲突；这里的流程是全书级主线骨架，必须覆盖主线推进、阶段划分、冲突升级、人物弧光、伏笔揭示、爽点情绪、分卷衔接和结局路径，但不能写成逐章列表或替代分卷大纲。",
         "volume_outline": "分卷大纲必须整合方向、世界观、人物关系和故事流程，只做卷级目标、卷内高潮、代价和卷间钩子，不拆逐章细纲。",
         "chapter_outline": "章节大纲必须承接分卷大纲，只做章节目标、冲突、信息增量、人物变化、钩子和连续性提醒，不写场景卡或正文。",
         "review_lock": "审稿锁定只做一致性检查、风险标注、锁定建议和章节卡准备度判断；不得新增 canon、重写人物关系、重写剧情流程或生成章节卡/正文。",
