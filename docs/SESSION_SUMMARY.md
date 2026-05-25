@@ -2221,3 +2221,9 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 剩余限制：
 - 卷信息抽取仍是基于 Markdown/中文卷序的启发式解析；如果 `volume_outline` 完全不写卷序，会按单卷兜底。
 - 章节切片对旧格式保持宽松 fallback，复杂非 Markdown 章纲可能仍会返回较大片段。
+
+## 27. 本轮调整：阶段产物待确认问题与真实追问对齐
+
+- 问题：大纲各阶段 Markdown 里的“仍需确认的问题”会保留模型草稿中的原始问题列表，可能比系统真正追问用户的 `pending_questions` 更多。
+- 调整：所有非方向阶段的保存输出现在都会用过滤后的 `pending_questions` 回填该段落，保证文件内容、状态机和用户实际看到的问题一致。
+- 验证：`.venv/bin/python -m pytest tests/test_outline_collaboration.py`：50 passed。

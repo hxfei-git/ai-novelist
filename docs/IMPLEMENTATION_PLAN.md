@@ -712,6 +712,7 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 
 - `run_outline_stage_node` 现在会从阶段汇总中的 `仍需确认的问题` / `待确认问题` 小节抽取编号或列表问题。
 - 抽取到的问题会写入 `state.pending_questions` 和 `state.pending_question`，并进入 Director 后续上下文，不再只停留在 Markdown 产物中。
+- 保存到 `outline/<stage>.md` 的阶段 Markdown 会用过滤后的 `pending_questions` 回填“仍需确认的问题”，避免模型草稿和实际追问不一致。
 - 阶段完成回复会明确列出这些问题，引导用户直接逐条回答；如果没有问题，才回到“继续修改或确认进入下一阶段”。
 - 新增测试覆盖确认问题抽取。
 

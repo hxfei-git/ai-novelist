@@ -757,6 +757,51 @@ def test_non_direction_stage_markdown_hides_role_reviews_by_default():
     assert "内部建议" not in markdown
 
 
+def test_non_direction_stage_markdown_rewrites_pending_questions_across_all_stages():
+    stages = [
+        ("worldbuilding", "世界观设定", "## 世界观设定稿"),
+        ("characters", "人物关系", "## 人物关系稿"),
+        ("story_flow", "故事流程", "## 故事流程稿"),
+        ("volume_outline", "分卷大纲", "## 分卷大纲稿"),
+        ("chapter_outline", "章节大纲", "## 章节大纲稿"),
+        ("review_lock", "审稿锁定", "STATUS: pass|revise|stop"),
+    ]
+    filtered = [
+        "魔门、正道、仙门三层势力的正式名称是否已有固定称呼？",
+        "主角前世死于哪一类宗门内斗，死因细节要不要在世界层面预埋？",
+    ]
+    extras = [
+        "圣女与魔门高层的关系是否需要更明确？",
+        "师妹的出身是否要和边地绑定？",
+        "天外仙门是单一组织还是多个共同统治？",
+    ]
+    for stage, label, prefix in stages:
+        markdown = format_stage_markdown(
+            {
+                "stage": stage,
+                "label": label,
+                "synthesis": (
+                    f"{prefix}\n"
+                    "世界核心已经成立。\n\n"
+                    "## 仍需确认的问题\n"
+                    "1. 魔门、正道、仙门三层势力的正式名称是否已有固定称呼？\n"
+                    "2. 主角前世死因是否需要世界层面预埋？\n"
+                    "3. 圣女与魔门高层的关系是否需要更明确？\n"
+                    "4. 师妹的出身是否要和边地绑定？\n"
+                    "5. 天外仙门是单一组织还是多个共同统治？\n"
+                ),
+                "pending_questions": list(filtered),
+            }
+        )
+
+        assert markdown.count("## 仍需确认的问题") + markdown.count("### 仍需确认的问题") == 1
+        assert filtered[0] in markdown
+        assert filtered[1] in markdown
+        for bad in extras:
+            assert bad not in markdown
+        assert prefix in markdown
+
+
 def test_compact_numbered_pending_answers_are_absorbed(tmp_path):
     store = LocalStore(tmp_path)
     state = store.create_project("Demo", "demo")

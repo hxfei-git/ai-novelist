@@ -1747,7 +1747,61 @@ def format_stage_markdown(artifact: dict) -> str:
         else:
             lines.append("## Director 汇总")
             lines.append(synthesis)
-    return "\n".join(lines).rstrip() + "\n"
+    markdown = "\n".join(lines).rstrip() + "\n"
+    questions = artifact.get("pending_questions")
+    pending_questions = [str(item).strip() for item in questions if str(item).strip()] if isinstance(questions, list) else None
+    return replace_pending_questions_section(markdown, pending_questions)
+
+
+def replace_pending_questions_section(markdown: str, pending_questions: list[str] | None = None) -> str:
+    if pending_questions is None:
+        return markdown
+
+    questions = [str(item).strip() for item in pending_questions if str(item).strip()]
+    replacement = ["## 仍需确认的问题"]
+    if questions:
+        replacement.extend(f"- {question}" for question in questions)
+    else:
+        replacement.append("- 暂无，当前阶段可继续修改或确认进入下一阶段。")
+
+    lines = markdown.splitlines()
+    section_start = None
+    section_level = 2
+    for index, raw_line in enumerate(lines):
+        match = re.match(r"^(#{2,6})\s*(仍需确认的问题|待确认问题|待确认的问题)\s*$", raw_line.strip())
+        if match:
+            section_start = index
+            section_level = len(match.group(1))
+            break
+
+    if section_start is None:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.extend(replacement)
+        return "\n".join(lines).rstrip() + "\n"
+
+    section_end = len(lines)
+    for index in range(section_start + 1, len(lines)):
+        match = re.match(r"^(#{1,6})\s+", lines[index].strip())
+        if match and len(match.group(1)) <= section_level:
+            section_end = index
+            break
+
+    prefix = lines[:section_start]
+    suffix = lines[section_end:]
+    while prefix and not prefix[-1].strip():
+        prefix.pop()
+    while suffix and not suffix[0].strip():
+        suffix.pop(0)
+
+    result = prefix[:]
+    if result:
+        result.append("")
+    result.extend(replacement)
+    if suffix:
+        result.append("")
+        result.extend(suffix)
+    return "\n".join(result).rstrip() + "\n"
 
 
 DIRECTION_FORBIDDEN_REPLACEMENTS = {
