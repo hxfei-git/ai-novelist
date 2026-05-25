@@ -2236,3 +2236,21 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - 调整：每个阶段最多允许 3 轮追问；第 4 轮仍产出问题时，系统会让模型直接回答未决问题并回填锁定摘要。
 - 调整：用户确认进入下一阶段时，剩余未决问题也会先由模型逐项回答，再锁定推进。
 - 验证：`.venv/bin/python -m pytest tests/test_outline_collaboration.py tests/test_director_service.py tests/test_story_flow_contract.py tests/test_volume_outline_contract.py tests/test_outline_stage_controls.py`：99 passed。
+
+## 2026-05-25 大纲阶段轻修订与问题去重
+
+本次完成：
+- 所有 active outline stages 在已有 artifact 且用户是普通修订/补充时走 `outline_stage_reviser` 轻修订，不再重跑 role agents 和 stage synthesizer。
+- 首次生成、当前阶段无产物或用户明确要求完整重做时仍走完整阶段流水。
+- stage artifact 新增并持久化 `revision_meta`：记录 revision mode、问题轮次、已见问题指纹和问题历史。
+- 待确认问题按阶段维度去重；重复旧问题不再展示，也不会再次推动 3 轮自动闭环计数。
+- `review_lock` 复审同样走增量逻辑，保留已锁定来源，阻塞项继续作为回改对象，非阻塞项作为补齐提示。
+
+验证结果：
+- `.venv/bin/python -m pytest tests/test_outline_collaboration.py::test_light_revision_filters_seen_questions_without_full_stage_rerun tests/test_outline_collaboration.py::test_outline_stage_question_round_limit_autoclosed_after_three_rounds tests/test_outline_collaboration.py::test_outline_feedback_stays_on_current_stage`：5 passed。
+- `.venv/bin/python -m pytest tests/test_outline_collaboration.py tests/test_director_service.py tests/test_outline_stage_controls.py`：98 passed。
+- `.venv/bin/python -m pytest`：320 passed。
+- `.venv/bin/python tests/smoke_outline_collaboration.py`：outline collaboration smoke ok。
+
+剩余限制：
+- 轻修订依赖模型遵守“保留原结构”的 prompt；代码会做问题去重和边界 guard，但不在轻修订分支强制重跑各阶段结构 repair。

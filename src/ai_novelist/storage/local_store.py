@@ -238,6 +238,10 @@ class LocalStore:
                     slim["max_question_rounds"] = item.get("max_question_rounds")
                 if item.get("question_round_limit_reached"):
                     slim["question_round_limit_reached"] = item.get("question_round_limit_reached")
+                if isinstance(item.get("revision_meta"), dict):
+                    slim["revision_meta"] = item.get("revision_meta")
+                if isinstance(item.get("review_lock_issues"), dict):
+                    slim["review_lock_issues"] = item.get("review_lock_issues")
                 if isinstance(item.get("metadata"), dict):
                     slim["metadata"] = item.get("metadata")
                 slim_artifacts[str(stage)] = {k: v for k, v in slim.items() if v not in (None, "", [])}

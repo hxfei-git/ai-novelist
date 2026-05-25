@@ -1,9 +1,12 @@
 import json
+import re
+
+import pytest
 
 from ai_novelist.adapters.codex_cli import CodexCLIAdapter
 from ai_novelist.artifacts import load_artifacts
 from ai_novelist.chapter_outline_framework import profile_required_points, profile_to_pacing_function
-from ai_novelist.graph_outline import OUTLINE_STAGES, build_outline_stage_role_prompt, build_outline_stage_synthesizer_prompt, ensure_worldbuilding_outline_structure, extract_stage_confirmation_questions, format_stage_markdown, sanitize_direction_stage_output, append_message, build_outline_collaboration_graph, build_outline_prompt
+from ai_novelist.graph_outline import OUTLINE_STAGES, STAGE_LABELS, build_outline_stage_role_prompt, build_outline_stage_synthesizer_prompt, ensure_worldbuilding_outline_structure, extract_stage_confirmation_questions, format_stage_markdown, sanitize_direction_stage_output, append_message, build_outline_collaboration_graph, build_outline_prompt, run_outline_stage_node, stage_question_fingerprint
 from ai_novelist.graph_writer import build_chat_graph
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
@@ -802,6 +805,111 @@ def test_non_direction_stage_markdown_rewrites_pending_questions_across_all_stag
         for bad in extras:
             assert bad not in markdown
         assert prefix in markdown
+
+
+
+class LightRevisionOnlyAdapter:
+    def __init__(self, old_question: str, new_question: str) -> None:
+        self.old_question = old_question
+        self.new_question = new_question
+        self.prompts: list[str] = []
+
+    def complete(self, prompt, workspace, options=None):
+        self.prompts.append(prompt)
+        if "AGENT: outline_stage_reviser" not in prompt:
+            raise AssertionError("light revision should not call role or synthesizer agents")
+        stage_match = re.search(r"^STAGE:\s*(\w+)", prompt, re.MULTILINE)
+        stage = stage_match.group(1) if stage_match else "volume_outline"
+        return revised_stage_markdown(stage, self.old_question, self.new_question)
+
+
+def revised_stage_markdown(stage: str, old_question: str, new_question: str) -> str:
+    if stage == "review_lock":
+        return (
+            "STATUS: revise\n"
+            "## 阻塞型结构问题\n"
+            f"- {old_question}\n"
+            f"- {new_question}\n\n"
+            "## 非阻塞细节问题\n"
+            "- 暂无\n\n"
+            "## 已锁定 canon 清单\n"
+            "- 保留既有来源链。\n\n"
+            "## 是否可进入章节卡\n"
+            "- revise\n"
+        )
+    return (
+        f"## {STAGE_LABELS[stage]}稿\n\n"
+        "- 已按用户反馈做最小补丁，未触碰其他区块。\n\n"
+        "## 仍需确认的问题\n"
+        f"- {old_question}\n"
+        f"- {new_question}\n"
+    )
+
+
+def seed_light_revision_stage(store: LocalStore, stage: str, old_question: str) -> NovelState:
+    state = store.create_project("Demo", "demo")
+    state.idea = "重生魔门"
+    state.active_workflow = "outline"
+    state.outline_stage = stage
+    state.outline_stage_status = "options_ready"
+    state.director_action = "run_outline_stage"
+    state.director_intent = "revise"
+    state.revision_instruction = "补充新信息，保持其他内容不动"
+    state.user_request = "补充新信息，保持其他内容不动"
+    old_fingerprint = stage_question_fingerprint(old_question)
+    state.outline_stage_artifacts[stage] = {
+        "stage": stage,
+        "label": STAGE_LABELS[stage],
+        "status": "options_ready",
+        "synthesis": revised_stage_markdown(stage, old_question, old_question),
+        "summary": "旧阶段摘要",
+        "stage_memory": ["旧阶段摘要"],
+        "pending_questions": [old_question],
+        "question_round": 1,
+        "revision_meta": {
+            "revision_count": 1,
+            "last_revision_mode": "full",
+            "question_round": 1,
+            "last_question_round": 1,
+            "seen_question_fingerprints": [old_fingerprint],
+            "last_question_fingerprints": [old_fingerprint],
+            "question_history": [
+                {
+                    "round": 1,
+                    "questions": [old_question],
+                    "fingerprints": [old_fingerprint],
+                    "mode": "full",
+                    "created_at": "2026-05-25T00:00:00+00:00",
+                }
+            ],
+        },
+    }
+    store.save_state(state)
+    return state
+
+
+@pytest.mark.parametrize("stage", ["volume_outline", "chapter_outline", "review_lock"])
+def test_light_revision_filters_seen_questions_without_full_stage_rerun(tmp_path, stage):
+    old_question = "旧问题是否需要重复确认？"
+    new_question = "新增问题是否需要确认？"
+    store = LocalStore(tmp_path)
+    state = seed_light_revision_stage(store, stage, old_question)
+    adapter = LightRevisionOnlyAdapter(old_question, new_question)
+
+    result = NovelState.from_dict(run_outline_stage_node(state.to_dict(), adapter, store))
+
+    assert any("AGENT: outline_stage_reviser" in prompt for prompt in adapter.prompts)
+    assert all("outline_stage_role" not in prompt and "outline_stage_synthesizer" not in prompt for prompt in adapter.prompts)
+    artifact = result.outline_stage_artifacts[stage]
+    assert old_question not in artifact["pending_questions"]
+    assert new_question in artifact["pending_questions"]
+    assert artifact["question_round"] == 2
+    assert artifact["revision_meta"]["last_revision_mode"] == "light"
+    assert artifact["revision_meta"]["revision_count"] == 2
+    assert store.load_state("demo").outline_stage_artifacts[stage]["revision_meta"]["last_revision_mode"] == "light"
+    if stage == "review_lock":
+        assert old_question not in artifact["review_lock_issues"]["blocking"]
+        assert new_question in artifact["review_lock_issues"]["blocking"]
 
 
 def test_outline_stage_question_round_limit_autoclosed_after_three_rounds(tmp_path):

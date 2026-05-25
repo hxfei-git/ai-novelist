@@ -10,7 +10,7 @@ from typing import Protocol
 from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
 from ai_novelist.agent_metrics import complete_with_metrics, estimate_tokens
 from ai_novelist.agent_parallel import AgentJob, run_agent_jobs
-from ai_novelist.artifacts import ArtifactRecord, register_artifact
+from ai_novelist.artifacts import ArtifactRecord, register_artifact, sha256_text
 from ai_novelist.characters_framework import (
     extract_characters_memory,
     summarize_characters_outline,
@@ -320,6 +320,18 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
     author_craft = load_outline_stage_craft_brief(state, store)
     if stage == "chapter_outline":
         prepare_chapter_outline_metadata(state, store)
+
+    existing_artifact = state.outline_stage_artifacts.get(stage)
+    if should_lightly_revise_outline_stage(state, stage, existing_artifact, store):
+        return revise_outline_stage_from_existing(
+            state=state,
+            stage=stage,
+            adapter=adapter,
+            store=store,
+            progress=progress,
+            author_craft=author_craft,
+        )
+
     role_jobs = [
         AgentJob(
             key=role,
@@ -445,7 +457,9 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
 
     if stage == "review_lock":
         issue_buckets = extract_review_lock_issue_buckets(synthesis)
+        issue_buckets = filter_review_lock_issue_buckets_by_history(existing_artifact, issue_buckets)
         combined_issues = review_lock_issue_lines(issue_buckets)
+        question_round = stage_question_round(state, stage, bool(combined_issues))
         artifact = {
             "stage": stage,
             "label": STAGE_LABELS[stage],
@@ -457,7 +471,7 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
             "stage_memory": extract_outline_stage_memory_for_artifact(stage, synthesis),
             "pending_questions": [],
             "review_lock_issues": issue_buckets,
-            "question_round": 0,
+            "question_round": question_round,
             "max_question_rounds": MAX_STAGE_QUESTION_ROUNDS,
             "guard_issues": [
                 {
@@ -471,6 +485,14 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
             "user_feedback": state.user_request,
             "updated_at": datetime.now(UTC).isoformat(timespec="seconds"),
         }
+        update_stage_revision_metadata(
+            artifact=artifact,
+            previous_artifact=existing_artifact,
+            mode="full",
+            state=state,
+            visible_questions=combined_issues,
+            question_round=question_round,
+        )
         state.outline_stage_artifacts[stage] = artifact
         state.outline_stage_status = "options_ready"
         state.review_status = "revision_requested" if issue_buckets["blocking"] else "draft"
@@ -490,6 +512,7 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
 
     questions = extract_stage_confirmation_questions(synthesis)
     questions = filter_stage_confirmation_questions(stage, questions, state, synthesis)
+    questions = filter_stage_questions_by_history(existing_artifact, questions)
     question_round = stage_question_round(state, stage, bool(questions))
     artifact = {
         "stage": stage,
@@ -515,6 +538,14 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
         "user_feedback": state.user_request,
         "updated_at": datetime.now(UTC).isoformat(timespec="seconds"),
     }
+    update_stage_revision_metadata(
+        artifact=artifact,
+        previous_artifact=existing_artifact,
+        mode="full",
+        state=state,
+        visible_questions=questions,
+        question_round=question_round,
+    )
     if stage == "chapter_outline":
         artifact["metadata"] = state.director_task_args.get("chapter_outline_metadata") or chapter_outline_metadata_from_artifact(None)
     if questions and question_round > MAX_STAGE_QUESTION_ROUNDS:
@@ -558,14 +589,396 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
     return state.to_dict()
 
 
+def revise_outline_stage_from_existing(
+    state: NovelState,
+    stage: str,
+    adapter: AgentAdapter,
+    store: LocalStore,
+    progress: ProgressFunc = noop_progress,
+    author_craft: str = "",
+) -> dict:
+    existing_artifact = dict(state.outline_stage_artifacts.get(stage) or {})
+    current_markdown = current_stage_markdown_for_revision(state, store, stage, existing_artifact)
+    if not current_markdown.strip():
+        return run_outline_stage_node(state.to_dict(), adapter, store, progress)
+
+    label = STAGE_LABELS[stage]
+    emit_progress(progress, "OutlineStage", f"正在轻修订第 {stage_number(stage)} 阶段「{label}」...")
+    prompt = build_outline_stage_revision_prompt(
+        state=state,
+        stage=stage,
+        current_markdown=current_markdown,
+        author_craft=author_craft,
+        artifact=existing_artifact,
+    )
+    try:
+        revised = complete_with_metrics(
+            adapter=adapter,
+            prompt=prompt,
+            project_dir=store.project_dir(state.project_id),
+            project_id=state.project_id,
+            graph="outline",
+            node="outline_stage_reviser",
+            agent="outline_stage_reviser",
+            prompt_profile="outline_stage_reviser",
+        ).strip()
+    except AgentAdapterError as exc:
+        state.error = str(exc)
+        state.review_status = "error"
+        store.save_state(state)
+        return state.to_dict()
+
+    if not revised:
+        revised = current_markdown
+
+    guarded = guard_stage_output(revised, stage, state)
+    revised = guarded.text.strip() or revised
+    if stage == "worldbuilding":
+        state.worldbuilding = revised
+
+    artifact = dict(existing_artifact)
+    artifact.update(
+        {
+            "stage": stage,
+            "label": STAGE_LABELS[stage],
+            "status": "options_ready",
+            "path": f"outline/{stage}.md",
+            "synthesis": revised,
+            "summary": summarize_outline_stage_for_artifact(stage, revised),
+            "stage_memory": extract_outline_stage_memory_for_artifact(stage, revised),
+            "guard_issues": [
+                {
+                    "code": issue.code,
+                    "severity": issue.severity,
+                    "message": issue.message,
+                    "excerpt": issue.excerpt,
+                }
+                for issue in guarded.issues
+            ],
+            "user_feedback": state.user_request,
+            "updated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        }
+    )
+
+    if stage == "chapter_outline":
+        artifact["metadata"] = state.director_task_args.get("chapter_outline_metadata") or chapter_outline_metadata_from_artifact(artifact)
+
+    if stage == "review_lock":
+        issue_buckets = extract_review_lock_issue_buckets(revised)
+        issue_buckets = filter_review_lock_issue_buckets_by_history(existing_artifact, issue_buckets)
+        combined_issues = review_lock_issue_lines(issue_buckets)
+        question_round = stage_question_round(state, stage, bool(combined_issues))
+        artifact["review_lock_issues"] = issue_buckets
+        artifact["pending_questions"] = combined_issues
+        artifact["question_round"] = question_round
+        artifact["max_question_rounds"] = MAX_STAGE_QUESTION_ROUNDS
+        state.review_status = "revision_requested" if review_lock_blocking_issues(issue_buckets) else "draft"
+        update_stage_revision_metadata(
+            artifact=artifact,
+            previous_artifact=existing_artifact,
+            mode="light",
+            state=state,
+            visible_questions=combined_issues,
+            question_round=question_round,
+        )
+        state.pending_questions = combined_issues
+        state.pending_question = review_lock_pending_question_text(issue_buckets)
+        state.director_message = stage_ready_message(stage, combined_issues, artifact)
+    else:
+        questions = extract_stage_confirmation_questions(revised)
+        questions = filter_stage_confirmation_questions(stage, questions, state, revised)
+        questions = filter_stage_questions_by_history(existing_artifact, questions)
+        question_round = stage_question_round(state, stage, bool(questions))
+        artifact["pending_questions"] = questions
+        artifact["question_round"] = question_round
+        artifact["max_question_rounds"] = MAX_STAGE_QUESTION_ROUNDS
+        state.review_status = "draft"
+        update_stage_revision_metadata(
+            artifact=artifact,
+            previous_artifact=existing_artifact,
+            mode="light",
+            state=state,
+            visible_questions=questions,
+            question_round=question_round,
+        )
+        if questions and question_round > MAX_STAGE_QUESTION_ROUNDS:
+            answer = answer_stage_unresolved_questions(
+                state=state,
+                stage=stage,
+                artifact=artifact,
+                questions=questions,
+                user_text=f"当前阶段已达到最多 {MAX_STAGE_QUESTION_ROUNDS} 轮追问，系统自动闭环。",
+                adapter=adapter,
+                store=store,
+                progress=progress,
+            )
+            artifact["default_discretion_summary"] = answer
+            artifact["default_discretion_answers"] = answer
+            artifact["question_round_limit_reached"] = True
+            append_artifact_memory(artifact, answer)
+            questions = []
+            artifact["pending_questions"] = []
+        state.director_message = stage_ready_message(stage, questions, artifact)
+        if questions:
+            state.pending_questions = questions
+            state.pending_question = "\n".join(f"{index}. {question}" for index, question in enumerate(questions, start=1))
+        else:
+            state.pending_question = f"请确认是否锁定{STAGE_LABELS[stage]}并进入下一阶段，或继续提出修改。"
+            state.pending_questions = [state.pending_question]
+
+    state.outline_stage_artifacts[stage] = artifact
+    state.outline_stage_status = "options_ready"
+    state.active_workflow = "outline"
+    state.current_stage = stage
+    state.active_artifact = "outline_stage"
+    state.director_action = "run_outline_stage"
+    state.outline_stage_summaries[stage] = artifact["summary"]
+    record_stage_history(state, "light_revise", stage, state.user_request)
+    emit_progress(progress, "OutlineStage", f"正在保存「{label}」轻修订产物...")
+    save_outline_stage_outputs(state, stage, format_stage_markdown(artifact), store, source_agent="outline_stage_reviser")
+    if stage == "worldbuilding":
+        store.save_worldbuilding(state)
+    store.save_state(state)
+    return state.to_dict()
+
+
+def should_lightly_revise_outline_stage(state: NovelState, stage: str, artifact: object, store: LocalStore) -> bool:
+    if stage not in OUTLINE_STAGES:
+        return False
+    if force_full_outline_stage_rerun(state.user_request):
+        return False
+    if not isinstance(artifact, dict):
+        return False
+    current_text = str(artifact.get("synthesis") or artifact.get("summary") or "").strip()
+    if not current_text and not (store.load_outline_artifact(state.project_id, stage) or store.load_outline_stage(state.project_id, stage)).strip():
+        return False
+    revision_intents = {"revise", "run_current_stage", "answer_pending_questions", "revise_previous_stage", "lock"}
+    if state.director_intent in revision_intents:
+        return True
+    if state.revision_instruction.strip() and state.user_request.strip():
+        return True
+    return bool(state.user_request.strip() and is_revision_request(state.user_request))
+
+
+def force_full_outline_stage_rerun(text: str) -> bool:
+    markers = (
+        "完整重做",
+        "完整重写",
+        "全部重做",
+        "全部重写",
+        "全量重做",
+        "全量重写",
+        "推翻重来",
+        "整个阶段重做",
+        "重跑整个阶段",
+        "从头重做",
+        "从零重做",
+    )
+    return any(marker in text for marker in markers)
+
+
+def current_stage_markdown_for_revision(state: NovelState, store: LocalStore, stage: str, artifact: dict) -> str:
+    saved = store.load_outline_artifact(state.project_id, stage).strip() or store.load_outline_stage(state.project_id, stage).strip()
+    if saved:
+        return saved
+    formatted = format_stage_markdown(artifact).strip()
+    if formatted:
+        return formatted
+    return str(artifact.get("synthesis") or artifact.get("summary") or "").strip()
+
+
+def build_outline_stage_revision_prompt(
+    state: NovelState,
+    stage: str,
+    current_markdown: str,
+    author_craft: str = "",
+    artifact: dict | None = None,
+) -> str:
+    template = load_prompt("outline_stage_reviser")
+    metadata = stage_revision_metadata(artifact or {})
+    return (
+        f"{template.rstrip()}\n\n"
+        "## 当前任务\n"
+        f"STAGE: {stage}\n"
+        f"STAGE_LABEL: {STAGE_LABELS[stage]}\n"
+        f"用户最新输入：{state.user_request or '暂无'}\n"
+        f"Director intent：{state.director_intent or 'unknown'}\n"
+        f"修订要求：{state.revision_instruction or state.user_request or '暂无'}\n"
+        f"锁定约束：{', '.join(state.locked_constraints) or '暂无'}\n"
+        f"风格偏好：{', '.join(state.style_preferences) or '暂无'}\n\n"
+        "## 阶段边界\n"
+        f"{stage_continuity_requirement(stage)}\n\n"
+        f"{outline_stage_boundary_prompt(stage)}\n\n"
+        "## 修订策略\n"
+        f"{outline_stage_revision_focus(stage)}\n\n"
+        "## 前序已保存阶段内容\n"
+        f"{previous_stage_context(state, stage)}\n\n"
+        "## 作者构思参考\n"
+        f"{author_craft or '暂无'}\n\n"
+        "## 该阶段问题历史\n"
+        f"{format_stage_revision_metadata_for_prompt(metadata)}\n\n"
+        "## 当前阶段 Markdown（在此基础上做最小补丁）\n"
+        f"{current_markdown or '暂无'}\n\n"
+        "## 输出结构参考\n"
+        f"{build_stage_output_rule(stage, state)}\n"
+    )
+
+
+def outline_stage_revision_focus(stage: str) -> str:
+    common = "只改用户反馈、修订要求或待确认回答直接覆盖的区块；未覆盖的设定、顺序、标题和已锁定来源保持原意。"
+    focuses = {
+        "direction": "保留方向定位的十项结构，只调整宏观方向、卖点、基调、篇幅或主角方向中被点名的部分。",
+        "worldbuilding": "保留现有世界组成部分和来源关系，只补丁受影响的世界规则、势力、资源、历史或剧情服务条目。",
+        "characters": "保留既有人物池、关系卡、秘密与读者认知进度，只调整用户点名的人物关系或信息差。",
+        "story_flow": "保留全书主线骨架和阶段顺序，只修正被点名的目标升级、失败代价、反转、伏笔或终局选择。",
+        "volume_outline": "保留分卷数量、卷序和卷间承接，只修正受影响卷的卷级目标、关键节点或悬念释放。",
+        "chapter_outline": "保留已确认卷和当前卷章节表，只修正用户点名的卷、章节、profile、钩子或连续性项。",
+        "review_lock": "继续审计锁定链，但采用增量更新：保留已锁定来源，只回改阻塞项；非阻塞项只作为补齐提示，不把全部细节重新铺一遍。",
+    }
+    return common + "\n" + focuses.get(stage, "")
+
+
+def format_stage_revision_metadata_for_prompt(metadata: dict) -> str:
+    history = metadata.get("question_history") if isinstance(metadata.get("question_history"), list) else []
+    lines = [
+        f"- 最近修订模式：{metadata.get('last_revision_mode') or 'none'}",
+        f"- 最近问题轮次：{metadata.get('last_question_round') or metadata.get('question_round') or 0}",
+        f"- 已见问题指纹数：{len(metadata.get('seen_question_fingerprints') or [])}",
+    ]
+    if history:
+        lines.append("- 已展示问题：")
+        for batch in history[-4:]:
+            questions = batch.get("questions") if isinstance(batch, dict) else []
+            question_text = "；".join(str(item).strip() for item in questions if str(item).strip())
+            if question_text:
+                lines.append(f"  - 第 {batch.get('round', '?')} 轮：{question_text}")
+    else:
+        lines.append("- 已展示问题：暂无")
+    return "\n".join(lines)
+
+
+def stage_revision_metadata(artifact: dict) -> dict:
+    raw = artifact.get("revision_meta") if isinstance(artifact, dict) else {}
+    metadata = dict(raw) if isinstance(raw, dict) else {}
+    metadata["revision_count"] = int_value(metadata.get("revision_count"), int_value(artifact.get("revision_count"), 0))
+    metadata["last_revision_mode"] = str(metadata.get("last_revision_mode") or artifact.get("last_revision_mode") or "")
+    metadata["last_revision_at"] = str(metadata.get("last_revision_at") or artifact.get("last_revision_at") or "")
+    metadata["last_revision_intent"] = str(metadata.get("last_revision_intent") or artifact.get("last_revision_intent") or "")
+    metadata["last_revision_instruction"] = str(metadata.get("last_revision_instruction") or artifact.get("last_revision_instruction") or "")
+    metadata["last_revision_user_text"] = str(metadata.get("last_revision_user_text") or artifact.get("last_revision_user_text") or "")
+    metadata["question_round"] = int_value(metadata.get("question_round"), int_value(artifact.get("question_round"), 0))
+    metadata["last_question_round"] = int_value(metadata.get("last_question_round"), int_value(artifact.get("question_round"), 0))
+    metadata["last_question_fingerprints"] = normalize_meta_str_list(metadata.get("last_question_fingerprints") or artifact.get("last_question_fingerprints"))
+    metadata["seen_question_fingerprints"] = normalize_meta_str_list(metadata.get("seen_question_fingerprints") or artifact.get("seen_question_fingerprints"))
+    metadata["question_history"] = normalize_meta_dict_list(metadata.get("question_history") or artifact.get("question_history"))
+    return metadata
+
+
+def update_stage_revision_metadata(
+    artifact: dict,
+    previous_artifact: object,
+    mode: str,
+    state: NovelState,
+    visible_questions: list[str],
+    question_round: int,
+) -> None:
+    previous = previous_artifact if isinstance(previous_artifact, dict) else {}
+    metadata = stage_revision_metadata(previous)
+    fingerprints = [stage_question_fingerprint(question) for question in visible_questions if question.strip()]
+    metadata["revision_count"] = int_value(metadata.get("revision_count"), 0) + 1
+    metadata["last_revision_mode"] = mode
+    metadata["last_revision_at"] = datetime.now(UTC).isoformat(timespec="seconds")
+    metadata["last_revision_intent"] = state.director_intent
+    metadata["last_revision_instruction"] = state.revision_instruction or state.user_request
+    metadata["last_revision_user_text"] = state.user_request
+    metadata["question_round"] = question_round
+    metadata["last_question_round"] = question_round
+    metadata["last_question_fingerprints"] = fingerprints
+    seen = normalize_meta_str_list(metadata.get("seen_question_fingerprints"))
+    metadata["seen_question_fingerprints"] = list(dict.fromkeys([*seen, *fingerprints]))[-120:]
+    if visible_questions:
+        history = normalize_meta_dict_list(metadata.get("question_history"))
+        history.append(
+            {
+                "round": question_round,
+                "questions": list(visible_questions),
+                "fingerprints": fingerprints,
+                "mode": mode,
+                "created_at": metadata["last_revision_at"],
+            }
+        )
+        metadata["question_history"] = history[-12:]
+    artifact["revision_meta"] = metadata
+
+
+def filter_stage_questions_by_history(artifact: object, questions: list[str]) -> list[str]:
+    if not isinstance(artifact, dict):
+        return questions
+    metadata = stage_revision_metadata(artifact)
+    seen = set(normalize_meta_str_list(metadata.get("seen_question_fingerprints")))
+    filtered: list[str] = []
+    fingerprints: set[str] = set()
+    for question in questions:
+        cleaned = str(question).strip()
+        if not cleaned:
+            continue
+        fingerprint = stage_question_fingerprint(cleaned)
+        if fingerprint in seen or fingerprint in fingerprints:
+            continue
+        filtered.append(cleaned)
+        fingerprints.add(fingerprint)
+    return filtered
+
+
+def filter_review_lock_issue_buckets_by_history(artifact: object, issue_buckets: dict[str, list[str]]) -> dict[str, list[str]]:
+    return {
+        key: filter_stage_questions_by_history(artifact, list(issue_buckets.get(key) or []))
+        for key in ("blocking", "detail", "rework", "questions")
+    }
+
+
+def stage_question_fingerprint(question: str) -> str:
+    normalized = normalize_stage_question_text(question)
+    return sha256_text(normalized) if normalized else ""
+
+
+def normalize_stage_question_text(question: str) -> str:
+    text = str(question or "").strip()
+    text = re.sub(r"^[-*+•\s]*", "", text)
+    text = re.sub(r"^\d+[.、)]\s*", "", text)
+    text = re.sub(r"[`*_#>\[\]【】()（）{}]+", "", text)
+    text = re.sub(r"\s+", "", text)
+    text = text.strip(" ：:，,。.!！?？；;、-/\\")
+    return text.lower()
+
+
+def int_value(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def normalize_meta_str_list(value) -> list[str]:
+    if isinstance(value, str):
+        return [value] if value else []
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def normalize_meta_dict_list(value) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, dict)]
+
+
 def stage_question_round(state: NovelState, stage: str, has_questions: bool) -> int:
     artifact = state.outline_stage_artifacts.get(stage)
     previous = 0
     if isinstance(artifact, dict):
-        try:
-            previous = int(artifact.get("question_round") or 0)
-        except (TypeError, ValueError):
-            previous = 0
+        metadata = stage_revision_metadata(artifact)
+        previous = int_value(metadata.get("question_round"), int_value(artifact.get("question_round"), 0))
     return previous + 1 if has_questions else previous
 
 
@@ -822,7 +1235,7 @@ def build_stage_closure_summary(stage: str, questions: list[str], user_text: str
         f"已由本阶段 Agent 默认回答：{joined}；用户确认语：{user_text}"
     )
 
-def save_outline_stage_outputs(state: NovelState, stage: str, content: str, store: LocalStore) -> None:
+def save_outline_stage_outputs(state: NovelState, stage: str, content: str, store: LocalStore, source_agent: str = "outline_stage_synthesizer") -> None:
     store.save_outline_stage(state, stage, content)
     artifact_path = store.save_outline_artifact(state, stage, content)
     artifact = state.outline_stage_artifacts.get(stage)
@@ -839,7 +1252,7 @@ def save_outline_stage_outputs(state: NovelState, stage: str, content: str, stor
             id="",
             type=stage,
             path=artifact_path.relative_to(store.project_dir(state.project_id)).as_posix(),
-            source_agent="outline_stage_synthesizer",
+            source_agent=source_agent,
             graph="outline",
             stage=stage,
         ),

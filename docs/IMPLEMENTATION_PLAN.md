@@ -15,6 +15,8 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
 - 本地小说知识库优先 RAG：chat 可配置本地 `.txt/.md` 语料目录，research 优先检索本地语料；本地无命中时回退 mock 或真实联网搜索。
 - 大纲共创增强：outline collaboration graph，支持方向提案、生成、审稿、用户反馈、修订、版本比较、锁定约束、查看正文和保存。
 - 大纲确认容量已统一：outline editor / outline reviser / volume outline prompt 里的待确认问题上限同步提升到 10 条；stage 运行时的确认问题过滤与保存也维持 10 条上限，便于一次暴露完整待确认项。
+- 大纲阶段修订已统一为“首次生成走完整角色 + 汇总流水，后续普通修订走轻修订补丁”：已有 stage artifact 时，`outline_stage_reviser` 直接基于现有 Markdown 做最小改动；只有显式完整重做或当前阶段无产物时才重跑完整阶段。
+- 每个大纲阶段 artifact 持久化 `revision_meta`，记录修订模式、问题指纹、问题历史和最近问题轮次；待确认问题会按阶段内指纹去重，重复旧问题不会再次展示或计入 3 轮追问。
 - review_lock 的 prompt 现在明确要求沿前序阶段继承链审计、回指锁定来源，并区分阻塞型结构问题与非阻塞细节问题。
 - `review_lock` 阶段边界现在明确要求锁定来源回指、阻塞型结构问题和非阻塞细节问题的区分，避免把候选内容误写成已锁定设定。
 - 方向定位阶段已升级为 10 项完整合同，并同步 Prompt、渲染模板、边界守卫、mock/demo 与测试。
@@ -255,6 +257,8 @@ START
 - `persist_outline` 保存 `outline.md`，并清空 `active_workflow`，`current_stage` 进入 `chapter_plan`。
 - `worldbuilding` 阶段产物必须包含从“世界核心设定”到“结局后的世界格局”的 33 个二级标题；生成后会校验结构，失败时调用一次 `worldbuilding_structure_repair`，仍失败则追加明确的兜底占位。
 - 世界观完整正文保存到 `outline/worldbuilding.md`、`outline_stages/worldbuilding.md` 和根目录 `worldbuilding.md`；状态摘要只保留核心规则、空间格局、力量代价、关键势力、核心矛盾、主角关系、隐藏真相和终局方向，避免后续阶段上下文过长。
+- active outline stages 的普通反馈、补充回答和上一阶段回修默认使用轻修订分支；`review_lock` 仍执行审计语义，但复审时保留已锁定来源，只增量更新阻塞项和非阻塞补齐提示。
+- 阶段 `pending_questions` 只保留新增或变化的问题；重复问题留在 `revision_meta.question_history/seen_question_fingerprints` 中作为历史，不再反复追问。
 - 用户明确 `stop / 退出 / 结束` 会清空 `active_workflow/current_stage`。
 
 outline prompt 已注入 retrieval/research 上下文：
