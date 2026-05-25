@@ -187,6 +187,8 @@ def chapter_hook_agent_node(data: dict, adapter: AgentAdapter, store: LocalStore
 
 def chapter_card_synthesizer_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
+    if state.review_status == "error":
+        return state.to_dict()
     prompt = build_agent_prompt(state, "chapter_card_synthesizer")
     try:
         output = complete_with_metrics(
@@ -218,6 +220,8 @@ def chapter_card_synthesizer_node(data: dict, adapter: AgentAdapter, store: Loca
 
 def validate_chapter_card_node(data: dict, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
+    if state.review_status == "error":
+        return state.to_dict()
     pacing = pacing_from_state(state)
     required = required_chapter_card_sections(pacing)
     missing = [section for section in required if section not in state.current_chapter_card]
@@ -231,6 +235,8 @@ def validate_chapter_card_node(data: dict, store: LocalStore) -> dict:
 
 def save_chapter_card_node(data: dict, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
+    if state.review_status == "error":
+        return state.to_dict()
     path = store.save_chapter_card(state)
     record = register_artifact(
         store.project_dir(state.project_id),
@@ -258,6 +264,8 @@ def save_chapter_card_node(data: dict, store: LocalStore) -> dict:
 
 def run_report_agent(data: dict, adapter: AgentAdapter, store: LocalStore, prompt_name: str, field: str) -> dict:
     state = NovelState.from_dict(data)
+    if state.review_status == "error":
+        return state.to_dict()
     prompt = build_agent_prompt(state, prompt_name)
     try:
         output = complete_with_metrics(

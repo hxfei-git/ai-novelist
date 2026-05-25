@@ -110,6 +110,8 @@ def load_review_context_node(data: dict, store: LocalStore) -> dict:
 
 def run_review_editors_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
+    if state.review_status == "error":
+        return state.to_dict()
     specs = [
         ("continuity_review", "continuity_editor"),
         ("structure_review", "structure_editor"),
@@ -159,6 +161,8 @@ def run_review_editors_node(data: dict, adapter: AgentAdapter, store: LocalStore
 
 def run_review_agent(data: dict, adapter: AgentAdapter, store: LocalStore, prompt_name: str, field: str) -> dict:
     state = NovelState.from_dict(data)
+    if state.review_status == "error":
+        return state.to_dict()
     prompt = build_review_prompt(state, prompt_name)
     try:
         output = complete_with_metrics(
@@ -187,6 +191,8 @@ def run_review_agent(data: dict, adapter: AgentAdapter, store: LocalStore, promp
 
 def review_synthesizer_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
+    if state.review_status == "error":
+        return state.to_dict()
     prompt = build_review_prompt(state, "review_synthesizer")
     try:
         output = complete_with_metrics(
@@ -220,6 +226,8 @@ def review_synthesizer_node(data: dict, adapter: AgentAdapter, store: LocalStore
 
 def decide_pass_or_revise_node(data: dict, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
+    if state.review_status == "error":
+        return state.to_dict()
     report = normalize_review_report(state.director_task_args.get("review_json", {}), state.current_review_report)
     decision = str(report["decision"])
     score = int(report["score"])
@@ -241,6 +249,8 @@ def decide_pass_or_revise_node(data: dict, store: LocalStore) -> dict:
 
 def save_review_report_node(data: dict, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
+    if state.review_status == "error":
+        return state.to_dict()
     report = normalize_review_report(state.director_task_args.get("review_json", {}), state.current_review_report)
     path = store.save_review_report(state, version=1)
     json_path = store.review_json_path(state.project_id, state.active_chapter, 1)

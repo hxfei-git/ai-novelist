@@ -59,3 +59,21 @@ def test_director_service_routes_scene_planning(tmp_path):
     assert result.state.director_action == "plan_scenes"
     assert result.state.active_graph == "scene"
     assert store.scene_cards_path("demo", 1).exists()
+
+class AlwaysFailAdapter:
+    def complete(self, prompt, workspace, options=None):
+        from ai_novelist.adapters.base import AgentAdapterError
+
+        raise AgentAdapterError("scene agent failed")
+
+
+def test_scene_agent_failure_does_not_save_empty_scene_cards(tmp_path):
+    store = LocalStore(tmp_path)
+    state_data = make_state_with_chapter_card(store)
+
+    result = build_scene_graph(AlwaysFailAdapter(), store).invoke(state_data)
+
+    assert result["review_status"] == "error"
+    assert result["error"] == "scene agent failed"
+    assert not store.scene_cards_path("demo", 1).exists()
+    assert store.load_state("demo").review_status == "error"

@@ -49,3 +49,21 @@ def test_revision_stops_at_max_revisions(tmp_path):
     assert result.review_status == "stopped"
     assert "最大修订次数" in result.director_message
     assert not store.chapter_draft_path("demo", 1, 2).exists()
+
+class AlwaysFailAdapter:
+    def complete(self, prompt, workspace, options=None):
+        from ai_novelist.adapters.base import AgentAdapterError
+
+        raise AgentAdapterError("revision agent failed")
+
+
+def test_revision_agent_failure_does_not_save_revised_draft(tmp_path):
+    store, state = prepared_review(tmp_path)
+
+    result = NovelState.from_dict(build_revision_graph(AlwaysFailAdapter(), store).invoke(state.to_dict()))
+
+    assert result.review_status == "error"
+    assert result.error == "revision agent failed"
+    assert not store.revision_plan_path("demo", 1, 1).exists()
+    assert not store.chapter_draft_path("demo", 1, 2).exists()
+    assert store.load_state("demo").review_status == "error"

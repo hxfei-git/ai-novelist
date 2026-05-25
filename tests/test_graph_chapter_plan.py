@@ -86,3 +86,21 @@ def test_chapter_plan_sets_pacing_target(tmp_path):
     assert 1 <= int(pacing.get("intensity", 0)) <= 5
     validation = result["director_task_args"].get("chapter_card_validation", {})
     assert "required_sections" in validation
+
+class AlwaysFailAdapter:
+    def complete(self, prompt, workspace, options=None):
+        from ai_novelist.adapters.base import AgentAdapterError
+
+        raise AgentAdapterError("chapter agent failed")
+
+
+def test_chapter_plan_agent_failure_does_not_save_empty_card(tmp_path):
+    store = LocalStore(tmp_path)
+    state = make_ready_state(store)
+
+    result = build_chapter_plan_graph(AlwaysFailAdapter(), store).invoke(state.to_dict())
+
+    assert result["review_status"] == "error"
+    assert result["error"] == "chapter agent failed"
+    assert not store.chapter_card_path("demo", 1).exists()
+    assert store.load_state("demo").review_status == "error"

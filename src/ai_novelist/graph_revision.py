@@ -122,6 +122,8 @@ def load_revision_context_node(data: dict, store: LocalStore) -> dict:
 
 def build_revision_plan_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
+    if state.review_status == "error":
+        return state.to_dict()
     prompt = build_revision_prompt(state, "revision_planner")
     try:
         output = adapter.complete(prompt, store.project_dir(state.project_id))
@@ -139,6 +141,8 @@ def build_revision_plan_node(data: dict, adapter: AgentAdapter, store: LocalStor
 
 def revise_targeted_sections_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
+    if state.review_status == "error":
+        return state.to_dict()
     prompt = build_revision_prompt(state, "targeted_reviser")
     try:
         output = adapter.complete(prompt, store.project_dir(state.project_id))
@@ -156,6 +160,8 @@ def revise_targeted_sections_node(data: dict, adapter: AgentAdapter, store: Loca
 
 def merge_revision_node(data: dict, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
+    if state.review_status == "error":
+        return state.to_dict()
     state.chapter_draft = state.chapter_draft.strip() + "\n"
     state.active_stage = "merge_revision"
     store.save_state(state)
@@ -164,6 +170,8 @@ def merge_revision_node(data: dict, store: LocalStore) -> dict:
 
 def revision_self_check_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
+    if state.review_status == "error":
+        return state.to_dict()
     prompt = build_revision_prompt(state, "revision_self_check")
     try:
         output = adapter.complete(prompt, store.project_dir(state.project_id))
@@ -182,6 +190,8 @@ def revision_self_check_node(data: dict, adapter: AgentAdapter, store: LocalStor
 
 def save_revised_draft_node(data: dict, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
+    if state.review_status == "error":
+        return state.to_dict()
     plan_path = store.save_revision_plan(state, version=1)
     draft_path = store.save_chapter_draft(state, version=2)
     legacy = store.save_chapter(state)
@@ -229,6 +239,8 @@ def save_revised_draft_node(data: dict, store: LocalStore) -> dict:
 
 def maybe_review_again_node(data: dict, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
+    if state.review_status == "error":
+        return state.to_dict()
     state.review_status = "draft"
     state.next_action = "review_chapter"
     state.active_stage = "maybe_review_again"

@@ -76,3 +76,25 @@ def test_drafting_uses_low_intensity_polishers_when_no_hard_hook(tmp_path):
     agents = [item.get("agent") for item in result.last_agent_reports]
     assert "restraint_polisher" in agents
     assert "emotional_resonance_polisher" in agents
+
+class AlwaysFailAdapter:
+    def complete(self, prompt, workspace, options=None):
+        from ai_novelist.adapters.base import AgentAdapterError
+
+        raise AgentAdapterError("draft dependency failed")
+
+
+def test_drafting_dependency_failure_does_not_save_draft_or_empty_cards(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.idea = "月球城市失忆工程师"
+    state.current_chapter = 1
+    store.save_state(state)
+
+    result = NovelState.from_dict(build_drafting_graph(AlwaysFailAdapter(), store).invoke(state.to_dict()))
+
+    assert result.review_status == "error"
+    assert result.error == "draft dependency failed"
+    assert not store.chapter_card_path("demo", 1).exists()
+    assert not store.chapter_draft_path("demo", 1, 1).exists()
+    assert store.load_state("demo").review_status == "error"

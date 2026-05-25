@@ -141,6 +141,8 @@ def draft_scene_batch_node(data: dict, adapter: AgentAdapter, store: LocalStore)
 
 def merge_scenes_node(data: dict, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
+    if state.review_status == "error":
+        return state.to_dict()
     state.active_stage = "merge_scenes"
     state.chapter_draft = normalize_markdown(state.chapter_draft)
     store.save_state(state)
@@ -184,6 +186,8 @@ def style_normalize_node(data: dict, adapter: AgentAdapter, store: LocalStore) -
 
 def run_draft_agent(data: dict, adapter: AgentAdapter, store: LocalStore, prompt_name: str, stage: str) -> dict:
     state = NovelState.from_dict(data)
+    if state.review_status == "error":
+        return state.to_dict()
     prompt = build_draft_prompt(state, prompt_name)
     try:
         output = adapter.complete(prompt, store.project_dir(state.project_id))
@@ -204,6 +208,8 @@ def run_draft_agent(data: dict, adapter: AgentAdapter, store: LocalStore, prompt
 
 def save_draft_node(data: dict, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
+    if state.review_status == "error":
+        return state.to_dict()
     version = 1
     path = store.save_chapter_draft(state, version=version)
     legacy = store.save_chapter(state)

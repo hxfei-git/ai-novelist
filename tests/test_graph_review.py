@@ -87,3 +87,21 @@ def test_review_parallel_path_records_all_editor_reports(tmp_path, monkeypatch):
     trace_path = store.project_dir("demo") / "debug" / "agent_runs.jsonl"
     assert trace_path.exists()
     assert "review_synthesizer" in trace_path.read_text(encoding="utf-8")
+
+class AlwaysFailAdapter:
+    def complete(self, prompt, workspace, options=None):
+        from ai_novelist.adapters.base import AgentAdapterError
+
+        raise AgentAdapterError("review agent failed")
+
+
+def test_review_agent_failure_does_not_save_empty_report(tmp_path):
+    store, state = prepared_draft(tmp_path)
+
+    result = NovelState.from_dict(build_review_graph(AlwaysFailAdapter(), store).invoke(state.to_dict()))
+
+    assert result.review_status == "error"
+    assert result.error == "review agent failed"
+    assert not store.review_report_path("demo", 1, 1).exists()
+    assert not store.review_json_path("demo", 1, 1).exists()
+    assert store.load_state("demo").review_status == "error"

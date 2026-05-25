@@ -127,6 +127,8 @@ def conflict_check_agent_node(data: dict, adapter: AgentAdapter, store: LocalSto
 
 def scene_synthesizer_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
+    if state.review_status == "error":
+        return state.to_dict()
     prompt = build_agent_prompt(state, "scene_synthesizer")
     try:
         output = adapter.complete(prompt, store.project_dir(state.project_id))
@@ -146,6 +148,8 @@ def scene_synthesizer_node(data: dict, adapter: AgentAdapter, store: LocalStore)
 
 def validate_scene_cards_node(data: dict, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
+    if state.review_status == "error":
+        return state.to_dict()
     scene_count = count_scenes(state.current_scene_cards)
     pacing = parse_pacing_target_from_card(state.active_chapter or state.current_chapter or 1, state.current_chapter_card or "")
     required_fields = scene_required_fields(pacing)
@@ -165,6 +169,8 @@ def validate_scene_cards_node(data: dict, store: LocalStore) -> dict:
 
 def save_scene_cards_node(data: dict, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
+    if state.review_status == "error":
+        return state.to_dict()
     path = store.save_scene_cards(state)
     record = register_artifact(
         store.project_dir(state.project_id),
@@ -192,6 +198,8 @@ def save_scene_cards_node(data: dict, store: LocalStore) -> dict:
 
 def run_report_agent(data: dict, adapter: AgentAdapter, store: LocalStore, prompt_name: str, field: str) -> dict:
     state = NovelState.from_dict(data)
+    if state.review_status == "error":
+        return state.to_dict()
     prompt = build_agent_prompt(state, prompt_name)
     try:
         output = adapter.complete(prompt, store.project_dir(state.project_id))
