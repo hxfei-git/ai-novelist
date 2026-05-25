@@ -550,12 +550,14 @@ def test_review_lock_prompt_is_status_first_and_non_creative():
     role_prompt = build_outline_stage_role_prompt(state, "review_lock", "总编辑 Agent")
     synth_prompt = build_outline_stage_synthesizer_prompt(state, "review_lock", [])
 
-    assert "只做一致性检查、风险标注、锁定建议和章节卡准备度判断" in role_prompt
+    assert "锁定来源" in role_prompt
+    assert "阻塞型结构问题" in role_prompt
+    assert "非阻塞细节问题" in role_prompt
     assert "STATUS: pass|revise|stop" in synth_prompt
     assert "STATUS: pass" in synth_prompt
     assert "pass|revise|stop" in synth_prompt
-    assert "一致性检查" in synth_prompt
-    assert "锁定建议" in synth_prompt
+    assert "阶段承接检查" in synth_prompt
+    assert "锁定来源追溯" in synth_prompt
     assert "阶段承接检查" in synth_prompt
     assert "已锁定 canon 清单" in synth_prompt
     assert "是否可进入章节卡" in synth_prompt

@@ -15,6 +15,8 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
 - 本地小说知识库优先 RAG：chat 可配置本地 `.txt/.md` 语料目录，research 优先检索本地语料；本地无命中时回退 mock 或真实联网搜索。
 - 大纲共创增强：outline collaboration graph，支持方向提案、生成、审稿、用户反馈、修订、版本比较、锁定约束、查看正文和保存。
 - 大纲确认容量已统一：outline editor / outline reviser / volume outline prompt 里的待确认问题上限同步提升到 10 条；stage 运行时的确认问题过滤与保存也维持 10 条上限，便于一次暴露完整待确认项。
+- review_lock 的 prompt 现在明确要求沿前序阶段继承链审计、回指锁定来源，并区分阻塞型结构问题与非阻塞细节问题。
+- `review_lock` 阶段边界现在明确要求锁定来源回指、阻塞型结构问题和非阻塞细节问题的区分，避免把候选内容误写成已锁定设定。
 - 方向定位阶段已升级为 10 项完整合同，并同步 Prompt、渲染模板、边界守卫、mock/demo 与测试。
 - 世界观大纲框架修复：`worldbuilding` 阶段已改为 33 项完整小说世界大纲，按世界组成部分组织，并接入 prompt、结构校验、一次 repair、兜底补节、专用摘要和 `worldbuilding.md` 同步保存。
 - 人物关系蓝图整改：`characters` 阶段已升级为完整“人物关系稿”蓝图，新增 `src/ai_novelist/characters_framework.py` 负责 14 个顶级标题、结构校验、兜底补节、摘要和 stage memory；`graph_outline.py` 的角色/合成 prompt 注入专用框架、关系约束 guard 和结构修复；`stage_contracts.py`、`outline/renderers.py`、`outline/question_filter.py`、`adapters/codex_cli.py` 与测试同步改造为以关系演化、秘密信息差、阵营继承和最多 4 个确认问题为核心，并显式加入 A/B/C/D 级角色提示、关系卡/认知进度/秘密/阵营 schema 引导。
