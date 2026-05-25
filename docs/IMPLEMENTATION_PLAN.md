@@ -2400,3 +2400,33 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 ```
 
 结果：`302 passed`，`outline collaboration smoke ok`。
+
+
+## 99. 本轮更新：volume_outline 生成整改
+
+目标：按 `plan.md` 将分卷大纲从短摘要整改为完整卷级蓝图，解决 `demo-chat/outline/volume_outline.md` 中卷设定不完整的问题。
+
+已完成：
+
+- `volume_outline` 阶段契约已扩展为 14 个必需模块：分卷总体规划、单卷基础定位、本卷一句话概括、本卷阶段目标、本卷核心冲突、本卷剧情推进、本卷关键节点、本卷人物推进、本卷世界观释放、本卷爽点与卖点兑现、本卷伏笔/悬念/信息差、本卷情绪节奏、本卷开头与结尾、与前后卷的衔接。
+- 新增 `src/ai_novelist/volume_outline_framework.py`，统一定义卷大纲必需标题、框架渲染和边界说明。
+- 新增 `src/ai_novelist/outline/volume_outline_structure.py`，提供旧标题别名归一、结构校验、疑似逐章列表检测、确定性兜底补齐、摘要和 stage memory 提取。
+- `graph_outline.py` 已将 `volume_outline` 角色扩展为分卷架构、卷内推进、人物推进、世界观释放、爽点悬念、衔接约束，并在角色 Prompt / Synthesizer Prompt 中注入卷大纲框架。
+- `graph_outline.py` 在保存前接入 `ensure_volume_outline_structure()`，当模型只给旧式短摘要时，会触发 `volume_outline_structure_repair` 重写为完整 14 模块结构。
+- `renderers.py` 已将 `volume_outline` 输出规则改为 `## 分卷大纲稿` + 14 个 `###` 核心模块，并明确不得替代 `chapter_outline` 或写成逐章细纲。
+- `adapters/codex_cli.py` 的 mock 输出已补齐完整 `volume_outline`，并支持 `volume_outline_structure_repair`。
+- 锁定项处理按用户反馈放松：不再把“锁定项、可变项、待确认项”作为必需模块，仅保留可选 `卷级约束与待确认项（可选）`，并要求未确认内容写成候选或待确认。
+
+验证：
+
+```bash
+.venv/bin/python -m compileall src tests
+.venv/bin/python -m pytest
+.venv/bin/python tests/smoke_outline_collaboration.py
+# 311 passed; outline collaboration smoke ok
+```
+
+后续边界：
+
+- 结构兜底只负责补齐标题和候选方向；高质量正文仍优先依赖 `volume_outline_structure_repair` Agent 结合前序阶段重写。
+- 卷级约束是可选备注，不应重新变成硬锁死清单。

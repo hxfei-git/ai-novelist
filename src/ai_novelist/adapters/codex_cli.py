@@ -112,6 +112,8 @@ class CodexCLIAdapter(AgentAdapter):
             return self._mock_full_characters_outline()
         if "AGENT: story_flow_structure_repair" in prompt:
             return self._mock_full_story_flow_outline()
+        if "AGENT: volume_outline_structure_repair" in prompt:
+            return self._mock_full_volume_outline()
         if "AGENT: outline_stage_synthesizer" in prompt:
             return self._mock_outline_stage_synthesizer(prompt)
         if "AGENT: bible_update_extractor" in prompt:
@@ -215,6 +217,8 @@ class CodexCLIAdapter(AgentAdapter):
     def _mock_outline_stage_role(self, prompt: str) -> str:
         stage = self._extract_prompt_field(prompt, "STAGE") or "direction"
         role = self._extract_prompt_field(prompt, "ROLE") or "阶段 Agent"
+        if stage == "volume_outline":
+            return self._mock_volume_outline_role(role)
         labels = {
             "direction": "方向定位",
             "worldbuilding": "世界观设定",
@@ -234,6 +238,8 @@ class CodexCLIAdapter(AgentAdapter):
         stage = self._extract_prompt_field(prompt, "STAGE") or "direction"
         if stage == "worldbuilding":
             return self._mock_full_worldbuilding_outline()
+        if stage == "volume_outline":
+            return self._mock_full_volume_outline()
         data = {
             "direction": """## 方向定位稿
 
@@ -320,14 +326,6 @@ class CodexCLIAdapter(AgentAdapter):
 - 是否需要为前世记忆设置明确限制；若暂不确认，可先按“记忆不完整且会失准”处理？""",
             "characters": self._mock_full_characters_outline(),
             "story_flow": self._mock_full_story_flow_outline(),
-            "volume_outline": """## 分卷大纲稿
-### 分卷结构
-- 第一卷：外门求生与线索起点。
-- 第二卷：门内博弈与资源反制。
-- 第三卷：真相揭示与立场决断。
-
-## 仍需确认的问题
-- 是否采用三卷结构作为当前基准？""",
             "chapter_outline": """## 章节大纲稿
 ### 章节编号
 - 第 1-10 章。
@@ -351,6 +349,103 @@ class CodexCLIAdapter(AgentAdapter):
         }
         return data.get(stage, data["direction"])
 
+
+    def _mock_volume_outline_role(self, role: str) -> str:
+        return (
+            f"- 机会：{role}可以把分卷结构拆成卷级蓝图、阶段目标、冲突升级和卷间钩子，而不是写成逐章清单。\n"
+            "- 风险：如果直接输出章节列表，会挤占 chapter_outline 的职责。\n"
+            "- 建议：优先明确每卷的功能、推进逻辑和结尾状态，再把未确认内容写成候选项。"
+        )
+
+
+    def _mock_full_volume_outline(self) -> str:
+        return """## 分卷大纲稿
+
+### 一、分卷总体规划
+- 全书暂定五卷，按“入局 -> 扩张 -> 对抗 -> 反攻 -> 终局”推进。
+- 每卷只定卷级功能，不拆到逐章细纲。
+
+### 二、单卷基础定位
+- 第一卷：入局卷，外门求生与线索起点。
+- 第二卷：成长卷，门内博弈与资源反制。
+- 第三卷：阵营卷，真相浮出与关系撕裂。
+- 第四卷：反攻卷，旧案反噬与立场重组。
+- 第五卷：终局卷，清算旧账与完成主题表达。
+
+### 三、本卷一句话概括
+- 主角在外门苟活并追查前世失准的死局，却在每次自保时不断逼近师傅与宗门旧案。
+
+### 四、本卷阶段目标
+- 活下来。
+- 找到可验证的局部线索。
+- 让关键关系从互疑进入互保。
+
+### 五、本卷核心冲突
+- 主角与师傅的压迫冲突。
+- 主角与宗门规则的冲突。
+- 主角与自己“只能自保”的内在冲突。
+
+### 六、本卷剧情推进
+- 开卷：主角回到外门，发现前世记忆已经出现偏差。
+- 前期：借差事和小资源试探局势，建立最低限度盟友。
+- 中段：误判导致关系受损，主角第一次付出代价。
+- 后段：局部线索指向更深旧案，压力从个人求生升级到阵营对抗。
+- 结尾：主角保住一部分关系，但也把更高层势力引入视线。
+
+### 七、本卷关键节点
+- 开卷事件：前世死局提前变形。
+- 第一个推动事件：拿到第一条可验证线索。
+- 第一次受挫：自以为稳妥的安排失效。
+- 中段反转：盟友或被保护者与旧案产生关联。
+- 高潮事件：主角公开或半公开地做出一次立场选择。
+- 结尾钩子：更大范围的清算开始注意到主角。
+
+### 八、本卷人物推进
+- 主角从只想苟活，转向开始承担关系代价。
+- 师姐从保护者变成需要被重新判断的盟友。
+- 师妹从信息来源变成可补证的关系节点。
+- 师傅从远距压迫者变成可被触碰的旧案核心。
+
+### 九、本卷世界观释放
+- 外门资源分配、黑市交易、执法堂脸面逻辑开始成型。
+- 前世记忆不是万能外挂，而是会失准的有限线索。
+- 寿元债、吞噬旧案和宗门灰色秩序只释放必要部分。
+
+### 十、本卷爽点与卖点兑现
+- 低成本避坑。
+- 小范围反制压迫者。
+- 以证据和布局拿回一点主动权。
+- 保护关系后带来的情绪回报。
+
+### 十一、本卷伏笔、悬念与信息差
+- 本卷埋下前世记忆失准、寿元债线索、师傅异常、师姐隐瞒与师妹误传。
+- 本卷揭开外门资源分配和局部旧案证据。
+- 本卷暂时不说清前世记忆来源与终局真相。
+
+### 十二、本卷情绪节奏
+- 开头偏压迫和不安。
+- 中段偏怀疑和受挫。
+- 高潮偏爆发和反击。
+- 结尾偏小胜利后继续施压。
+
+### 十三、本卷开头与结尾
+- 开头：主角先避祸，再发现祸已经变形。
+- 结尾：保住局部安全，但换来更大范围的关注。
+
+### 十四、与前后卷的衔接
+- 承接上一卷的外门求生局面。
+- 推出下一卷的门内博弈和阵营扩张。
+- 让全书主线从局部求生进入持续对抗。
+
+## 仍需确认的问题
+- 本书更偏五卷结构还是可扩展为四卷结构？
+- 第一卷是否需要在结尾明确埋出师傅旧案证据？
+- 主角是否在第二卷前就让师姐知道部分真相？
+
+## 卷级约束与待确认项（可选）
+- 卷数与每卷名称可在不破坏总节奏前提下调整。
+- 第一卷结尾钩子可以在“记忆失准”与“关系受损”之间微调。
+"""
 
     def _mock_full_story_flow_outline(self) -> str:
         return """## 故事流程稿

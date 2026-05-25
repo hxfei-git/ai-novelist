@@ -447,14 +447,19 @@ def test_story_flow_prompt_limits_flow_to_narrative_structure():
 def test_volume_outline_prompt_limits_output_to_volume_level():
     state = NovelState(project_id="demo", title="Demo", idea="重生魔门")
 
-    role_prompt = build_outline_stage_role_prompt(state, "volume_outline", "分卷策划 Agent")
+    role_prompt = build_outline_stage_role_prompt(state, "volume_outline", "分卷架构 Agent")
     synth_prompt = build_outline_stage_synthesizer_prompt(state, "volume_outline", [])
 
-    assert "只做卷级目标、卷内高潮、代价和卷间钩子" in role_prompt
+    assert "本阶段只做卷级蓝图" in role_prompt
+    assert "不得拆成逐章细纲" in role_prompt
+    assert "VOLUME_OUTLINE_FRAMEWORK" in synth_prompt
     assert "分卷大纲稿" in synth_prompt
-    assert "分卷结构" in synth_prompt
-    assert "卷目标" in synth_prompt
-    assert "卷级高潮" in synth_prompt
+    assert "分卷总体规划" in synth_prompt
+    assert "本卷阶段目标" in synth_prompt
+    assert "本卷剧情推进" in synth_prompt
+    assert "本卷世界观释放" in synth_prompt
+    assert "卷级约束与待确认项（可选）" in synth_prompt
+    assert "不要替代 chapter_outline" in synth_prompt
 
 
 def test_chapter_outline_prompt_limits_output_to_chapter_level_plan():

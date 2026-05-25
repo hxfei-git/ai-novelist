@@ -8,6 +8,7 @@ from ai_novelist.characters_framework import full_characters_headings
 from ai_novelist.outline.stage_contracts import StageSlot, get_stage_contract
 from ai_novelist.state import NovelState
 from ai_novelist.story_flow_framework import story_flow_required_headings
+from ai_novelist.volume_outline_framework import volume_outline_required_headings
 from ai_novelist.worldbuilding_framework import full_worldbuilding_headings
 
 
@@ -187,6 +188,24 @@ def _stage_structure(stage: str, slots: tuple[StageSlot, ...]) -> str:
             "- 必须承接 direction、worldbuilding、characters 已锁定内容；未锁定信息写成候选或待确认。\n"
             "- `### 仍需确认的问题` 最多 3 条，只问会影响主线阶段、核心代价、关键反转或终局选择的问题；若无写“暂无”。\n"
             "- 不得替代 volume_outline 输出完整分卷细纲。\n\n"
+            "必须包含并按顺序输出这些标题：\n"
+            f"{heading_lines}"
+        )
+    if stage == "volume_outline":
+        heading_lines = "\n".join(f"- `### {heading}`" for heading in volume_outline_required_headings())
+        return (
+            "分卷大纲阶段不是章节大纲，也不是逐章细纲。必须输出卷级蓝图，"
+            "并严格使用以下 14 个模块作为 Markdown 三级标题。\n\n"
+            "输出格式：\n"
+            "- 只输出 Markdown。\n"
+            "- 顶部不要写评审报告、分析过程或“以下是”。\n"
+            "- 必须以 `## 分卷大纲稿` 开始。\n"
+            "- 每个必填标题下必须有具体、可执行的内容，不能只有空泛概念或空标题。\n"
+            "- 可以用紧凑表格，但不要输出逐章列表，不要写正文或场景卡。\n"
+            "- 必须承接 direction、worldbuilding、characters 和 story_flow 的已保存内容；未确认信息写成候选、待确认或可选方案。\n"
+            "- 可选保留 `### 仍需确认的问题`，最多 3 条。\n"
+            "- 可选保留 `### 卷级约束与待确认项（可选）`，只在确有必要时写。\n"
+            "- 不得替代 chapter_outline。\n\n"
             "必须包含并按顺序输出这些标题：\n"
             f"{heading_lines}"
         )

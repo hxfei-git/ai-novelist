@@ -2175,3 +2175,31 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 结果：`302 passed`，`outline collaboration smoke ok`。
 
 说明：本轮代码与文档修改在当前沙箱中通过提权脚本化编辑完成，`apply_patch` 在既有文件更新时曾触发 bwrap loopback 错误，因此采用了等价的定向文本替换。
+
+
+## 99. 本轮更新：volume_outline 生成整改
+
+- 按 `plan.md` 将 `volume_outline` 从旧的分卷短摘要整改为 14 模块卷级蓝图。
+- 新增 `volume_outline_framework.py` 和 `outline/volume_outline_structure.py`，分别负责框架注入、标题归一、结构校验、兜底补齐、摘要和 memory 提取。
+- `graph_outline.py` 已在 `volume_outline` 阶段注入完整框架，扩展 6 个卷级角色分工，并在保存前调用 `volume_outline_structure_repair` 修复不完整输出。
+- `renderers.py`、`stage_contracts.py`、`codex_cli.py` mock 和 `tests/test_outline_collaboration.py` 已同步到新结构。
+- 锁定项按用户反馈放松为可选备注：不再要求必填锁定项，只保留 `卷级约束与待确认项（可选）`，未确认内容以候选/待确认表达。
+
+新增测试：
+
+- `tests/test_volume_outline_framework.py`
+- `tests/test_volume_outline_contract.py`
+- `tests/test_volume_outline_structure.py`
+
+验证：
+
+```bash
+.venv/bin/python -m compileall src tests
+.venv/bin/python -m pytest
+.venv/bin/python tests/smoke_outline_collaboration.py
+# 311 passed; outline collaboration smoke ok
+```
+
+剩余限制：
+
+- 结构兜底只保证模块完整，不保证创作质量；真实质量主要依赖修复 Agent 结合 direction/worldbuilding/characters/story_flow 重写。
