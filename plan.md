@@ -1,1081 +1,939 @@
-# AI Novelist `story_flow` 生成整改计划（Codex CLI 执行版）
+# AI Novelist `volume_outline` 生成整改计划（Codex CLI 执行版）
 
-> 目标：把 `story_flow.md` 从“少量剧情阶段摘要”整改为“可支撑全书规划、分卷大纲、章节大纲的故事流程蓝图”。
+> 目标：把 `volume_outline.md` 从“少量分卷摘要”整改为“可支撑章节大纲、章节卡、场景卡和正文生产的卷级蓝图”。
 >
 > 使用方式：在 `ai-novelist` 仓库根目录，把本文件作为 Codex CLI 的执行任务上下文。Codex 需要逐项修改代码、补充测试、运行验证，并在最终汇报中给出变更文件、测试结果和前后对比。
 
 ---
 
-## 0. 执行原则
+## 0. 背景与问题诊断
 
-1. **不要只改 Prompt**：当前问题不是单个提示词不够详细，而是 `story_flow` 的阶段契约、角色分工、框架注入、结构校验、后处理修复和测试都不完整。必须系统整改。
-2. **不要把 `story_flow` 做成章节大纲**：它应当给 `volume_outline` 和 `chapter_outline` 提供骨架，但本身不直接拆章。
-3. **不要硬造未锁定设定**：凡是 `direction`、`worldbuilding`、`characters` 没有锁定的信息，只能写成“候选方向 / 待确认 / 可选方案”，不能伪装成既定正典。
-4. **保留现有项目风格**：先阅读现有代码结构、命名习惯、测试风格，再实现。下面给的是目标和建议实现路径，若现有代码有更合适的组织方式，可以在不降低验收标准的前提下调整。
-5. **一切以可验证产物为准**：整改完成后，至少要通过单元测试和一次故事流程生成/结构修复的集成式验证。
+本计划基于当前仓库、`demo-chat/outline/volume_outline.md`、`demo-chat/outline/story_flow.md` 和 `chat.log` 的实际输出制定。
+
+当前 `demo-chat/outline/volume_outline.md` 只有以下结构：
+
+- 分卷结构
+- 卷目标
+- 卷内主要矛盾
+- 卷级高潮
+- 卷间钩子
+- 仍需确认的问题
+
+这导致分卷大纲存在明显缺口：
+
+1. **卷级设定不完整**：没有分卷数量、卷名、副标题、章节范围、字数范围、所处故事阶段、主叙事功能等稳定字段。
+2. **单卷缺少一句话概括**：每卷没有清晰说明“这一卷讲什么、核心看点是什么、读者期待是什么”。
+3. **剧情推进太粗**：没有开卷状态、入卷事件、前期推进、中段转折、低谷失败、高潮、结尾余波和下卷钩子的过程线。
+4. **关键节点缺失**：当前只写高潮，没有每卷开卷事件、受挫、中段反转、重大选择、关键揭示和结尾钩子。
+5. **人物推进不足**：缺少主角状态、能力、信念、关系变化、新人物登场、旧人物退场、反派推进、秘密揭示和信息差变化。
+6. **世界观释放不足**：没有控制每卷出现的新地点、新势力、新规则、历史背景、力量体系、隐藏真相和保留未知。
+7. **爽点/卖点兑现缺位**：没有按题材说明每卷给读者兑现什么期待，例如悬疑揭示、关系拉扯、反转、打脸、升级、情绪爆点。
+8. **伏笔与信息差缺位**：缺少“本卷埋什么、揭什么、暂时不说什么”。
+9. **情绪节奏缺位**：没有开卷、中段、高潮、结尾的阅读情绪曲线。
+10. **开头结尾弱**：没有明确每卷第一场戏、开头钩子、结尾解决什么、留下什么、如何引向下一卷。
+11. **前后卷衔接弱**：没有逐卷说明继承上一卷什么后果、解决什么阶段问题、制造什么新问题、下一卷从哪里接起。
+12. **锁定项与弹性不足**：没有区分已锁定内容、可变内容、待确认内容和禁止 AI 擅改的设定。
+
+当前 `chat.log` 还能看到：
+
+- `volume_outline` 角色短评 Agent 只有 3 个：`分卷策划 Agent`、`卷内高潮 Agent`、`卷间钩子 Agent`。
+- 汇总 Agent 上下文约 3K，输出仍然短，说明问题不是模型上下文不够，而是阶段契约、输出规则和结构修复都不完整。
+- 当前 `story_flow.md` 本身也是旧短结构，虽然代码已整改 story_flow 框架，但 demo 旧产物尚未重跑。volume_outline 整改必须兼容两种情况：有完整 story_flow 时深度承接；只有旧短 story_flow 时也能生成完整分卷蓝图，并用“候选/待确认”标注缺口。
 
 ---
 
-## 1. 当前问题诊断
+## 1. 执行原则
 
-### 1.1 产物层问题
-
-当前 `demo-chat/outline/story_flow.md` 更像一个短摘要，主要围绕这些小节输出：
-
-- 开局压力
-- 中段升级
-- 后段冲突显形
-- 终局方向
-- 伏笔布置与回收方向
-- 仍需确认的问题
-
-这会导致以下问题：
-
-1. **主线因果链不完整**：没有明确“故事起点 → 引发事件 → 初始目标 → 阶段性目标升级 → 终局目标”。
-2. **阶段功能不清楚**：没有把开局、成长、扩张、转折、高潮、结局各自承担的叙事功能讲清楚。
-3. **冲突升级不够**：缺少“个人困境 → 组织/阵营冲突 → 制度/规则冲突 → 终极价值冲突”的升级路径。
-4. **人物弧光没有嵌入流程**：`characters` 里即使有人物成长，也没有说明这些变化如何被剧情事件推动。
-5. **爽点、情绪、伏笔、反转节奏缺位**：后续分卷和章节生成会缺少连续抓手。
-6. **结局路径过早模糊**：没有提前规定终局问题、世界变化、人物归宿和主题落点，中后期容易散。
-
-### 1.2 代码层问题
-
-需要重点检查并整改以下位置：
-
-- `src/ai_novelist/outline/stage_contracts.py`
-  - `story_flow` 的 `StageContract` 当前槽位太少。
-  - `allowed_intents` 太窄。
-  - `max_total_chars` 过低，不足以承载全书级流程蓝图。
-
-- `src/ai_novelist/graph_outline.py`
-  - `STAGE_ROLES["story_flow"]` 当前角色覆盖不足，缺少冲突升级、人物弧光、爽点情绪、终局回收等视角。
-  - 已有 `worldbuilding`、`characters` 类框架注入思路，但 `story_flow` 缺少同等级框架。
-  - 运行阶段有世界观/人物等结构化后处理，但缺少 `story_flow` 专属结构修复。
-  - `outline_stage_synthesizer_output_rule` 或同类输出规则没有强制 `story_flow` 必含完整结构。
-
-- `tests/`
-  - 需要补充 `story_flow` 合同、框架渲染、结构修复、集成保存等测试。
+1. **不要只改 Prompt**：必须同时整改阶段契约、框架注入、角色分工、输出规则、结构校验、修复兜底、摘要记忆和测试。
+2. **不要把 volume_outline 做成章节大纲**：可以给每卷大致章节范围和字数范围，但不能拆第 1 章、第 2 章的逐章细纲。
+3. **不要搬运完整 worldbuilding/characters/story_flow**：volume_outline 只取每卷需要释放和推进的部分，不复制全部设定。
+4. **不要硬造未锁定设定**：凡是 direction、worldbuilding、characters、story_flow 没有锁定的信息，只能写成“候选方向 / 待确认 / 可选方案”。
+5. **每卷要可执行但保留弹性**：分卷大纲应能支撑后续章节大纲，却不能把所有细节提前锁死。
+6. **按不同卷型调整重点**：调查型卷、战争型卷、感情推进卷、成长卷、探索卷、终局卷的推进方式可以不同，不要套死单一公式。
+7. **以结构可验证为准**：完成后必须有结构校验和集成测试，确保保存的 `outline/volume_outline.md` 包含完整卷级蓝图。
+8. **遵守仓库规范**：任何代码变更必须同步更新 `docs/IMPLEMENTATION_PLAN.md` 和 `docs/SESSION_SUMMARY.md`，并创建 git commit。
 
 ---
 
 ## 2. 目标产物规格
 
-整改后，`outline/story_flow.md` 应当成为“故事流程稿”，默认包含以下 14 个一级内容块。标题可根据项目现有风格加 `##` 或 `###`，但测试建议采用稳定标题，便于结构校验。
+整改后，`outline/volume_outline.md` 应成为“分卷大纲稿”，默认包含以下 15 个模块。建议稳定使用以下 Markdown 标题，方便结构校验。
 
-### 2.1 必须包含的 14 个模块
+### 2.1 必须包含的 15 个模块
 
-1. **故事主线推进**
-   - 故事起点
-   - 引发事件
-   - 主角初始目标
-   - 主线任务 / 主线问题
-   - 阶段性目标变化
-   - 终局目标
+1. **分卷总体规划**
+   - 分卷数量
+   - 每卷名称
+   - 每卷大致章节范围
+   - 每卷大致字数范围
+   - 每卷在全书中的阶段位置
+   - 每卷承担的叙事功能
+   - 全书分卷推进逻辑
 
-2. **故事阶段划分**
-   - 开局阶段
-   - 成长阶段
-   - 扩张阶段
-   - 转折阶段
-   - 高潮阶段
-   - 结局阶段
+2. **单卷基础定位**
+   - 卷序号
+   - 卷名
+   - 卷副标题
+   - 大致章节范围
+   - 大致字数范围
+   - 所属故事阶段
+   - 本卷主叙事功能
+   - 可兼具的副功能
 
-3. **核心冲突升级路径**
-   - 初级冲突
-   - 中级冲突
-   - 高级冲突
-   - 终极冲突
-   - 每阶段敌人、升级方式、胜利代价、失败损失、成长推动
+3. **本卷一句话概括**
+   - 每卷一句话剧情
+   - 每卷核心看点
+   - 每卷主要问题
+   - 每卷读者期待
+   - 每卷阶段性承诺
 
-4. **关键剧情节点**
-   - 开篇钩子
-   - 第一次选择
-   - 第一次胜利
-   - 第一次失败
-   - 中段大转折
-   - 黑暗时刻
-   - 最终觉醒
-   - 终局对决
-   - 结局回响
+4. **本卷阶段目标**
+   - 主角这一卷想达成什么
+   - 主角被迫面对什么
+   - 阶段性任务是什么
+   - 卷末得到什么
+   - 卷末失去什么
+   - 成功或失败带来的后果
 
-5. **人物弧光嵌入流程**
-   - 主角起点缺陷、误解、欲望、恐惧
-   - 每阶段学会什么、失去什么、改变什么
-   - 关键人物如何推动、诱惑、阻止或唤醒主角
-   - 关系变化流程
-   - 反派与主角镜像关系
-   - 终局人物状态
+5. **本卷核心冲突**
+   - 人物冲突
+   - 规则冲突
+   - 环境冲突
+   - 内心冲突
+   - 关系冲突
+   - 阵营冲突
+   - 冲突如何逐步升级
 
-6. **伏笔、悬念与揭示节奏**
-   - 核心悬念
-   - 阶段性悬念
-   - 伏笔布置点
-   - 真相揭示顺序
-   - 表层真相、第一层反转、第二层反转、深层真相、终极真相
+6. **本卷剧情推进**
+   - 开卷状态
+   - 入卷事件
+   - 目标建立
+   - 前期推进
+   - 中段转折
+   - 冲突升级
+   - 重大选择
+   - 低谷或失败
+   - 高潮事件
+   - 结尾余波
+   - 下卷钩子
 
-7. **爽点 / 卖点兑现节奏**
-   - 开局卖点
-   - 阶段性爽点
-   - 升级型爽点
-   - 情绪释放点
-   - 卖点与主线结合方式
+7. **本卷关键节点**
+   - 开卷事件
+   - 第一个重要推动事件
+   - 第一次明显受挫
+   - 中段反转
+   - 重大选择
+   - 关键揭示
+   - 高潮事件
+   - 结尾钩子
 
-8. **情绪节奏与阅读体验**
-   - 整体情绪曲线
-   - 阶段情绪目标
-   - 高低起伏安排
-   - 章节 / 分卷节奏参考
+8. **本卷人物推进**
+   - 主角状态变化
+   - 主角能力变化
+   - 主角信念变化
+   - 关键配角作用
+   - 重要关系变化
+   - 新人物登场
+   - 旧人物退场
+   - 反派或对手推进
+   - 角色秘密揭示进度
+   - 人物之间的信息差变化
 
-9. **世界观展开顺序**
-   - 开局展示哪些设定
-   - 中期扩展哪些设定
-   - 后期揭示哪些底层秘密
-   - 设定展示方式
-   - 世界观与主角命运的关系
+9. **本卷世界观释放**
+   - 新地点
+   - 新势力
+   - 新规则
+   - 历史背景
+   - 力量体系推进
+   - 社会结构展示
+   - 隐藏真相揭示
+   - 暂时保留的未知信息
 
-10. **阵营与势力推进**
-    - 各阵营登场顺序
-    - 阵营关系变化
-    - 主角阵营位置变化
-    - 阵营冲突如何推动主线
+10. **本卷爽点与卖点兑现**
+    - 主要爽点
+    - 高光场面
+    - 能力升级点
+    - 打脸/逆转点
+    - 情感爆点
+    - 悬疑揭示点
+    - 大场面
+    - 最值得期待的桥段
 
-11. **代价与失败机制**
-    - 能力代价
-    - 选择代价
-    - 关系代价
-    - 世界代价
-    - 必败节点与后果
+11. **本卷伏笔、悬念与信息差**
+    - 承接前文的伏笔
+    - 本卷新增伏笔
+    - 本卷揭示的悬念
+    - 本卷保留的悬念
+    - 本卷制造的误导
+    - 人物之间的信息差
+    - 读者与主角之间的信息差
+    - 为后续卷准备的反转条件
 
-12. **反转与认知升级**
-    - 反转位置
-    - 反转类型：身份、阵营、目标、规则、真相、情感
-    - 反转后的剧情影响
-    - 反转与前文伏笔的对应关系
+12. **本卷情绪节奏**
+    - 开卷情绪
+    - 中段情绪
+    - 高潮情绪
+    - 结尾情绪
+    - 本卷整体阅读体验
+    - 情绪反差
+    - 缓冲段落需求
 
-13. **分卷衔接方向**
-    - 每卷承担的故事功能
-    - 每卷核心问题
-    - 每卷阶段性高潮
-    - 卷与卷之间的钩子
+13. **本卷开头与结尾**
+    - 第一场戏
+    - 开头钩子
+    - 入卷问题
+    - 结尾解决了什么
+    - 结尾留下了什么
+    - 如何引向下一卷
 
-14. **结局路径**
-    - 主线结局
-    - 人物结局
-    - 关系结局
-    - 世界结局
-    - 主题落点
-    - 余味 / 续作空间
+14. **与前后卷的衔接**
+    - 继承上一卷的什么问题
+    - 延续上一卷的什么后果
+    - 本卷解决了哪些阶段问题
+    - 本卷制造了哪些新问题
+    - 下一卷从哪里接起
+    - 本卷在全书主线中的作用
+
+15. **锁定项、可变项、待确认项**
+    - 已锁定内容
+    - 暂时可调整内容
+    - 不确定内容
+    - 后续生成限制
+    - 不希望 AI 擅自改变的设定
 
 ### 2.2 可选模块
 
-15. **仍需确认的问题**
-   - 只记录真正会影响流程设计的待确认项。
-   - 不要把已能从前序阶段推导的问题重复问用户。
-   - 最多 3 个问题。
+16. **仍需确认的问题**
+   - 最多 3 个。
+   - 只问会影响分卷数量、卷末大事件、关键人物命运、终局方向或不可逆设定的问题。
+   - 不要重复问已能从前序阶段推导的问题。
 
 ---
 
-## 3. 针对当前 demo 故事的流程建议
+## 3. 推荐输出模板
 
-> 这一节不是要求硬编码进系统，而是给 Codex 在修复 demo 输出和测试用例时参考。若前序正典未锁定，应写成“候选”。
+最终 `volume_outline.md` 建议使用以下稳定结构。模板中的说明不能原样留在成品里，成品必须填写具体故事内容。
 
-当前 demo 的核心方向大致是：重生到魔门、谨慎苟活、利用前世记忆获得先手感、轻松日常与暗线危机形成反差、保护身边重要人物并慢慢变强。`story_flow` 应将这些卖点转成逐步升级的全书结构。
+```markdown
+## 分卷大纲稿
 
-### 3.1 推荐主线因果链
+### 分卷总体规划
+| 卷 | 卷名 | 章节范围 | 字数范围 | 故事阶段 | 主叙事功能 | 全书推进作用 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 第一卷 | ... | ... | ... | 开局 / 入局 | ... | ... |
+| 第二卷 | ... | ... | ... | 成长 / 扩张 | ... | ... |
+| 第三卷 | ... | ... | ... | 转折 / 低谷 | ... | ... |
 
-- **故事起点**：主角重生为魔门底层弟子，表面上只是想避开前世死局、稳住日常，与师姐/师妹维系小院生活。
-- **引发事件**：前世记忆中的关键危险提前或变形出现，例如差事分派、药田/矿坑异常、外院清洗、某个师妹命运改变。
-- **初始目标**：苟住、避祸、保护眼前人，不主动卷入魔门权力斗争。
-- **主线问题**：主角能否在“魔门规则、前世记忆失准、寿元/资源债、正魔阵营暗斗”的夹缝中，保护重要关系并改写死局？
-- **目标升级**：
-  - 求生避祸
-  - 保护小院与亲近之人
-  - 夺取局部规则解释权
-  - 识破前世记忆背后的更大局
-  - 改写吞噬弱者的底层规则
-- **终局目标**：不只是活下来，而是在付出代价后建立一种新的选择空间，让主角和重要人物不再只能被宗门/阵营/寿元债推着走。
+### 单卷基础定位
+| 卷 | 卷名 / 副标题 | 主功能 | 副功能 | 阶段位置 | 弹性说明 |
+| --- | --- | --- | --- | --- | --- |
+| 第一卷 | ... | ... | ... | ... | ... |
 
-### 3.2 推荐阶段划分
+### 本卷一句话概括
+- 第一卷：...
+- 第二卷：...
+- 第三卷：...
 
-1. **开局阶段：入魔门与立卖点**
-   - 重点：重生先手、谨慎苟活、日常反差、第一次避坑。
-   - 需要立即兑现读者期待：主角利用前世记忆规避一次危机，同时发现今世已有细节偏差。
+### 本卷阶段目标
+| 卷 | 主角目标 | 被迫面对 | 卷末得到 | 卷末失去 | 成败后果 |
+| --- | --- | --- | --- | --- | --- |
 
-2. **成长阶段：小院、差事与局部副本**
-   - 重点：药田、矿坑、外门任务、低阶资源争夺、小反派压迫。
-   - 目标：让读者理解魔门生存玩法，看到主角不是无脑爽，而是靠信息差、谨慎选择和关系经营取胜。
+### 本卷核心冲突
+| 卷 | 冲突来源 | 升级方式 | 主要压力 | 卷末变化 |
+| --- | --- | --- | --- | --- |
 
-3. **扩张阶段：阵营浮现与地图扩大**
-   - 重点：外院/内门/圣女/长老/正道势力/地下交易等陆续登场。
-   - 目标：把冲突从个人生存升级为组织和阵营结构问题。
+### 本卷剧情推进
+#### 第一卷：...
+- 开卷状态：...
+- 入卷事件：...
+- 目标建立：...
+- 前期推进：...
+- 中段转折：...
+- 冲突升级：...
+- 重大选择：...
+- 低谷或失败：...
+- 高潮事件：...
+- 结尾余波：...
+- 下卷钩子：...
 
-4. **转折阶段：前世记忆失准与关系破裂**
-   - 重点：一次主角以为必胜的选择失败，导致亲近者受伤、误解或分离。
-   - 目标：推翻“只靠前世记忆就能赢”的安全感。
+#### 第二卷：...
+- ...
 
-5. **高潮阶段：规则真相与最终选择**
-   - 重点：寿元债、宗门资源体系、正魔双方共同掩盖的规则真相显形。
-   - 目标：主角必须在复仇/救人/保全自身/改变规则之间做不可兼得的选择。
+### 本卷关键节点
+| 卷 | 开卷事件 | 首个推动 | 明显受挫 | 中段反转 | 重大选择 | 关键揭示 | 高潮事件 | 结尾钩子 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
 
-6. **结局阶段：有限胜利与新秩序余味**
-   - 重点：主线问题得到回答，关键关系落定，世界格局改变但不必完美。
-   - 目标：回应开头“苟活”的动机，让主角最终从“只想活下去的人”变成“愿意承担代价改变局面的人”。
+### 本卷人物推进
+| 卷 | 主角变化 | 关键配角 | 关系变化 | 新登场 / 退场 | 秘密与信息差 |
+| --- | --- | --- | --- | --- | --- |
 
-### 3.3 推荐冲突升级路径
+### 本卷世界观释放
+| 卷 | 新地点 | 新势力 | 新规则 / 体系 | 揭示内容 | 保留未知 |
+| --- | --- | --- | --- | --- | --- |
 
-- **初级冲突**：差事、资源、外门欺压、低阶敌人。
-- **中级冲突**：执事、内门派系、圣女线、宗门任务、正道追查。
-- **高级冲突**：宗门制度、寿元债、资源献祭、前世记忆被操控或不完整。
-- **终极冲突**：自由选择 vs 被规则吞噬；保护个人关系 vs 改写世界代价。
+### 本卷爽点与卖点兑现
+| 卷 | 主要爽点 | 高光桥段 | 情感 / 悬疑 / 反转兑现 | 与主线关系 |
+| --- | --- | --- | --- | --- |
 
-### 3.4 推荐反转层级
+### 本卷伏笔、悬念与信息差
+| 卷 | 承接伏笔 | 新增伏笔 | 本卷揭示 | 本卷保留 | 后续反转准备 |
+| --- | --- | --- | --- | --- | --- |
 
-- **表层真相**：主角以为自己只是重生避祸。
-- **第一层反转**：今世危险并非简单复刻前世，敌人和事件顺序发生偏移。
-- **第二层反转**：身边重要人物与核心秘密有关，不只是被保护对象。
-- **深层真相**：魔门规则与正道秩序可能共享同一套剥削/献祭逻辑。
-- **终极真相**：主角的前世记忆本身可能是某种规则漏洞、诱饵或代价的一部分，必须决定是否继续利用它。
+### 本卷情绪节奏
+| 卷 | 开卷情绪 | 中段情绪 | 高潮情绪 | 结尾情绪 | 缓冲 / 反差 |
+| --- | --- | --- | --- | --- | --- |
+
+### 本卷开头与结尾
+| 卷 | 第一场戏 | 开头钩子 | 入卷问题 | 结尾解决 | 结尾遗留 | 下一卷入口 |
+| --- | --- | --- | --- | --- | --- | --- |
+
+### 与前后卷的衔接
+- 第一卷 -> 第二卷：...
+- 第二卷 -> 第三卷：...
+- 第三卷 -> 第四卷：...
+
+### 锁定项、可变项、待确认项
+#### 第一卷
+- 锁定项：...
+- 可变项：...
+- 待确认：...
+- 注意：...
+
+#### 第二卷
+- ...
+
+### 仍需确认的问题
+1. ...
+2. ...
+3. ...
+```
 
 ---
 
-## 4. 代码整改步骤
+## 4. 针对当前 demo 的方向建议
 
-### 4.1 建立分支并跑基线
+这一节不是硬编码内容，只用于指导测试、mock 和人工验收。
+
+当前 demo 已有信息大致为：主角重生到幽罗魔宗外门，想低调苟活；外门小院有轻松日常与危险反差；药田、矿坑、丹药、符纸、软资源、人情债构成低阶压力；师妹提供日常温度和牵连风险；圣女线代表更高压的危险同盟；故事流程中后段可能走向边境城、矿脉或近海海市。
+
+推荐分卷应从 `story_flow` 的阶段骨架推导，而不是只写“三卷”。如果用户只说“三卷”，系统也应补齐每卷功能和弹性边界。
+
+### 4.1 三卷版候选
+
+1. **第一卷：外门苟活 / 入局卷**
+   - 功能：立人设、立卖点、建立外门规则、展示小院日常与危险反差。
+   - 核心问题：主角能否在不暴露前世记忆的前提下活下来，并保护师妹不被卷入外门清洗。
+   - 关键推进：药田差事、便宜丹药/符纸、人情债、第一次避坑、第一次留下“知道太多”的痕迹。
+   - 卷末变化：主角暂时站稳，但被圣女或更高层注意到。
+
+2. **第二卷：边境承压 / 扩张卷**
+   - 功能：扩大地图，连接外门、矿坑、边境城，推动从避祸到处理危险。
+   - 核心问题：主角是否还能只靠躲避保护自己和身边人。
+   - 关键推进：矿坑名额、边境城任务、圣女试探、前世记忆失准、一次关系受损或任务失败。
+   - 卷末变化：主角被迫承认自己已经进入更高层视线，不能再只守小院。
+
+3. **第三卷：同盟代价 / 转折卷**
+   - 功能：把危险同盟、资源交易、圣女线和海市/高阶交易压到台前。
+   - 核心问题：主角愿意为保护关系和换取后路暴露多少、交换多少、牵连多少。
+   - 关键推进：近海海市、情报交易、圣女立场变化、师妹风险升级、同盟代价显形。
+   - 卷末变化：主角获得更大资源入口，同时失去完全隐身的可能。
+
+### 4.2 五卷版候选
+
+如果项目目标是更长篇，volume_outline 应允许给出五卷结构，或在“三卷”用户反馈下标明“三卷为当前基准，后续可扩展为五卷”。
+
+1. 第一卷：外门苟活与小院牵连。
+2. 第二卷：药田矿坑与外门清洗。
+3. 第三卷：边境城承压与圣女试探。
+4. 第四卷：近海海市交易与同盟代价。
+5. 第五卷：规则真相、师徒旧案和有限胜利。
+
+### 4.3 当前 demo 产物应避免的问题
+
+- 不要只写“来源：已锁定...”作为内容填充。
+- 不要把每卷都写成同一种“压力升级”。
+- 不要只给卷名，不给卷内过程线。
+- 不要把边境城、矿坑、海市写成装饰性地点，必须说明它们如何改变主角目标、关系和世界认知。
+- 不要在用户只确认“三卷”时忽略章节范围、字数范围、卷功能、开头结尾和锁定/可变项。
+
+---
+
+## 5. 代码整改步骤
+
+### 5.1 建立分支与跑基线
 
 在仓库根目录执行：
 
 ```bash
-git checkout -b fix/story-flow-framework
-python -m compileall src tests
-python -m pytest tests/test_outline_stage_controls.py tests/test_outline_collaboration.py tests/test_output_contracts.py
+git checkout -b fix/volume-outline-framework
+.venv/bin/python -m compileall src tests
+.venv/bin/python -m pytest tests/test_outline_stage_controls.py tests/test_outline_collaboration.py tests/test_output_contracts.py tests/test_graph_writer.py
 ```
-
-记录当前失败/通过情况。如果已有测试失败，不要先大改，先确认失败与本次需求是否相关。
 
 同时查看当前关键文件：
 
 ```bash
-sed -n '1,260p' src/ai_novelist/outline/stage_contracts.py
-sed -n '1,260p' src/ai_novelist/graph_outline.py
-grep -R "story_flow" -n src tests | head -80
-sed -n '1,220p' demo-chat/outline/story_flow.md
+sed -n '1,420p' src/ai_novelist/outline/stage_contracts.py
+sed -n '1,260p' src/ai_novelist/outline/renderers.py
+sed -n '1,520p' src/ai_novelist/graph_outline.py
+sed -n '200,420p' src/ai_novelist/adapters/codex_cli.py
+rg -n "volume_outline|分卷" src tests
+sed -n '1,260p' demo-chat/outline/volume_outline.md
+sed -n '1,260p' demo-chat/outline/story_flow.md
 ```
 
----
+记录基线结果。如果已有测试失败，先确认是否与本次需求相关。
 
-### 4.2 扩展 `story_flow` 阶段契约
+### 5.2 扩展 `volume_outline` 阶段契约
 
 文件：`src/ai_novelist/outline/stage_contracts.py`
 
-找到 `story_flow` 的 `StageContract`，将其改成能承载 14 个核心模块。
+将 `volume_outline` 从当前 5 个 slot 扩展为 15 个核心模块。
 
-#### 4.2.1 建议 intent
-
-将 `allowed_intents` 扩展为：
+建议 `allowed_intents` 覆盖：
 
 ```python
 allowed_intents=(
-    "故事起点",
-    "引发事件",
-    "主线问题",
-    "阶段目标",
-    "终局目标",
-    "阶段划分",
-    "冲突升级",
-    "关键剧情节点",
-    "人物弧光嵌入",
-    "关系变化流程",
-    "反派镜像",
-    "伏笔悬念",
-    "揭示节奏",
-    "爽点兑现",
-    "情绪节奏",
-    "世界观展开",
-    "阵营推进",
-    "失败代价",
-    "反转认知",
-    "分卷衔接",
-    "结局路径",
+    "分卷总体规划",
+    "单卷基础定位",
+    "本卷一句话概括",
+    "本卷阶段目标",
+    "本卷核心冲突",
+    "本卷剧情推进",
+    "本卷关键节点",
+    "本卷人物推进",
+    "本卷世界观释放",
+    "本卷爽点与卖点兑现",
+    "本卷伏笔悬念与信息差",
+    "本卷情绪节奏",
+    "本卷开头与结尾",
+    "前后卷衔接",
+    "锁定项可变项待确认项",
 )
 ```
 
-如果项目约定 intent 使用更短词，可保留短词，但必须覆盖以上语义。
+建议 `forbidden_intents` 覆盖：
 
-#### 4.2.2 建议 slots
+```python
+forbidden_intents=(
+    "逐章细纲",
+    "章节正文",
+    "完整场景卡",
+    "替代 chapter_outline",
+    "替代 story_flow 重写全书主线",
+    "新增与 worldbuilding 冲突的世界规则",
+    "新增与 characters 冲突的人物设定",
+    "无来源地把候选内容写成已锁定 canon",
+    "只输出卷名和卷目标的短摘要",
+)
+```
 
-将 `slots` 扩展为类似以下结构。字段名按项目现有 `StageSlot` 构造函数调整，不要机械复制导致类型错误。
+建议 slots：
 
 ```python
 slots=(
-    StageSlot(
-        "mainline_progression",
-        "故事主线推进",
-        "说明故事起点、引发事件、主角初始目标、主线问题、阶段性目标升级与终局目标。",
-        True,
-        6,
-        180,
-    ),
-    StageSlot(
-        "stage_map",
-        "故事阶段划分",
-        "按开局、成长、扩张、转折、高潮、结局说明每阶段功能、核心事件类型、阶段出口。",
-        True,
-        6,
-        220,
-    ),
-    StageSlot(
-        "conflict_escalation",
-        "核心冲突升级路径",
-        "从个人困境升级到组织/阵营、制度/规则、终极价值矛盾，并标注敌人、代价和成长作用。",
-        True,
-        4,
-        220,
-    ),
-    StageSlot(
-        "key_plot_nodes",
-        "关键剧情节点",
-        "规划开篇钩子、第一次选择、第一次胜利、第一次失败、中段大转折、黑暗时刻、最终觉醒、终局对决、结局回响。",
-        True,
-        9,
-        160,
-    ),
-    StageSlot(
-        "character_arc_embedding",
-        "人物弧光嵌入流程",
-        "说明主角缺陷与欲望如何被剧情推动变化，关键人物如何影响主角，重要关系如何变化，反派如何镜像主角。",
-        True,
-        6,
-        220,
-    ),
-    StageSlot(
-        "foreshadowing_reveal_cadence",
-        "伏笔、悬念与揭示节奏",
-        "定义核心悬念、阶段悬念、伏笔布置点、真相分层揭示顺序与回收方向。",
-        True,
-        6,
-        220,
-    ),
-    StageSlot(
-        "payoff_promise_cadence",
-        "爽点 / 卖点兑现节奏",
-        "承接 direction 的核心卖点和故事承诺，安排开局卖点、阶段爽点、升级爽点、情绪释放点。",
-        True,
-        5,
-        200,
-    ),
-    StageSlot(
-        "emotional_pacing",
-        "情绪节奏与阅读体验",
-        "规划整体情绪曲线、阶段情绪目标、高低起伏、缓冲与爆发、分卷节奏倾向。",
-        True,
-        5,
-        200,
-    ),
-    StageSlot(
-        "worldbuilding_reveal_order",
-        "世界观展开顺序",
-        "说明世界规则、地图、历史、力量体系、底层秘密如何随剧情逐步展示。",
-        True,
-        5,
-        200,
-    ),
-    StageSlot(
-        "faction_progression",
-        "阵营与势力推进",
-        "规划势力登场顺序、关系变化、主角阵营位置变化、势力冲突如何压迫选择。",
-        True,
-        5,
-        200,
-    ),
-    StageSlot(
-        "cost_failure_mechanism",
-        "代价与失败机制",
-        "规定能力代价、选择代价、关系代价、世界代价、必败节点与后果。",
-        True,
-        5,
-        200,
-    ),
-    StageSlot(
-        "reversals_cognition",
-        "反转与认知升级",
-        "规划开局、中段、后期、终局的身份/阵营/目标/规则/真相/情感反转，以及反转后的剧情影响。",
-        True,
-        5,
-        200,
-    ),
-    StageSlot(
-        "volume_bridge_direction",
-        "分卷衔接方向",
-        "为后续 volume_outline 提供骨架：每卷功能、核心问题、阶段高潮、卷尾钩子。不是章节大纲。",
-        True,
-        5,
-        180,
-    ),
-    StageSlot(
-        "ending_path",
-        "结局路径",
-        "提前规划主线、人物、关系、世界、主题和余味/续作空间的结局方向。",
-        True,
-        6,
-        200,
-    ),
+    StageSlot("volume_master_plan", "分卷总体规划", "分卷数量、卷名、章节/字数范围、阶段位置、叙事功能和全书推进逻辑", True, 8, 220),
+    StageSlot("volume_positioning", "单卷基础定位", "卷序号、卷名、副标题、范围、所属故事阶段、主功能和副功能", True, 8, 200),
+    StageSlot("volume_loglines", "本卷一句话概括", "每卷一句话剧情、核心看点、主要问题、读者期待和阶段性承诺", True, 8, 220),
+    StageSlot("volume_goals", "本卷阶段目标", "主角目标、被迫面对、阶段任务、卷末得到/失去和成败后果", True, 8, 220),
+    StageSlot("volume_conflicts", "本卷核心冲突", "人物、规则、环境、内心、关系、阵营冲突及升级方式", True, 8, 220),
+    StageSlot("volume_plot_progression", "本卷剧情推进", "开卷状态、入卷事件、前期推进、中段转折、低谷、高潮、余波和下卷钩子", True, 8, 260),
+    StageSlot("volume_key_nodes", "本卷关键节点", "开卷事件、推动事件、受挫、中段反转、重大选择、关键揭示、高潮和结尾钩子", True, 8, 220),
+    StageSlot("volume_character_progression", "本卷人物推进", "主角变化、关键配角、重要关系、新登场/退场、对手推进和信息差变化", True, 8, 220),
+    StageSlot("volume_world_reveal", "本卷世界观释放", "新地点、新势力、新规则、历史背景、体系推进、隐藏真相和保留未知", True, 8, 220),
+    StageSlot("volume_payoffs", "本卷爽点与卖点兑现", "高光场面、升级、逆转、情感爆点、悬疑揭示、大场面和桥段期待", True, 8, 220),
+    StageSlot("volume_foreshadowing", "本卷伏笔、悬念与信息差", "承接伏笔、新增伏笔、揭示、保留、误导、信息差和后续反转条件", True, 8, 220),
+    StageSlot("volume_emotional_pacing", "本卷情绪节奏", "开卷、中段、高潮、结尾情绪，整体体验、缓冲和反差", True, 8, 200),
+    StageSlot("volume_opening_ending", "本卷开头与结尾", "第一场戏、开头钩子、入卷问题、结尾解决/遗留和下一卷入口", True, 8, 220),
+    StageSlot("volume_bridges", "与前后卷的衔接", "继承前卷后果、本卷解决/制造的问题、下一卷接起点和全书作用", True, 8, 220),
+    StageSlot("volume_locks", "锁定项、可变项、待确认项", "每卷锁定内容、可调整内容、不确定内容、生成限制和禁止擅改项", True, 8, 220),
 )
 ```
 
-#### 4.2.3 字数与问题数
+`max_questions` 建议为 3。
 
-- 将 `max_total_chars` 从当前过低值提高到 **6500～9000**，或设为 `None` 后交给输出规则控制。
-- `max_questions` 建议为 `3`。
-- `confirmation_prompt` 要明确询问“主线阶段、终局方向、核心代价、反转尺度”这类高价值问题，而不是笼统询问。
+`max_total_chars` 建议提升到 9000～12000，或设为 `None` 并交给输出规则控制。首版可用 `10000`。
 
-示例：
+`confirmation_policy` 建议改为：
 
 ```python
-confirmation_prompt=(
-    "请确认故事流程中的主线目标升级、核心失败代价、关键反转尺度、终局选择是否符合预期；"
-    "若有未锁定设定，请标为候选而不是写成正典。"
+confirmation_policy=(
+    "只问会影响分卷数量、卷末大事件、关键人物命运、世界观释放顺序或不可逆锁定项的问题；"
+    "不要让用户在模型自造的细枝末节中选择。"
 )
 ```
 
----
+### 5.3 新增 `volume_outline` 框架文件
 
-### 4.3 新增 `story_flow` 框架文件
+新增文件：`src/ai_novelist/volume_outline_framework.py`
 
-建议新增文件：`src/ai_novelist/story_flow_framework.py`
+建议结构类似 `story_flow_framework.py`：
 
-目的：像世界观/人物框架一样，将 `story_flow` 的结构要求稳定注入到角色 Agent 和 Synthesizer Prompt 中。
+- `VolumeOutlineSection`
+- `VOLUME_OUTLINE_SECTIONS`
+- `volume_outline_required_headings()`
+- `full_volume_outline_headings()`
+- `render_volume_outline_framework(mode="full")`
 
-#### 4.3.1 建议实现
+必需标题：
 
 ```python
-"""Framework prompt for the story_flow outline stage."""
-
-from __future__ import annotations
-
-from dataclasses import dataclass
-
-
-@dataclass(frozen=True)
-class StoryFlowSection:
-    key: str
-    heading: str
-    purpose: str
-    required_points: tuple[str, ...]
-
-
-STORY_FLOW_SECTIONS: tuple[StoryFlowSection, ...] = (
-    StoryFlowSection(
-        "mainline_progression",
-        "故事主线推进",
-        "描述整部小说最核心的因果链。",
-        ("故事起点", "引发事件", "主角初始目标", "主线任务 / 主线问题", "阶段性目标变化", "终局目标"),
-    ),
-    StoryFlowSection(
-        "stage_map",
-        "故事阶段划分",
-        "把整部故事拆成大的流程阶段，而不是直接拆章节。",
-        ("开局阶段", "成长阶段", "扩张阶段", "转折阶段", "高潮阶段", "结局阶段"),
-    ),
-    StoryFlowSection(
-        "conflict_escalation",
-        "核心冲突升级路径",
-        "规划冲突如何越来越大、越来越难、越来越贴近主题。",
-        ("初级冲突", "中级冲突", "高级冲突", "终极冲突", "胜利代价", "失败损失"),
-    ),
-    StoryFlowSection(
-        "key_plot_nodes",
-        "关键剧情节点",
-        "记录全书级别的重要节点。",
-        ("开篇钩子", "第一次选择", "第一次胜利", "第一次失败", "中段大转折", "黑暗时刻", "最终觉醒", "终局对决", "结局回响"),
-    ),
-    StoryFlowSection(
-        "character_arc_embedding",
-        "人物弧光嵌入流程",
-        "说明人物变化如何被剧情事件推动。",
-        ("主角起点状态", "成长路径", "关键人物影响", "关系变化流程", "反派镜像", "终局人物状态"),
-    ),
-    StoryFlowSection(
-        "foreshadowing_reveal_cadence",
-        "伏笔、悬念与揭示节奏",
-        "安排信息释放，避免前期没钩子、后期硬反转。",
-        ("核心悬念", "阶段性悬念", "伏笔布置点", "真相揭示顺序", "分层反转"),
-    ),
-    StoryFlowSection(
-        "payoff_promise_cadence",
-        "爽点 / 卖点兑现节奏",
-        "承接核心卖点和故事承诺，规划持续兑现与升级。",
-        ("开局卖点", "阶段性爽点", "升级型爽点", "情绪释放点", "卖点与主线结合"),
-    ),
-    StoryFlowSection(
-        "emotional_pacing",
-        "情绪节奏与阅读体验",
-        "规划读者情绪，而不只是事件顺序。",
-        ("整体情绪曲线", "阶段情绪目标", "高低起伏", "缓冲与爆发", "分卷节奏参考"),
-    ),
-    StoryFlowSection(
-        "worldbuilding_reveal_order",
-        "世界观展开顺序",
-        "说明静态设定如何逐步进入读者视野。",
-        ("开局展示", "中期扩展", "后期揭示", "展示方式", "与主角命运关系"),
-    ),
-    StoryFlowSection(
-        "faction_progression",
-        "阵营与势力推进",
-        "规划组织、宗门、家族、国家、神明、AI 等势力如何登场和冲突。",
-        ("登场顺序", "关系变化", "主角位置变化", "势力冲突推动选择"),
-    ),
-    StoryFlowSection(
-        "cost_failure_mechanism",
-        "代价与失败机制",
-        "防止主角一路平推，让胜利和成长都有成本。",
-        ("能力代价", "选择代价", "关系代价", "世界代价", "失败节点"),
-    ),
-    StoryFlowSection(
-        "reversals_cognition",
-        "反转与认知升级",
-        "将 concept 中的反转原则落到流程位置。",
-        ("反转位置", "反转类型", "反转后影响", "前文伏笔对应"),
-    ),
-    StoryFlowSection(
-        "volume_bridge_direction",
-        "分卷衔接方向",
-        "为 volume_outline 提供骨架，而不是替代分卷大纲。",
-        ("每卷功能", "每卷核心问题", "阶段性高潮", "卷间钩子"),
-    ),
-    StoryFlowSection(
-        "ending_path",
-        "结局路径",
-        "提前约束终局，避免中后期发散。",
-        ("主线结局", "人物结局", "关系结局", "世界结局", "主题落点", "余味 / 续作空间"),
-    ),
+(
+    "分卷总体规划",
+    "单卷基础定位",
+    "本卷一句话概括",
+    "本卷阶段目标",
+    "本卷核心冲突",
+    "本卷剧情推进",
+    "本卷关键节点",
+    "本卷人物推进",
+    "本卷世界观释放",
+    "本卷爽点与卖点兑现",
+    "本卷伏笔、悬念与信息差",
+    "本卷情绪节奏",
+    "本卷开头与结尾",
+    "与前后卷的衔接",
+    "锁定项、可变项、待确认项",
 )
-
-
-def story_flow_required_headings() -> tuple[str, ...]:
-    return tuple(section.heading for section in STORY_FLOW_SECTIONS)
-
-
-def render_story_flow_framework() -> str:
-    lines: list[str] = [
-        "【story_flow 阶段强制框架】",
-        "本阶段产物是全书级故事流程蓝图，不是章节大纲，也不是分卷细纲。",
-        "必须承接 direction、worldbuilding、characters 已锁定内容；未锁定内容只能写为候选/待确认。",
-        "必须覆盖以下模块：",
-    ]
-    for index, section in enumerate(STORY_FLOW_SECTIONS, start=1):
-        points = "、".join(section.required_points)
-        lines.append(f"{index}. {section.heading}：{section.purpose} 必含：{points}。")
-    lines.extend(
-        [
-            "写作边界：",
-            "- 不要直接写章节正文。",
-            "- 不要生成逐章列表。",
-            "- 不要新增与 worldbuilding 冲突的世界规则。",
-            "- 不要新增与 characters 冲突的人物终局。",
-            "- 每个模块都要说明它如何推动主线、人物、冲突或阅读体验。",
-            "- 缺失信息请标为候选方向或待确认问题。",
-        ]
-    )
-    return "\n".join(lines)
 ```
 
-如项目已有框架文件命名规范，请按规范调整。
+框架 Prompt 必须声明：
 
----
+- 本阶段是卷级蓝图，不是章节大纲。
+- 必须承接 story_flow 的主线阶段、冲突升级、分卷衔接方向和结局路径。
+- 必须承接 worldbuilding 的地点、势力、规则释放顺序。
+- 必须承接 characters 的关系变化、秘密揭示和人物命运推进。
+- 用户只给“三卷/五卷”时，也要补齐每卷功能和弹性边界。
+- 未锁定内容写候选或待确认。
 
-### 4.4 将 `story_flow` 框架注入 Prompt
+### 5.4 新增 `volume_outline` 结构校验与修复
 
-文件：`src/ai_novelist/graph_outline.py`
+新增文件：`src/ai_novelist/outline/volume_outline_structure.py`
 
-#### 4.4.1 引入框架函数
+参考 `story_flow_structure.py` 实现：
 
-在 import 区域增加：
+必需函数：
 
 ```python
-from .story_flow_framework import render_story_flow_framework, story_flow_required_headings
+VOLUME_OUTLINE_REQUIRED_HEADINGS: tuple[str, ...]
+normalize_heading(text: str) -> str
+canonical_volume_outline_heading(text: str) -> str | None
+extract_markdown_sections(text: str) -> dict[str, str]
+missing_volume_outline_headings(text: str) -> list[str]
+has_nonempty_volume_outline_section(text: str, heading: str) -> bool
+empty_volume_outline_sections(text: str) -> list[str]
+validate_volume_outline(text: str, min_chars: int = 900) -> tuple[bool, list[str]]
+append_missing_volume_outline_sections(text: str, missing: list[str] | None = None) -> str
+split_volume_outline_sections(text: str) -> dict[str, str]
+volume_outline_bullets(section_text: str) -> list[str]
+summarize_volume_outline(text: str, max_chars: int = 2200) -> str
+extract_volume_outline_memory(text: str, max_items: int = 24, max_chars: int = 2200) -> list[str]
 ```
 
-根据实际包结构调整相对路径。
+标题别名需支持常见变体：
 
-#### 4.4.2 新增框架 Prompt 函数
+- `分卷结构` -> `分卷总体规划`
+- `卷目标` / `本卷目标` -> `本卷阶段目标`
+- `卷内主要矛盾` -> `本卷核心冲突`
+- `卷级高潮` -> `本卷关键节点` 或 `本卷剧情推进`，最终修复要保留原内容并归入合适模块
+- `卷间钩子` -> `与前后卷的衔接`
+- `伏笔悬念` -> `本卷伏笔、悬念与信息差`
+- `爽点卖点` -> `本卷爽点与卖点兑现`
 
-如果现有代码已有 `worldbuilding_framework_prompt(stage)`、`characters_framework_prompt(stage)` 这类函数，新增同类函数：
+校验规则：
+
+1. 必须含 `## 分卷大纲稿` 或同级主标题。
+2. 15 个必需模块都存在。
+3. 每个模块下有非空内容。
+4. 总中文字符数不低于 900，推荐 2500+。
+5. 不得出现明显逐章列表，例如 3 个以上 `第 N 章`。
+6. 必须有至少 2 个卷级条目；如果用户指定“三卷”，最好有 3 个卷级条目。
+7. 若存在“待确认/候选”，不得把同一内容同时写成已锁定。
+
+确定性兜底：
+
+- 如果模型修复仍缺标题，按 15 个模块重建文档。
+- 保留已有旧结构内容，归入对应模块。
+- 每个缺失模块写“待补充：结构兜底占位”，并给出当前阶段需要补写的方向。
+
+### 5.5 接入 `graph_outline.py`
+
+#### 5.5.1 扩展角色分工
+
+当前：
 
 ```python
-def story_flow_framework_prompt(stage: str) -> str:
-    if stage != "story_flow":
-        return ""
-    return render_story_flow_framework()
+"volume_outline": ["分卷策划 Agent", "卷内高潮 Agent", "卷间钩子 Agent"]
 ```
 
-#### 4.4.3 注入角色 Agent Prompt
-
-找到 `build_outline_stage_role_prompt`。在已有世界观/人物框架注入处加入：
+建议改为：
 
 ```python
-story_flow_framework = story_flow_framework_prompt(stage)
-```
-
-并在 prompt 文本中放入：
-
-```text
-{story_flow_framework}
-```
-
-放置位置建议：
-
-1. 阶段契约之后；
-2. stage boundary 之前或之后均可，但要保证模型能看到；
-3. role focus 之前也可以，让角色视角围绕完整框架展开。
-
-#### 4.4.4 注入 Synthesizer Prompt
-
-找到 `build_outline_stage_synthesizer_prompt`。同样加入：
-
-```python
-story_flow_framework = story_flow_framework_prompt(stage)
-```
-
-并在综合提示中注入。Synthesizer 必须比单个 Agent 更明确地看到完整结构，否则各角色意见可能被压缩成短摘要。
-
----
-
-### 4.5 扩展 `story_flow` 角色分工
-
-文件：`src/ai_novelist/graph_outline.py`
-
-找到 `STAGE_ROLES` 或同类配置。将 `story_flow` 从少量角色扩展为：
-
-```python
-"story_flow": [
-    "主线结构 Agent",
-    "冲突升级 Agent",
-    "人物弧光 Agent",
-    "悬念伏笔 Agent",
-    "爽点情绪 Agent",
-    "终局回收 Agent",
+"volume_outline": [
+    "分卷架构 Agent",
+    "卷内推进 Agent",
+    "人物推进 Agent",
+    "世界观释放 Agent",
+    "爽点悬念 Agent",
+    "衔接锁定 Agent",
 ]
 ```
 
-然后在 `role_focus_instruction` 或同类函数中补充每个角色的职责。
+#### 5.5.2 更新 `role_focus_instruction`
 
-建议文本：
+新增角色职责：
 
-```python
-if role == "主线结构 Agent":
-    return "重点检查故事起点、引发事件、初始目标、主线问题、目标升级、终局目标是否形成清晰因果链。"
-if role == "冲突升级 Agent":
-    return "重点检查冲突是否从个人困境升级到组织阵营、制度规则和终极价值矛盾，并记录胜利代价与失败损失。"
-if role == "人物弧光 Agent":
-    return "重点检查主角和关键人物的变化如何被剧情推动，关系链如何变化，反派是否形成镜像。"
-if role == "悬念伏笔 Agent":
-    return "重点检查核心悬念、阶段悬念、伏笔布置和真相揭示顺序，避免硬反转。"
-if role == "爽点情绪 Agent":
-    return "重点检查核心卖点如何在各阶段持续升级兑现，以及紧张、爽感、心疼、燃、满足等情绪节奏。"
-if role == "终局回收 Agent":
-    return "重点检查终局是否回答主线问题、回收人物关系与伏笔，并为分卷衔接和结局路径提供稳定骨架。"
-```
+- `分卷架构 Agent`：检查分卷数量、卷名、章节/字数范围、阶段位置、主功能和全书推进逻辑。
+- `卷内推进 Agent`：检查每卷开卷状态、入卷事件、中段转折、低谷、高潮、结尾余波是否完整。
+- `人物推进 Agent`：检查每卷主角变化、关键配角、关系推进、角色秘密和信息差变化。
+- `世界观释放 Agent`：检查每卷新地点、新势力、新规则、历史/体系释放和保留未知是否服务剧情。
+- `爽点悬念 Agent`：检查每卷爽点、卖点、情绪爆点、伏笔、悬念、揭示和误导是否持续兑现。
+- `衔接锁定 Agent`：检查前后卷承接、锁定项、可变项、待确认项和不应擅改内容。
 
-如果现有函数用映射表，按映射表风格实现。
+#### 5.5.3 新增框架 Prompt
 
----
-
-### 4.6 更新阶段边界 `OUTLINE_STAGE_BOUNDARIES`
-
-文件：`src/ai_novelist/graph_outline.py`
-
-找到 `OUTLINE_STAGE_BOUNDARIES["story_flow"]` 或同类配置。调整为：
-
-#### 允许内容
-
-- 全书主线因果链
-- 故事阶段划分
-- 阶段目标升级
-- 冲突升级路径
-- 关键剧情节点
-- 人物弧光嵌入流程
-- 关系变化流程
-- 伏笔、悬念、揭示节奏
-- 爽点/卖点兑现节奏
-- 情绪节奏
-- 世界观展开顺序
-- 阵营与势力推进
-- 代价与失败机制
-- 反转与认知升级
-- 分卷衔接方向
-- 结局路径
-- 待确认问题
-
-#### 禁止内容
-
-- 直接写章节正文
-- 逐章拆解章节清单
-- 替代 `volume_outline` 输出完整分卷细纲
-- 新增与 `worldbuilding` 冲突的世界规则
-- 新增与 `characters` 冲突的人物设定
-- 无来源地把候选内容写成已锁定正典
-- 只输出模板标题，不填充实际内容
-
----
-
-### 4.7 强化 Synthesizer 输出规则
-
-搜索：
-
-```bash
-grep -R "outline_stage_synthesizer_output_rule" -n src
-```
-
-或查找生成阶段最终稿的 Prompt 函数。
-
-增加 `story_flow` 专属规则：
+新增：
 
 ```python
-if stage == "story_flow":
-    return """
-输出必须以 `## 故事流程稿` 开始。
-必须包含以下二级标题，且不得遗漏：
-1. 故事主线推进
-2. 故事阶段划分
-3. 核心冲突升级路径
-4. 关键剧情节点
-5. 人物弧光嵌入流程
-6. 伏笔、悬念与揭示节奏
-7. 爽点 / 卖点兑现节奏
-8. 情绪节奏与阅读体验
-9. 世界观展开顺序
-10. 阵营与势力推进
-11. 代价与失败机制
-12. 反转与认知升级
-13. 分卷衔接方向
-14. 结局路径
-可选：仍需确认的问题。
-
-每个必填标题下必须有具体、可执行的内容，不能只有空泛概念。
-允许使用简洁表格，但不要输出逐章列表，不要写正文。
-必须承接 direction、worldbuilding、characters 已锁定内容；未锁定信息写成候选或待确认。
-"""
-```
-
-注意：如果项目中用英文 key 或模板系统，请保持项目风格。
-
----
-
-### 4.8 新增 `story_flow` 结构校验与修复
-
-建议新增文件：`src/ai_novelist/outline/story_flow_structure.py`
-
-目的：即使模型输出偷懒或遗漏，也能在保存前修复为完整结构。
-
-#### 4.8.1 必需功能
-
-实现以下函数：
-
-```python
-STORY_FLOW_REQUIRED_HEADINGS: tuple[str, ...]
-normalize_heading(text: str) -> str
-extract_markdown_sections(text: str) -> dict[str, str]
-missing_story_flow_headings(text: str) -> list[str]
-has_nonempty_story_flow_section(text: str, heading: str) -> bool
-ensure_story_flow_outline_structure(...)
-```
-
-#### 4.8.2 校验规则
-
-`story_flow` 合格标准：
-
-1. 含 `## 故事流程稿` 或同级主标题。
-2. 14 个必需模块都存在。
-3. 每个模块下至少有非空内容。
-4. 总体内容不能明显短小，建议中文字符数不低于 2500；实际阈值可按测试和项目设定调整。
-5. 不得只复述标题。
-6. 不得出现逐章正文。
-7. 如果有未知信息，必须出现“候选 / 待确认 / 未锁定”等标记，而不是硬编。
-
-#### 4.8.3 修复策略
-
-建议采用两层修复：
-
-1. **模型修复**：如果缺失模块较多、内容明显过短、结构不完整，调用 LLM 一次，要求按完整框架重写。
-2. **确定性兜底**：如果模型修复后仍缺少少量标题，追加保守小节，写明“待确认 / 候选方向”，避免保存不合格结构。
-
-伪代码：
-
-```python
-def ensure_story_flow_outline_structure(
-    synthesis: str,
-    *,
-    adapter,
-    project_context: str,
-    direction_text: str,
-    worldbuilding_text: str,
-    characters_text: str,
-    role_outputs: list[str] | None = None,
-) -> str:
-    missing = missing_story_flow_headings(synthesis)
-    too_short = count_cjk_chars(synthesis) < 2500
-    empty_sections = [h for h in STORY_FLOW_REQUIRED_HEADINGS if not has_nonempty_story_flow_section(synthesis, h)]
-
-    if not missing and not too_short and not empty_sections:
-        return synthesis
-
-    repair_prompt = build_story_flow_repair_prompt(
-        synthesis=synthesis,
-        missing=missing,
-        empty_sections=empty_sections,
-        project_context=project_context,
-        direction_text=direction_text,
-        worldbuilding_text=worldbuilding_text,
-        characters_text=characters_text,
-        role_outputs=role_outputs,
+def volume_outline_framework_prompt(stage: str) -> str:
+    if stage != "volume_outline":
+        return ""
+    from ai_novelist.volume_outline_framework import render_volume_outline_framework
+    return (
+        "
+VOLUME_OUTLINE_FRAMEWORK:
+"
+        "你必须按下面的分卷大纲蓝图框架生成。分卷大纲不是章节大纲，"
+        "而是覆盖卷级目标、剧情推进、人物推进、世界观释放、爽点悬念、情绪节奏和前后卷衔接的骨架。
+"
+        f"{render_volume_outline_framework(mode='full')}
+"
     )
-    repaired = adapter.complete(repair_prompt)
-
-    if is_valid_story_flow(repaired):
-        return repaired
-
-    return append_missing_story_flow_sections(repaired)
 ```
 
-根据现有 adapter 接口调整调用方式，可能是 `complete_with_metrics` 而不是 `complete`。
+将其注入：
 
-#### 4.8.4 修复 Prompt 要点
+- `build_outline_stage_role_prompt`
+- `build_outline_stage_synthesizer_prompt`
 
-修复 Prompt 必须强调：
+注入位置参考 `story_flow_framework_prompt(stage)`。
 
-- 这是全书级流程稿，不是章节大纲。
-- 必须保留原文中有价值内容。
-- 必须承接前序阶段。
-- 不得凭空新增硬设定。
-- 缺失模块必须补齐。
-- 输出完整 Markdown，而不是解释修改理由。
+#### 5.5.4 更新 stage boundary
 
-示例核心文本：
+`OUTLINE_STAGE_BOUNDARIES["volume_outline"]` 改为：
+
+允许：
+
+- 分卷总体规划
+- 单卷基础定位
+- 本卷一句话概括
+- 本卷阶段目标
+- 本卷核心冲突
+- 本卷剧情推进
+- 本卷关键节点
+- 本卷人物推进
+- 本卷世界观释放
+- 本卷爽点与卖点兑现
+- 本卷伏笔、悬念与信息差
+- 本卷情绪节奏
+- 本卷开头与结尾
+- 与前后卷的衔接
+- 锁定项、可变项、待确认项
+
+禁止：
+
+- 逐章细纲
+- 正文场景
+- 完整场景卡
+- 替代 chapter_outline
+- 替代 story_flow 重写全书主线
+- 新增无来源 canon
+- 复制完整 worldbuilding 或 characters
+- 只输出卷名/卷目标/高潮/钩子的短摘要
+
+#### 5.5.5 更新连续性要求
+
+`stage_continuity_requirement("volume_outline")` 改为：
 
 ```text
-你正在修复 story_flow 阶段输出。当前输出结构不完整。
-请在不写章节正文、不替代分卷大纲的前提下，重写为完整故事流程稿。
-必须包含 14 个标题：...
-请承接 direction/worldbuilding/characters 的已锁定内容。
-未锁定信息只能写为“候选方向”或“待确认”。
-保留当前草稿中有价值的剧情方向。
-只输出修复后的 Markdown。
+分卷大纲必须整合 direction、worldbuilding、characters 和 story_flow。
+本阶段只做卷级蓝图：分卷数量、卷功能、每卷目标、卷内推进、人物推进、世界观释放、爽点悬念、情绪节奏、开头结尾、前后卷衔接和锁定/可变项。
+可以给大致章节范围和字数范围，但不得拆成逐章细纲，不得替代 chapter_outline。
 ```
 
----
+#### 5.5.6 接入结构修复
 
-### 4.9 在运行节点接入结构修复
-
-文件：`src/ai_novelist/graph_outline.py`
-
-找到阶段输出保存前的逻辑，通常在 `run_outline_stage_node` 或同类函数中。当前可能已有：
+在 `run_outline_stage_node` 中，类似 `story_flow`：
 
 ```python
-if stage == "worldbuilding":
-    synthesis = ensure_worldbuilding_outline_structure(...)
-elif stage == "characters":
-    synthesis = ensure_characters_outline_structure(...)
-```
-
-增加：
-
-```python
-elif stage == "story_flow":
-    synthesis = ensure_story_flow_outline_structure(
-        synthesis,
+elif stage == "volume_outline":
+    synthesis = ensure_volume_outline_structure(
+        synthesis=synthesis,
+        state=state,
         adapter=adapter,
-        project_context=project_context,
-        direction_text=previous_stage_texts.get("direction", ""),
-        worldbuilding_text=previous_stage_texts.get("worldbuilding", ""),
-        characters_text=previous_stage_texts.get("characters", ""),
-        role_outputs=role_outputs,
+        store=store,
+        author_craft=author_craft,
+        role_reviews=role_reviews,
     )
 ```
 
-实际变量名按现有代码调整。关键是：修复必须发生在保存 `outline/story_flow.md` 之前。
+新增函数 `ensure_volume_outline_structure`，参考 `ensure_story_flow_outline_structure`：
+
+- 调用 `validate_volume_outline`。
+- 不合格时构建 `AGENT: volume_outline_structure_repair` prompt。
+- repair prompt 强调：保留原文有效内容、承接前序阶段、不写逐章细纲、不硬造 canon、输出完整 Markdown。
+- repair 失败后调用 `append_missing_volume_outline_sections`。
+
+#### 5.5.7 更新摘要和 stage memory
+
+`summary` 和 `stage_memory` 对后续 `chapter_outline` 很关键。新增分发：
+
+```python
+if stage == "volume_outline":
+    from ai_novelist.outline.volume_outline_structure import summarize_volume_outline
+    return summarize_volume_outline(synthesis)
+```
+
+```python
+if stage == "volume_outline":
+    from ai_novelist.outline.volume_outline_structure import extract_volume_outline_memory
+    return extract_volume_outline_memory(synthesis)
+```
+
+摘要优先包含：
+
+- 分卷数量与卷名
+- 每卷一句话概括
+- 每卷阶段目标
+- 每卷关键节点
+- 每卷人物推进
+- 每卷世界观释放
+- 每卷结尾钩子
+- 锁定/可变项
+
+### 5.6 更新 `outline/renderers.py`
+
+在 `_stage_structure` 中为 `volume_outline` 添加专属输出规则，不再走通用 slots 渲染。
+
+规则要点：
+
+- 必须以 `## 分卷大纲稿` 开始。
+- 必须包含 15 个 `###` 标题。
+- 每个必填标题下必须有具体内容。
+- 可以用紧凑表格。
+- 可以写大致章节范围和字数范围。
+- 禁止逐章列表、正文、场景卡。
+- `### 仍需确认的问题` 最多 3 条。
+
+### 5.7 更新 mock adapter
+
+文件：`src/ai_novelist/adapters/codex_cli.py`
+
+新增：
+
+- `if "AGENT: volume_outline_structure_repair" in prompt: return self._mock_full_volume_outline()`
+- `_mock_full_volume_outline()`，包含 15 模块。
+- `_mock_outline_stage_synthesizer` 的 `volume_outline` 改为 `self._mock_full_volume_outline()`。
+
+mock 内容应覆盖 demo 类型：外门苟活、边境承压、同盟代价，或继续使用月球城市示例也可以，但必须是完整 15 模块。
+
+### 5.8 可选：迁移旧 demo 产物
+
+不建议自动覆盖用户 `demo-chat/outline/volume_outline.md`。
+
+如需人工 demo 验收，先备份：
+
+```bash
+cp -R demo-chat demo-chat.before-volume-outline-fix
+```
+
+然后重新运行 volume_outline 阶段或 smoke。
 
 ---
 
-### 4.10 更新阶段摘要与记忆
+## 6. 测试计划
 
-检查生成 `stage_memory`、`summary`、`project_memory` 的逻辑。`story_flow` 完整后，后续 `volume_outline` 应能读取到以下关键信息：
+### 6.1 新增测试：阶段契约
 
-- 主线问题
-- 阶段划分
-- 阶段性目标升级
-- 冲突升级路径
-- 关键节点
-- 主要伏笔与揭示顺序
-- 分卷衔接方向
-- 结局路径
+文件：`tests/test_volume_outline_contract.py`
 
-如果当前摘要只抽取很短内容，需要为 `story_flow` 增加专门摘要提示或摘要规则。
+测试点：
 
-建议摘要格式：
+1. `volume_outline` contract 存在。
+2. 必需 slot 数量不少于 15。
+3. slot label 覆盖 15 个模块。
+4. allowed_intents 覆盖分卷总体、单卷定位、剧情推进、人物推进、世界观释放、爽点、伏笔、情绪、开头结尾、衔接、锁定项。
+5. `max_total_chars` 不再是 1400 这种短摘要限制。
+
+### 6.2 新增测试：框架渲染
+
+文件：`tests/test_volume_outline_framework.py`
+
+测试点：
+
+1. `render_volume_outline_framework()` 包含 15 个模块。
+2. 包含“不写逐章细纲”、“不替代 chapter_outline”、“未锁定信息写候选/待确认”。
+3. `volume_outline_required_headings()` 返回稳定标题。
+
+### 6.3 新增测试：结构校验与修复
+
+文件：`tests/test_volume_outline_structure.py`
+
+测试输入使用当前旧短格式：
 
 ```markdown
-## story_flow 摘要
-- 主线问题：...
-- 目标升级：求生 → ... → 终局目标
-- 阶段骨架：开局 / 成长 / 扩张 / 转折 / 高潮 / 结局
-- 冲突升级：个人 → 阵营 → 规则 → 终极价值
-- 关键转折：...
-- 分卷衔接：...
-- 结局路径：...
-```
-
----
-
-## 5. 测试计划
-
-### 5.1 新增测试：阶段契约
-
-文件：`tests/test_story_flow_contract.py`
-
-测试点：
-
-1. `story_flow` contract 存在。
-2. 必需 slot 数量不少于 14。
-3. slot 标题或描述覆盖 14 个模块。
-4. `allowed_intents` 覆盖主线、阶段、冲突、人物、伏笔、爽点、情绪、世界观、阵营、代价、反转、分卷、结局。
-5. `max_total_chars` 不再是 1200 这种短摘要限制。
-
-示例断言：
-
-```python
-def test_story_flow_contract_has_full_framework():
-    contract = STAGE_CONTRACTS["story_flow"]
-    labels = "\n".join(slot.label for slot in contract.slots)
-    for heading in [
-        "故事主线推进",
-        "故事阶段划分",
-        "核心冲突升级路径",
-        "关键剧情节点",
-        "人物弧光嵌入流程",
-        "伏笔、悬念与揭示节奏",
-        "爽点",
-        "情绪节奏",
-        "世界观展开顺序",
-        "阵营与势力推进",
-        "代价与失败机制",
-        "反转与认知升级",
-        "分卷衔接方向",
-        "结局路径",
-    ]:
-        assert heading in labels
-    assert contract.max_total_chars is None or contract.max_total_chars >= 6500
-```
-
-按实际字段名调整。
-
----
-
-### 5.2 新增测试：框架渲染
-
-文件：`tests/test_story_flow_framework.py`
-
-测试点：
-
-1. `render_story_flow_framework()` 包含 14 个模块。
-2. 包含禁止项：不写章节正文、不生成逐章列表、不硬造未锁定设定。
-3. `story_flow_required_headings()` 返回 14 个稳定标题。
-
-示例：
-
-```python
-def test_story_flow_framework_renders_required_headings():
-    text = render_story_flow_framework()
-    for heading in story_flow_required_headings():
-        assert heading in text
-    assert "不是章节大纲" in text
-    assert "未锁定" in text
-```
-
----
-
-### 5.3 新增测试：结构修复
-
-文件：`tests/test_story_flow_structure.py`
-
-测试输入使用当前旧格式的短输出，例如：
-
-```markdown
-## 故事流程稿
-### 开局压力
-主角在魔门外院谨慎求生。
-### 中段升级
-药田和矿坑牵出更大的宗门压力。
-### 后段冲突显形
-圣女线与寿元债浮出水面。
-### 终局方向
-主角尝试保护身边人。
-### 伏笔布置与回收方向
-前世记忆出现偏差。
+## 分卷大纲稿
+### 分卷结构
+- 第一卷：外门苟活。
+- 第二卷：边境承压。
+- 第三卷：同盟代价。
+### 卷目标
+- 第一卷：活下来。
+### 卷内主要矛盾
+- 第一卷：低调与护人冲突。
+### 卷级高潮
+- 第一卷：外门清洗。
+### 卷间钩子
+- 第一卷到第二卷：矿坑压力。
 ```
 
 测试点：
 
-1. `missing_story_flow_headings` 能识别缺失模块。
-2. `ensure_story_flow_outline_structure` 使用假 adapter 修复后包含 14 个模块。
-3. 假 adapter 若仍漏标题，确定性兜底能补齐。
-4. 不把候选设定写成强正典。
+1. `missing_volume_outline_headings` 能识别缺失模块。
+2. 标题别名能把 `分卷结构` 映射到 `分卷总体规划`。
+3. `append_missing_volume_outline_sections` 能补齐 15 模块。
+4. `validate_volume_outline` 拒绝逐章列表。
+5. `summarize_volume_outline` 和 `extract_volume_outline_memory` 优先提取卷名、目标、节点和衔接。
 
-建议用 stub adapter：
+### 6.4 集成测试
 
-```python
-class StubAdapter:
-    def complete_with_metrics(self, *args, **kwargs):
-        return "...完整 story_flow markdown...", {}
-```
+在 `tests/test_volume_outline_structure.py` 或 `tests/test_outline_collaboration.py` 中补一个集成测试：
 
-按真实 adapter 接口调整。
+1. 使用 stub adapter：
+   - `outline_stage_role` 返回短评。
+   - `outline_stage_synthesizer` 返回旧 5 段短结构。
+   - `volume_outline_structure_repair` 返回完整 15 模块。
+2. 运行 `run_outline_stage_node`，状态为 `outline_stage="volume_outline"`。
+3. 断言：
+   - `outline_stage_artifacts["volume_outline"]["synthesis"]` 包含 15 模块。
+   - 保存到 `outline/volume_outline.md` 和 `outline_stages/volume_outline.md`。
+   - artifact registry 注册 `type="volume_outline"`。
+   - summary / stage_memory 包含分卷总体规划、剧情推进或关键节点。
 
----
+### 6.5 更新现有测试
 
-### 5.4 更新现有测试
+检查并更新：
 
-检查并更新以下测试中可能写死旧结构的断言：
-
-- `tests/test_outline_stage_controls.py`
 - `tests/test_outline_collaboration.py`
+- `tests/test_outline_stage_controls.py`
+- `tests/test_graph_writer.py`
 - `tests/test_output_contracts.py`
 
-如果测试断言 `story_flow` 只有旧 slots 或旧角色，应改为新结构。
+特别是旧断言：
+
+- `分卷结构`
+- `卷目标`
+- `卷级高潮`
+- `卷间钩子`
+
+不应只断言旧 5 段结构，应改为断言新 15 模块或新专属输出规则。
 
 ---
 
-### 5.5 集成式验证
+## 7. 验收标准
 
-补充或更新一个集成测试：
+### 7.1 代码验收
 
-1. 使用 mock/stub 模型输出一个不完整的 `story_flow`。
-2. 运行 `story_flow` 阶段节点。
-3. 断言保存到 `outline/story_flow.md` 的内容包含 14 个模块。
-4. 断言 artifact registry 中注册了 `story_flow` 产物。
-5. 断言后续阶段上下文能读到 `story_flow` 摘要。
+执行：
+
+```bash
+.venv/bin/python -m compileall src tests
+.venv/bin/python -m pytest tests/test_volume_outline_contract.py tests/test_volume_outline_framework.py tests/test_volume_outline_structure.py
+.venv/bin/python -m pytest tests/test_outline_stage_controls.py tests/test_outline_collaboration.py tests/test_graph_writer.py tests/test_output_contracts.py
+.venv/bin/python -m pytest
+.venv/bin/python tests/smoke_outline_collaboration.py
+```
+
+全部通过，或若存在与本次无关的历史失败，必须在最终汇报中明确说明。
+
+### 7.2 产物验收
+
+生成或修复后的 `outline/volume_outline.md` 必须满足：
+
+1. 以 `## 分卷大纲稿` 或同等标题开始。
+2. 包含 15 个必需模块：
+   - 分卷总体规划
+   - 单卷基础定位
+   - 本卷一句话概括
+   - 本卷阶段目标
+   - 本卷核心冲突
+   - 本卷剧情推进
+   - 本卷关键节点
+   - 本卷人物推进
+   - 本卷世界观释放
+   - 本卷爽点与卖点兑现
+   - 本卷伏笔、悬念与信息差
+   - 本卷情绪节奏
+   - 本卷开头与结尾
+   - 与前后卷的衔接
+   - 锁定项、可变项、待确认项
+3. 每个模块都有具体内容，不是空标题。
+4. 至少有 2 个卷级条目；用户明确“三卷”时应有 3 个卷级条目。
+5. 能看出对 `story_flow` 的阶段骨架、冲突升级和结局路径有承接。
+6. 能看出对 `worldbuilding` 的地点、势力、规则或资源体系有承接。
+7. 能看出对 `characters` 的人物关系、信息差和角色命运推进有承接。
+8. 没有逐章细纲。
+9. 没有正文片段或场景卡。
+10. 未锁定内容标为候选或待确认。
+11. 能直接为 `chapter_outline` 提供卷级约束。
+
+### 7.3 Demo 验收
+
+如果要重跑 demo，请先备份：
+
+```bash
+cp -R demo-chat demo-chat.before-volume-outline-fix
+```
+
+重跑后检查：
+
+```bash
+grep -n "分卷总体规划\|本卷剧情推进\|本卷人物推进\|本卷世界观释放\|锁定项" demo-chat/outline/volume_outline.md
+```
+
+至少确认所有必需标题存在。
 
 ---
 
-## 6. 推荐文件变更清单
+## 8. 推荐文件变更清单
 
-预期至少修改或新增这些文件：
+预期新增：
+
+```text
+src/ai_novelist/volume_outline_framework.py
+src/ai_novelist/outline/volume_outline_structure.py
+tests/test_volume_outline_contract.py
+tests/test_volume_outline_framework.py
+tests/test_volume_outline_structure.py
+```
+
+预期修改：
 
 ```text
 src/ai_novelist/outline/stage_contracts.py
-src/ai_novelist/story_flow_framework.py
-src/ai_novelist/outline/story_flow_structure.py
+src/ai_novelist/outline/renderers.py
 src/ai_novelist/graph_outline.py
-tests/test_story_flow_contract.py
-tests/test_story_flow_framework.py
-tests/test_story_flow_structure.py
+src/ai_novelist/adapters/codex_cli.py
+tests/test_outline_collaboration.py
+tests/test_outline_stage_controls.py
+tests/test_graph_writer.py
 ```
 
-可能需要同步修改：
+必须同步修改：
 
 ```text
-tests/test_outline_stage_controls.py
-tests/test_outline_collaboration.py
-tests/test_output_contracts.py
+docs/IMPLEMENTATION_PLAN.md
+docs/SESSION_SUMMARY.md
 ```
 
 不要修改：
@@ -1089,300 +947,42 @@ tests/test_output_contracts.py
 
 ---
 
-## 7. 验收标准
+## 9. Codex 执行流程建议
 
-### 7.1 代码验收
+Codex 执行时按以下顺序推进：
 
-执行：
-
-```bash
-python -m compileall src tests
-python -m pytest tests/test_story_flow_contract.py tests/test_story_flow_framework.py tests/test_story_flow_structure.py
-python -m pytest tests/test_outline_stage_controls.py tests/test_outline_collaboration.py tests/test_output_contracts.py
-```
-
-全部通过，或者若有与本次变更无关的历史失败，必须在最终汇报中明确说明。
-
-### 7.2 产物验收
-
-生成或修复后的 `outline/story_flow.md` 必须满足：
-
-1. 以 `## 故事流程稿` 或同等标题开始。
-2. 包含 14 个必需模块：
-   - 故事主线推进
-   - 故事阶段划分
-   - 核心冲突升级路径
-   - 关键剧情节点
-   - 人物弧光嵌入流程
-   - 伏笔、悬念与揭示节奏
-   - 爽点 / 卖点兑现节奏
-   - 情绪节奏与阅读体验
-   - 世界观展开顺序
-   - 阵营与势力推进
-   - 代价与失败机制
-   - 反转与认知升级
-   - 分卷衔接方向
-   - 结局路径
-3. 每个模块下都有具体内容，不是空标题。
-4. 能看出对 `direction` 的核心卖点和故事承诺有承接。
-5. 能看出对 `worldbuilding` 的世界规则、地图、势力或力量体系有承接。
-6. 能看出对 `characters` 的人物弧光和关系变化有承接。
-7. 没有逐章正文。
-8. 没有直接替代分卷大纲。
-9. 未锁定内容标为候选或待确认。
-10. 能为 `volume_outline` 提供分卷骨架。
-
-### 7.3 Demo 验收
-
-如果要重新生成 demo，请不要直接覆盖用户当前产物，先备份：
-
-```bash
-cp -R demo-chat demo-chat.before-story-flow-fix
-```
-
-然后按项目现有 CLI 流程重新运行或运行 smoke test。完成后检查：
-
-```bash
-grep -n "故事主线推进\|故事阶段划分\|核心冲突升级路径\|结局路径" demo-chat/outline/story_flow.md
-```
-
-至少确认所有必需标题存在。
-
----
-
-## 8. Codex 执行流程建议
-
-Codex 执行时请按以下顺序推进：
-
-1. 阅读本计划和相关源码。
+1. 阅读本计划、`demo-chat/outline/volume_outline.md`、`demo-chat/outline/story_flow.md`、`chat.log` 和相关源码。
 2. 跑基线测试并记录结果。
-3. 修改 `stage_contracts.py`。
-4. 新增 `story_flow_framework.py`。
-5. 将框架注入 `graph_outline.py` 的角色 Prompt 和 Synthesizer Prompt。
-6. 扩展 `story_flow` 角色分工和 stage boundary。
-7. 新增 `story_flow_structure.py` 并接入运行节点。
-8. 更新摘要/记忆逻辑，确保后续 `volume_outline` 可以读到故事流程骨架。
-9. 新增和更新测试。
-10. 运行测试。
-11. 如测试失败，优先修实现，不要削弱验收标准。
-12. 最终汇报：
-    - 修改文件清单
-    - 关键设计说明
-    - 测试命令和结果
-    - `story_flow.md` 前后结构差异
-    - 是否有未完成项或风险
+3. 扩展 `volume_outline` 阶段契约。
+4. 新增 `volume_outline_framework.py`。
+5. 新增 `outline/volume_outline_structure.py`。
+6. 将框架注入 `graph_outline.py` 的角色 Prompt 和 Synthesizer Prompt。
+7. 扩展 `volume_outline` 角色分工、角色关注点、stage boundary 和 stage continuity。
+8. 在 `run_outline_stage_node` 保存前接入结构修复。
+9. 更新摘要和 stage memory，确保 `chapter_outline` 能读取卷级骨架。
+10. 更新 `renderers.py` 输出规则。
+11. 更新 mock adapter。
+12. 新增和更新测试。
+13. 更新 `docs/IMPLEMENTATION_PLAN.md` 和 `docs/SESSION_SUMMARY.md`。
+14. 运行 compileall、目标测试、全量 pytest 和 smoke。
+15. 创建 git commit，例如：
 
----
+```bash
+git add src tests docs
 
-## 9. 重要实现细节
-
-### 9.1 标题匹配要支持轻微变体
-
-模型可能输出：
-
-- `爽点/卖点兑现节奏`
-- `爽点 / 卖点兑现节奏`
-- `爽点与卖点兑现节奏`
-
-结构校验应支持常见变体，但最终修复输出建议统一为：
-
-```markdown
-## 故事流程稿
-### 故事主线推进
-### 故事阶段划分
-### 核心冲突升级路径
-### 关键剧情节点
-### 人物弧光嵌入流程
-### 伏笔、悬念与揭示节奏
-### 爽点 / 卖点兑现节奏
-### 情绪节奏与阅读体验
-### 世界观展开顺序
-### 阵营与势力推进
-### 代价与失败机制
-### 反转与认知升级
-### 分卷衔接方向
-### 结局路径
-```
-
-### 9.2 不要让字数限制截断完整结构
-
-如果框架完整后输出变长，旧的 `max_total_chars=1200` 一定会伤害质量。建议：
-
-- `story_flow` 单独提高字数上限；
-- 或允许 `max_total_chars=None`；
-- 或在 Synthesizer 输出规则中控制为“每节 2～6 条要点”，而不是粗暴总字数截断。
-
-### 9.3 角色 Agent 输出可以分工，但 Synthesizer 必须完整
-
-角色 Agent 可以各自聚焦：冲突、人物、悬念、爽点等；但最终 Synthesizer 不能只汇总其中几类意见，必须按 14 模块输出完整稿。
-
-### 9.4 `story_flow` 和 `volume_outline` 的边界
-
-`story_flow` 可以写：
-
-```markdown
-第一卷功能：入局与立人设；卷尾钩子：前世记忆首次失准。
-```
-
-不应该写：
-
-```markdown
-第 1 章：主角醒来。
-第 2 章：师姐送药。
-第 3 章：外门弟子挑衅。
-```
-
-### 9.5 处理未锁定设定
-
-推荐表达：
-
-```markdown
-候选方向：若“寿元债”在 worldbuilding 中已锁定，可将其作为中后期规则真相；若未锁定，则暂以“资源代价机制”占位，等待用户确认。
-```
-
-不推荐表达：
-
-```markdown
-寿元债就是世界底层规则。
-```
-
-除非该设定已在前序阶段锁定。
-
----
-
-## 10. 建议的 `story_flow.md` 输出模板
-
-下面是最终生成时可使用的稳定模板。不要把括号里的说明原样留在成品中；成品应填写具体故事内容。
-
-```markdown
-## 故事流程稿
-
-### 故事主线推进
-- 故事起点：...
-- 引发事件：...
-- 主角初始目标：...
-- 主线任务 / 主线问题：...
-- 阶段性目标变化：...
-- 终局目标：...
-
-### 故事阶段划分
-| 阶段 | 故事功能 | 核心推进 | 阶段出口 |
-| --- | --- | --- | --- |
-| 开局阶段 | ... | ... | ... |
-| 成长阶段 | ... | ... | ... |
-| 扩张阶段 | ... | ... | ... |
-| 转折阶段 | ... | ... | ... |
-| 高潮阶段 | ... | ... | ... |
-| 结局阶段 | ... | ... | ... |
-
-### 核心冲突升级路径
-| 层级 | 主要敌人 / 压力 | 冲突升级方式 | 胜利代价 / 失败损失 | 对成长的推动 |
-| --- | --- | --- | --- | --- |
-| 初级冲突 | ... | ... | ... | ... |
-| 中级冲突 | ... | ... | ... | ... |
-| 高级冲突 | ... | ... | ... | ... |
-| 终极冲突 | ... | ... | ... | ... |
-
-### 关键剧情节点
-- 开篇钩子：...
-- 第一次选择：...
-- 第一次胜利：...
-- 第一次失败：...
-- 中段大转折：...
-- 黑暗时刻：...
-- 最终觉醒：...
-- 终局对决：...
-- 结局回响：...
-
-### 人物弧光嵌入流程
-- 主角起点状态：...
-- 主角成长路径：...
-- 关键人物影响：...
-- 关系变化流程：...
-- 反派与主角镜像：...
-- 终局人物状态：...
-
-### 伏笔、悬念与揭示节奏
-- 核心悬念：...
-- 阶段性悬念：...
-- 伏笔布置点：...
-- 真相揭示顺序：...
-- 回收方式：...
-
-### 爽点 / 卖点兑现节奏
-- 开局卖点：...
-- 阶段性爽点：...
-- 升级型爽点：...
-- 情绪释放点：...
-- 与主线结合：...
-
-### 情绪节奏与阅读体验
-- 整体情绪曲线：...
-- 阶段情绪目标：...
-- 高低起伏安排：...
-- 缓冲与爆发：...
-- 分卷节奏参考：...
-
-### 世界观展开顺序
-- 开局展示：...
-- 中期扩展：...
-- 后期揭示：...
-- 展示方式：...
-- 与主角命运的关系：...
-
-### 阵营与势力推进
-- 登场顺序：...
-- 阵营关系变化：...
-- 主角阵营位置变化：...
-- 阵营冲突推动主线：...
-
-### 代价与失败机制
-- 能力代价：...
-- 选择代价：...
-- 关系代价：...
-- 世界代价：...
-- 必败节点：...
-
-### 反转与认知升级
-- 开局反转：...
-- 中段反转：...
-- 后期反转：...
-- 终局反转：...
-- 伏笔对应：...
-
-### 分卷衔接方向
-| 卷 | 故事功能 | 核心问题 | 阶段性高潮 | 卷尾钩子 |
-| --- | --- | --- | --- | --- |
-| 第一卷 | ... | ... | ... | ... |
-| 第二卷 | ... | ... | ... | ... |
-| 第三卷 | ... | ... | ... | ... |
-| 第四卷 | ... | ... | ... | ... |
-| 第五卷 | ... | ... | ... | ... |
-
-### 结局路径
-- 主线结局：...
-- 人物结局：...
-- 关系结局：...
-- 世界结局：...
-- 主题落点：...
-- 余味 / 续作空间：...
-
-### 仍需确认的问题
-1. ...
-2. ...
-3. ...
+git commit -m "fix: expand volume outline framework"
 ```
 
 ---
 
-## 11. 最终交付要求
+## 10. 最终汇报要求
 
-Codex 完成后，请输出如下汇报：
+完成后请输出：
 
 ```markdown
 ## 完成情况
-- 已扩展 story_flow 阶段契约：...
-- 已新增 story_flow 框架注入：...
+- 已扩展 volume_outline 阶段契约：...
+- 已新增 volume_outline 框架注入：...
 - 已新增结构修复：...
 - 已补充测试：...
 
@@ -1391,18 +991,20 @@ Codex 完成后，请输出如下汇报：
 
 ## 测试结果
 ```bash
-python -m compileall src tests
+.venv/bin/python -m compileall src tests
 # result ...
-python -m pytest ...
+.venv/bin/python -m pytest
+# result ...
+.venv/bin/python tests/smoke_outline_collaboration.py
 # result ...
 ```
 
 ## 产物变化
-- 旧 story_flow：仅包含开局/中段/后段/终局/伏笔等短结构。
-- 新 story_flow：包含 14 个全书级流程模块，可支撑后续分卷和章节生成。
+- 旧 volume_outline：仅包含分卷结构、目标、矛盾、高潮、钩子。
+- 新 volume_outline：包含 15 个卷级蓝图模块，可支撑章节大纲和后续章节卡生成。
 
 ## 风险与后续
 - ...
 ```
 
-如果有未完成项，必须明确写出原因、影响和下一步，不要隐藏。
+如果有未完成项，必须明确说明原因、影响和下一步，不要隐藏。
