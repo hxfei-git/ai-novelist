@@ -9,6 +9,7 @@ from typing import Literal
 
 from ai_novelist.agent_metrics import estimate_tokens
 from ai_novelist.artifacts import get_latest_artifact, load_artifact_text
+from ai_novelist.outline.chapter_outline_structure import extract_chapter_outline_slice
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
 
@@ -255,7 +256,7 @@ def build_profile_section(
     if key == "chapter_artifacts":
         return "当前任务 Artifact", build_artifact_section(state, store, profile.purpose, chapter, stage, artifact_types=profile.artifact_types)
     if key == "chapter_outline_slice":
-        return "章节大纲切片", build_artifact_section(state, store, profile.purpose, chapter, "chapter_outline", artifact_types=profile.artifact_types)
+        return "章节大纲切片", build_chapter_outline_slice_section(state, store, chapter)
     if key == "previous_chapter_summaries":
         return "已写前文摘要", build_chapter_summaries_section(state, chapter)
     if key == "reference_brief":
@@ -402,6 +403,28 @@ def build_artifact_section(
     if fallback:
         parts.append(fallback)
     return "\n\n".join(parts) if parts else "暂无"
+
+
+def build_chapter_outline_slice_section(state: NovelState, store: LocalStore, chapter: int | None) -> str:
+    selected = chapter or state.active_chapter or state.current_chapter or 1
+    project_dir = store.project_dir(state.project_id)
+    record = get_latest_artifact(project_dir, "chapter_outline", chapter=selected)
+    if record is None:
+        record = get_latest_artifact(project_dir, "chapter_outline", stage="chapter_outline")
+    if record is None:
+        record = get_latest_artifact(project_dir, "chapter_outline")
+    text = ""
+    if record is not None:
+        text = load_artifact_text(project_dir, record).strip()
+    if not text:
+        artifact = state.outline_stage_artifacts.get("chapter_outline", {})
+        if isinstance(artifact, dict):
+            text = str(artifact.get("synthesis") or artifact.get("summary") or "").strip()
+    if not text:
+        text = state.chapter_plan.strip() or state.outline.strip()
+    if not text:
+        return "暂无"
+    return extract_chapter_outline_slice(text, selected)
 
 
 def build_state_artifact_fallback(state: NovelState, purpose: str) -> str:

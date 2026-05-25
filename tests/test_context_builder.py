@@ -81,3 +81,34 @@ def test_context_bundle_records_sources_and_respects_profile_limit(tmp_path):
     assert bundle.estimated_tokens > 0
     assert any(item["section"] == "锁定约束" for item in manifest)
     assert all("included_chars" in item for item in manifest)
+
+
+def test_chapter_planning_context_uses_chapter_outline_slice(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.current_chapter = 2
+    state.active_chapter = 2
+    state.outline_stage_artifacts["chapter_outline"] = {
+        "stage": "chapter_outline",
+        "label": "章节大纲",
+        "synthesis": """## 章节大纲稿
+
+### 第一卷：入局卷
+
+#### 第 1 章：开局
+- 第一章专属内容。
+
+#### 第 2 章：冲突
+- 第二章专属内容。
+
+#### 第 3 章：反转
+- 第三章专属内容。
+""",
+    }
+    store.save_state(state)
+
+    context = build_context(state, store, "chapter_planning", chapter=2)
+
+    assert "第二章专属内容" in context
+    assert "第一章专属内容" not in context
+    assert "第三章专属内容" not in context

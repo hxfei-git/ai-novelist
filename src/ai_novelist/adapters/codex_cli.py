@@ -114,6 +114,8 @@ class CodexCLIAdapter(AgentAdapter):
             return self._mock_full_story_flow_outline()
         if "AGENT: volume_outline_structure_repair" in prompt:
             return self._mock_full_volume_outline()
+        if "AGENT: chapter_outline_structure_repair" in prompt:
+            return self._mock_full_chapter_outline(prompt)
         if "AGENT: outline_stage_synthesizer" in prompt:
             return self._mock_outline_stage_synthesizer(prompt)
         if "AGENT: bible_update_extractor" in prompt:
@@ -240,6 +242,8 @@ class CodexCLIAdapter(AgentAdapter):
             return self._mock_full_worldbuilding_outline()
         if stage == "volume_outline":
             return self._mock_full_volume_outline()
+        if stage == "chapter_outline":
+            return self._mock_full_chapter_outline(prompt)
         data = {
             "direction": """## 方向定位稿
 
@@ -446,6 +450,72 @@ class CodexCLIAdapter(AgentAdapter):
 - 卷数与每卷名称可在不破坏总节奏前提下调整。
 - 第一卷结尾钩子可以在“记忆失准”与“关系受损”之间微调。
 """
+
+    def _mock_full_chapter_outline(self, prompt: str = "") -> str:
+        match = re.search(r"current_volume_index:\s*(\d+)", prompt)
+        volume = int(match.group(1)) if match else 1
+        total_match = re.search(r"total_volumes:\s*(\d+)", prompt)
+        total = int(total_match.group(1)) if total_match else 5
+        start = (volume - 1) * 3 + 1
+        profiles = ["开篇章", "冲突章", "高潮章"] if volume == 1 else ["铺垫章", "反转章", "收束章"]
+        volume_name = f"第{volume}卷"
+        if volume == 1:
+            volume_name = "第一卷：入局卷"
+        elif volume == 2:
+            volume_name = "第二卷：成长卷"
+        elif volume == 3:
+            volume_name = "第三卷：阵营卷"
+        elif volume == 4:
+            volume_name = "第四卷：反攻卷"
+        elif volume == 5:
+            volume_name = "第五卷：终局卷"
+        rows = []
+        details = []
+        for offset, profile in enumerate(profiles):
+            chapter = start + offset
+            intensity = 5 if profile == "高潮章" else 4 if profile in {"冲突章", "反转章"} else 2 if profile == "收束章" else 3
+            function = "climax" if profile == "高潮章" else "twist" if profile == "反转章" else "aftermath" if profile == "收束章" else "build" if profile == "冲突章" else "setup"
+            hook = "hard" if profile in {"开篇章", "高潮章", "反转章"} else "none" if profile == "收束章" else "soft"
+            rows.append(
+                f"| 第 {chapter} 章 | 卷{volume}章{offset + 1} | {profile} | function={function}, intensity={intensity}, hook={hook} | 主角围绕本卷问题完成一次推进。 | 本卷关键人物 | 推进主线与关系 | 紧张 | 留下可承接状态 | {'是' if offset == 2 else '否'} |"
+            )
+            min_line = "核心冲突、胜利代价、情绪高点、结尾钩子" if profile == "高潮章" else "承接上一章、状态变化、轻钩子" if profile == "收束章" else "信息增量、后续回收位置、连续性"
+            details.append(f"""#### 第 {chapter} 章：卷{volume}章{offset + 1}
+- profile：{profile}
+- PacingTarget：function={function}, intensity={intensity}, hook={hook}
+- profile最低必填：{min_line}
+- 基础定位：状态：详写。所属卷为{volume_name}；本章一句话概括为主角在当前压力下推进本卷核心问题，并把读者带到新的认知位置。
+- 剧情执行方案：状态：详写。起因是上一章或本卷开端遗留压力；发展为试探、受阻和选择；结果改变人物处境并留下后果。
+- 人物/关系/读者认知：状态：详写。主角获得新判断；关键关系从互疑、合作或余波中变化；读者新增一条信息，同时保留未揭露信息。
+- 伏笔/爽点/情绪/开头结尾：状态：{'详写' if hook != 'none' else '简写'}。开头承接上一状态；中段完成情绪转折；结尾钩子强度为{hook}，服务下一章承接。
+- 世界观/能力资源/代价/阵营/连续性：状态：详写。能力限制、资源消耗、道具位置、阵营关注和未揭露信息保持连续；推进必须付出代价。
+- 写作执行与审稿检查：状态：详写。第三人称有限视角；不提前剧透终局真相；审稿时检查本章删掉后本卷推进是否断裂。
+- 连续性提醒：时间、地点、人物状态、道具归属、能力限制、关系状态和未揭露信息必须承接前后章。
+""")
+        table = "\n".join(rows)
+        detail_text = "\n".join(details)
+        return f"""## 章节大纲稿
+
+### {volume_name}
+
+#### 卷内章节总体规划
+- 本轮只生成{volume_name}，全书暂定 {total} 卷；当前卷暂定 3 章，后续可按真实篇幅扩展。
+- 第 {start}-{start + 1} 章负责承接、铺垫和冲突升级；第 {start + 2} 章负责本卷高潮或收束钩子。
+- 高潮章节位置：第 {start + 2} 章；反转章节位置：第 {start + 1} 章；爽点释放位置：第 {start + 2} 章。
+- 伏笔埋设与回收位置：第 {start} 章埋设，第 {start + 1} 章强化，第 {start + 2} 章局部回收并留下下一卷问题。
+- 信息揭示节奏：每章只释放一层读者认知，不提前解释终局秘密。
+- 情绪曲线：压迫或疑问进入，中段紧张升级，结尾给出小满足或更强压力。
+- 读者追读钩子分布：关键章使用硬钩子，过渡或收束章只保留轻钩子或状态承接。
+
+#### 章节列表总表
+| 章节 | 标题 | profile | PacingTarget | 本章一句话概括 | 主要人物 | 叙事功能 | 情绪基调 | 结尾状态 | 关键章 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+{table}
+
+{detail_text}
+## 仍需确认的问题
+- 当前卷章节数量是否按 3 章示例扩展为真实长卷范围？"""
+
 
     def _mock_full_story_flow_outline(self) -> str:
         return """## 故事流程稿

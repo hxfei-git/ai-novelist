@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from ai_novelist.characters_framework import full_characters_headings
+from ai_novelist.chapter_outline_framework import render_chapter_outline_framework
 from ai_novelist.outline.stage_contracts import StageSlot, get_stage_contract
 from ai_novelist.state import NovelState
 from ai_novelist.story_flow_framework import story_flow_required_headings
@@ -208,6 +209,23 @@ def _stage_structure(stage: str, slots: tuple[StageSlot, ...]) -> str:
             "- 不得替代 chapter_outline。\n\n"
             "必须包含并按顺序输出这些标题：\n"
             f"{heading_lines}"
+        )
+    if stage == "chapter_outline":
+        return (
+            "章节大纲阶段必须按卷渐进生成，不是一次性生成全书章纲，也不是场景卡或正文。\n\n"
+            "输出格式：\n"
+            "- 只输出 Markdown。\n"
+            "- 顶部不要写评审报告、分析过程或“以下是”。\n"
+            "- 必须以 `## 章节大纲稿` 开始，并只生成本轮目标卷。\n"
+            "- 目标卷内必须包含 `### 卷内章节总体规划` 和 `### 章节列表总表`。\n"
+            "- 每个单章必须明确 profile，并给出 PacingTarget(function/intensity/hook)。\n"
+            "- 每章使用稳定结构：基础定位、剧情执行方案、人物/关系/读者认知、伏笔/爽点/情绪/开头结尾、世界观/能力资源/代价/阵营/连续性、写作执行与审稿检查。\n"
+            "- 每个单章模块标注状态：详写 / 简写 / 本章不适用。\n"
+            "- suggestion.md 的 26 个点是能力池，不是每章硬性全量字段；按 profile 决定详略。\n"
+            "- 过渡章、日常章、收束章允许弱冲突、少钩子、低爽点，但必须有明确承接和状态变化。\n"
+            "- 高潮章、反转章必须详写冲突、代价、情绪高点和结尾钩子。\n"
+            "- 不写完整场景卡、正文段落或对白。\n\n"
+            f"{render_chapter_outline_framework(mode='full')}"
         )
     if stage == "review_lock":
         return (

@@ -1,7 +1,7 @@
 from ai_novelist.adapters.codex_cli import CodexCLIAdapter
 from ai_novelist.artifacts import load_artifacts
 from ai_novelist.director_service import DirectorDecision, DirectorService
-from ai_novelist.graph_chapter_plan import CHAPTER_CARD_SECTIONS, build_chapter_plan_graph
+from ai_novelist.graph_chapter_plan import CHAPTER_CARD_SECTIONS, build_chapter_plan_graph, collect_chapter_outline
 from ai_novelist.research import MockSearchBackend
 from ai_novelist.storage.local_store import LocalStore
 
@@ -36,6 +36,50 @@ def test_chapter_plan_graph_generates_chapter_card(tmp_path):
     assert result["current_chapter_card"] == content.strip()
     artifacts = load_artifacts(store.project_dir("demo"))
     assert any(item.type == "chapter_card" and item.chapter == 1 and item.graph == "chapter_plan" for item in artifacts)
+
+
+def test_collect_chapter_outline_returns_target_chapter_slice(tmp_path):
+    store = LocalStore(tmp_path)
+    state = make_ready_state(store)
+    state.current_chapter = 2
+    state.active_chapter = 2
+    outline = """## 章节大纲稿
+
+### 第一卷：入局卷
+
+#### 卷内章节总体规划
+- 第一卷承接求生压力。
+
+#### 第 1 章：空白手稿
+- profile：开篇章
+- PacingTarget：function=setup, intensity=3, hook=hard
+- 本章只属于第一章。
+
+#### 第 2 章：失效编号
+- profile：冲突章
+- PacingTarget：function=build, intensity=4, hook=soft
+- 本章只属于第二章。
+
+#### 第 3 章：旧案回声
+- profile：反转章
+- PacingTarget：function=twist, intensity=4, hook=hard
+- 本章只属于第三章。
+"""
+    state.outline_stage_artifacts["chapter_outline"] = {
+        "stage": "chapter_outline",
+        "label": "章节大纲",
+        "synthesis": outline,
+    }
+    store.save_outline_artifact(state, "chapter_outline", outline)
+    store.save_state(state)
+
+    selected = collect_chapter_outline(state, store)
+
+    assert "第 2 章" in selected
+    assert "本章只属于第二章" in selected
+    assert "第 1 章：空白手稿" not in selected
+    assert "第 3 章：旧案回声" not in selected
+
 
 
 def test_director_decision_treats_plan_chapters_as_plan_chapter_alias():

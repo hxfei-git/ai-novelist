@@ -2430,3 +2430,25 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 - 结构兜底只负责补齐标题和候选方向；高质量正文仍优先依赖 `volume_outline_structure_repair` Agent 结合前序阶段重写。
 - 卷级约束是可选备注，不应重新变成硬锁死清单。
+
+## 章节大纲按卷渐进生成整改（2026-05-25）
+
+目标：将 `chapter_outline` 从一次性轻量章纲改为按卷生成、逐卷确认、全部卷完成后再进入 `review_lock` 的章节大纲流程，并避免每章机械填满固定字段。
+
+已完成：
+- 新增 `src/ai_novelist/chapter_outline_framework.py`，定义章级功能 profile、profile 到 `PacingTarget` 的映射、单章稳定结构，以及“详写 / 简写 / 本章不适用”的模块状态规则。
+- 新增 `src/ai_novelist/outline/chapter_outline_structure.py`，负责从 `volume_outline` 抽取卷序、维护 `current_volume_index` / `completed_volumes` / `total_volumes` / `volume_statuses` / `volume_contents` metadata，校验当前卷章纲结构并做一次修复或兜底补齐。
+- `graph_outline.py` 在进入 `chapter_outline` 时准备目标卷上下文，生成后只合并当前卷；确认当前卷时若还有下一卷，会继续停留在 `chapter_outline` 并生成下一卷，最后一卷确认后才进入 `review_lock`。
+- `chapter_outline` prompt 已加入按卷渐进、profile、能力池灵活填充、稳定结构和连续性编辑要求；三个角色 Agent 的职责分别收敛到章节拆分、钩子/读者认知、连续性。
+- `LocalStore` 轻量化保存会保留 `metadata`，避免逐卷进度在保存/恢复后丢失。
+- `graph_chapter_plan.collect_chapter_outline()` 和 `context_builder` 的 `chapter_outline_slice` 改为按目标章节抽取切片，旧格式章纲仍 fallback 为原文。
+- Mock adapter 已更新为可按目标卷输出结构化章纲，并支持 `chapter_outline_structure_repair`。
+
+测试覆盖：
+- profile 映射和必填点：过渡章不会强制高潮字段，高潮/反转章保留冲突、代价、情绪高点或结尾钩子。
+- Outline 流程：确认当前卷后继续生成下一卷；最后一卷确认后进入 `review_lock`；最终 `outline.md` 合并所有卷章纲。
+- 下游消费：规划第 N 章时只注入第 N 章相关章纲切片，避免整卷章纲淹没章节卡上下文。
+
+限制与后续：
+- 当前卷数/卷名优先依赖 `volume_outline` 的显式“第X卷”文本；分卷大纲过于自由时会退回单卷兜底。
+- 当前结构校验偏 Markdown 文本启发式，后续可升级为更强的表格/章节 AST 解析。

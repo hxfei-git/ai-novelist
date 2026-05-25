@@ -2,6 +2,7 @@ import json
 
 from ai_novelist.adapters.codex_cli import CodexCLIAdapter
 from ai_novelist.artifacts import load_artifacts
+from ai_novelist.chapter_outline_framework import profile_required_points, profile_to_pacing_function
 from ai_novelist.graph_outline import OUTLINE_STAGES, build_outline_stage_role_prompt, build_outline_stage_synthesizer_prompt, ensure_worldbuilding_outline_structure, extract_stage_confirmation_questions, format_stage_markdown, sanitize_direction_stage_output, append_message, build_outline_collaboration_graph, build_outline_prompt
 from ai_novelist.graph_writer import build_chat_graph
 from ai_novelist.state import NovelState
@@ -107,7 +108,9 @@ def test_seven_stage_confirmation_persists_final_outline_and_artifacts(tmp_path)
         "chapter_outline",
         "review_lock",
     ]
-    for _ in range(7):
+    for _ in range(14):
+        if state.outline_stage == "done":
+            break
         state = run_outline_turn(graph, state, store, "确认进入下一阶段")
 
     assert state.outline_stage == "done"
@@ -290,6 +293,9 @@ def test_outline_synthesizer_prompts_use_stage_specific_structures():
     assert "人物关系不是人物小传" in characters_prompt
     assert "章节编号" in chapter_prompt
     assert "主要冲突" in chapter_prompt
+    assert "卷内章节总体规划" in chapter_prompt
+    assert "章节列表总表" in chapter_prompt
+    assert "章级功能 profile" in chapter_prompt
     assert len({concept_prompt, world_prompt, characters_prompt, chapter_prompt}) == 4
 
 
@@ -468,12 +474,74 @@ def test_chapter_outline_prompt_limits_output_to_chapter_level_plan():
     role_prompt = build_outline_stage_role_prompt(state, "chapter_outline", "章节拆分 Agent")
     synth_prompt = build_outline_stage_synthesizer_prompt(state, "chapter_outline", [])
 
-    assert "只做章节目标、冲突、信息增量、人物变化、钩子和连续性提醒" in role_prompt
+    assert "按卷渐进生成" in role_prompt
     assert "章节大纲稿" in synth_prompt
     assert "章节编号" in synth_prompt
     assert "章节目标" in synth_prompt
     assert "主要冲突" in synth_prompt
     assert "信息增量" in synth_prompt
+    assert "按卷渐进生成" in synth_prompt
+    assert "卷内章节总体规划" in synth_prompt
+    assert "章节列表总表" in synth_prompt
+    assert "详写 / 简写 / 本章不适用" in synth_prompt
+
+
+def test_chapter_profile_required_points_are_flexible_by_function():
+    assert profile_to_pacing_function("过渡章") == "transition"
+    assert "轻钩子" in profile_required_points("过渡章")
+    assert "情绪高点" not in profile_required_points("过渡章")
+    assert profile_to_pacing_function("高潮章") == "climax"
+    assert "核心冲突" in profile_required_points("高潮章")
+    assert "胜利代价" in profile_required_points("高潮章")
+    assert "情绪高点" in profile_required_points("高潮章")
+    assert "结尾钩子" in profile_required_points("反转章")
+
+
+def test_chapter_outline_confirmation_advances_by_volume_before_review_lock(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.idea = "重生魔门"
+    state.active_workflow = "outline"
+    state.outline_stage = "chapter_outline"
+    state.outline_stage_status = "options_ready"
+    state.outline_stage_artifacts["volume_outline"] = {
+        "stage": "volume_outline",
+        "label": "分卷大纲",
+        "status": "locked",
+        "synthesis": "## 分卷大纲稿\n- 第一卷：入局卷。\n- 第二卷：成长卷。",
+    }
+    state.outline_stage_artifacts["chapter_outline"] = {
+        "stage": "chapter_outline",
+        "label": "章节大纲",
+        "status": "options_ready",
+        "synthesis": "## 章节大纲稿\n\n### 第一卷：入局卷\n\n#### 卷内章节总体规划\n- 第一卷规划。\n\n#### 章节列表总表\n| 第 1 章 | 开篇章 | PacingTarget |\n\n#### 第 1 章：开局\n- profile：开篇章\n- PacingTarget：function=setup, intensity=3, hook=hard\n- 基础定位：状态：详写。\n- 连续性提醒：承接开局。",
+        "metadata": {
+            "current_volume_index": 1,
+            "completed_volumes": [],
+            "total_volumes": 2,
+            "volume_statuses": {"1": "options_ready"},
+            "volume_contents": {"1": "### 第一卷：入局卷\n\n#### 卷内章节总体规划\n- 第一卷规划。"},
+        },
+    }
+    graph = build_outline_collaboration_graph(CodexCLIAdapter(mock=True), store)
+
+    state = run_outline_turn(graph, state, store, "确认进入下一阶段")
+
+    assert state.outline_stage == "chapter_outline"
+    assert state.outline_stage_status == "options_ready"
+    metadata = state.outline_stage_artifacts["chapter_outline"]["metadata"]
+    assert metadata["current_volume_index"] == 2
+    assert metadata["completed_volumes"] == [1]
+    assert metadata["volume_statuses"]["1"] == "locked"
+    assert metadata["volume_statuses"]["2"] == "options_ready"
+    assert "review_lock" not in state.outline_stage_artifacts
+
+    state = run_outline_turn(graph, state, store, "确认进入下一阶段")
+
+    assert state.outline_stage == "review_lock"
+    assert state.outline_stage_artifacts["chapter_outline"]["status"] == "locked"
+    metadata = state.outline_stage_artifacts["chapter_outline"]["metadata"]
+    assert metadata["completed_volumes"] == [1, 2]
 
 
 def test_review_lock_prompt_is_status_first_and_non_creative():

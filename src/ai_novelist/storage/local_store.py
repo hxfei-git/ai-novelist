@@ -230,6 +230,8 @@ class LocalStore:
                     slim["locked_at"] = item.get("locked_at")
                 if item.get("default_discretion_summary"):
                     slim["default_discretion_summary"] = item.get("default_discretion_summary")
+                if isinstance(item.get("metadata"), dict):
+                    slim["metadata"] = item.get("metadata")
                 slim_artifacts[str(stage)] = {k: v for k, v in slim.items() if v not in (None, "", [])}
             data["outline_stage_artifacts"] = slim_artifacts
             data["outline_stage_summaries"] = summaries

@@ -17,6 +17,16 @@ from ai_novelist.characters_framework import (
 )
 from ai_novelist.corpus.craft_resolver import resolve_author_craft
 from ai_novelist.outline.legacy_migration import ensure_outline_stage, normalize_legacy_outline_artifacts
+from ai_novelist.outline.chapter_outline_structure import (
+    append_missing_chapter_outline_volume_sections,
+    build_chapter_outline_target_context,
+    chapter_outline_metadata_from_artifact,
+    chapter_outline_summary,
+    extract_chapter_outline_memory,
+    merge_chapter_outline_volumes,
+    normalize_generated_volume_outline,
+    validate_chapter_outline_volume,
+)
 from ai_novelist.outline.question_filter import filter_stage_confirmation_questions
 from ai_novelist.outline.renderers import build_stage_output_rule, extract_direction_memory, render_direction_stage_markdown, summarize_direction_outline
 from ai_novelist.outline.stage_contracts import (
@@ -305,6 +315,8 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
     emit_progress(progress, "OutlineStage", f"正在准备第 {stage_number(stage)} 阶段「{label}」上下文...")
     state = resolve_author_craft(state, store, "outline_stage", stage=stage)
     author_craft = load_outline_stage_craft_brief(state, store)
+    if stage == "chapter_outline":
+        prepare_chapter_outline_metadata(state, store)
     role_jobs = [
         AgentJob(
             key=role,
@@ -400,6 +412,16 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
             author_craft=author_craft,
             role_reviews=role_reviews,
         )
+    elif stage == "chapter_outline":
+        synthesis, chapter_metadata = ensure_chapter_outline_structure(
+            synthesis=synthesis,
+            state=state,
+            adapter=adapter,
+            store=store,
+            author_craft=author_craft,
+            role_reviews=role_reviews,
+        )
+        state.director_task_args["chapter_outline_metadata"] = chapter_metadata
     emit_progress(
         progress,
         "大纲汇总 Agent",
@@ -441,6 +463,8 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
         "user_feedback": state.user_request,
         "updated_at": datetime.now(UTC).isoformat(timespec="seconds"),
     }
+    if stage == "chapter_outline":
+        artifact["metadata"] = state.director_task_args.get("chapter_outline_metadata") or chapter_outline_metadata_from_artifact(None)
     state.outline_stage_artifacts[stage] = artifact
     state.outline_stage_status = "options_ready"
     state.review_status = "draft"
@@ -492,6 +516,23 @@ def advance_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalSt
         artifact["default_discretion_summary"] = default_summary
         memory = artifact.get("stage_memory") if isinstance(artifact.get("stage_memory"), list) else []
         artifact["stage_memory"] = [*memory, default_summary]
+    if stage == "chapter_outline":
+        artifact, next_volume_index = confirm_current_chapter_outline_volume(artifact, state, store)
+        if next_volume_index is not None:
+            artifact["pending_questions"] = []
+            artifact["status"] = "options_ready"
+            state.outline_stage_artifacts[stage] = artifact
+            state.pending_question = ""
+            state.pending_questions = []
+            state.outline_stage = "chapter_outline"
+            state.outline_stage_status = "collecting"
+            state.current_stage = "chapter_outline"
+            state.director_action = "run_outline_stage"
+            state.director_message = f"已确认第 {next_volume_index - 1} 卷章节大纲，继续生成第 {next_volume_index} 卷章节大纲。"
+            record_stage_history(state, "lock_volume", stage, default_summary or state.user_request)
+            save_outline_stage_outputs(state, stage, format_stage_markdown(artifact), store)
+            store.save_state(state)
+            return run_outline_stage_node(state.to_dict(), adapter, store, progress)
     artifact["pending_questions"] = []
     artifact["status"] = "locked"
     artifact["locked_at"] = datetime.now(UTC).isoformat(timespec="seconds")
@@ -821,6 +862,33 @@ def load_outline_stage_craft_brief(state: NovelState, store: LocalStore) -> str:
     return path.read_text(encoding="utf-8").strip()
 
 
+def prepare_chapter_outline_metadata(state: NovelState, store: LocalStore) -> dict:
+    volume_outline_text = stage_full_text(state, store, "volume_outline")
+    artifact = state.outline_stage_artifacts.get("chapter_outline")
+    metadata = chapter_outline_metadata_from_artifact(artifact if isinstance(artifact, dict) else None, volume_outline_text)
+    state.director_task_args["chapter_outline_metadata"] = metadata
+    state.director_task_args["chapter_outline_target_context"] = build_chapter_outline_target_context(metadata)
+    return metadata
+
+
+def chapter_outline_framework_prompt(stage: str, state: NovelState | None = None) -> str:
+    if stage != "chapter_outline":
+        return ""
+    from ai_novelist.chapter_outline_framework import render_chapter_outline_framework
+
+    target_context = "暂无"
+    if state is not None:
+        raw_metadata = state.director_task_args.get("chapter_outline_metadata")
+        if isinstance(raw_metadata, dict):
+            target_context = build_chapter_outline_target_context(raw_metadata)
+    return (
+        "\nCHAPTER_OUTLINE_FRAMEWORK:\n"
+        "你必须按下面的章节大纲框架生成。章节大纲按卷渐进推进，当前轮只生成目标卷。\n"
+        f"目标卷上下文：\n{target_context}\n"
+        f"{render_chapter_outline_framework(mode='full')}\n"
+    )
+
+
 def worldbuilding_framework_prompt(stage: str) -> str:
     if stage != "worldbuilding":
         return ""
@@ -903,6 +971,7 @@ def build_outline_stage_role_prompt(state: NovelState, stage: str, role: str, au
         f"{characters_framework_prompt(stage)}\n"
         f"{story_flow_framework_prompt(stage)}\n"
         f"{volume_outline_framework_prompt(stage)}\n"
+        f"{chapter_outline_framework_prompt(stage, state)}\n"
         f"{worldbuilding_overfine_terms_guard(state, stage)}\n"
         f"{characters_relationship_guard(state, stage)}\n"
         f"{outline_stage_boundary_prompt(stage)}\n\n"
@@ -943,6 +1012,7 @@ def build_outline_stage_synthesizer_prompt(state: NovelState, stage: str, role_r
         f"{characters_framework_prompt(stage)}\n"
         f"{story_flow_framework_prompt(stage)}\n"
         f"{volume_outline_framework_prompt(stage)}\n"
+        f"{chapter_outline_framework_prompt(stage, state)}\n"
         f"{worldbuilding_overfine_terms_guard(state, stage)}\n"
         f"{characters_relationship_guard(state, stage)}\n"
         f"{outline_stage_boundary_prompt(stage)}\n\n"
@@ -977,7 +1047,7 @@ OUTLINE_STAGE_BOUNDARIES = {
         "forbidden": "逐章细纲、第1章、第2章、章节列表、场景列表、细场景动作、正文片段、新世界观规则、新世界规则、新人物系统、过细制度机制、临时改写世界规则、脱离主线的新人物群、只输出卷名和卷目标的短摘要",
     },
     "chapter_outline": {
-        "allowed": "章节编号、章节目标、主要冲突、信息增量、人物状态变化、结尾钩子、连续性提醒",
+        "allowed": "按卷生成的卷内章节总体规划、章节列表总表、章级功能 profile、PacingTarget、单章稳定结构、模块状态、章节目标、主要冲突、信息增量、人物状态变化、结尾钩子、连续性提醒、写作执行与审稿检查",
         "forbidden": "正式正文、正文段落、对白、中文引号对白、完整场景卡、场景卡、细场景调度、细场景动作、未确立的新规则、新人物关系、额外世界观机制、审批、制度、亲密机制、临时改写已锁定设定、无关支线扩写",
     },
     "review_lock": {
@@ -1282,6 +1352,91 @@ def ensure_volume_outline_structure(
         return repaired
     return append_missing_volume_outline_sections(repaired, issues)
 
+def ensure_chapter_outline_structure(
+    synthesis: str,
+    state: NovelState,
+    adapter: AgentAdapter,
+    store: LocalStore,
+    author_craft: str = "",
+    role_reviews: list[dict[str, str]] | None = None,
+) -> tuple[str, dict]:
+    volume_outline_text = stage_full_text(state, store, "volume_outline")
+    artifact = state.outline_stage_artifacts.get("chapter_outline")
+    metadata = chapter_outline_metadata_from_artifact(artifact if isinstance(artifact, dict) else None, volume_outline_text)
+    current_key = str(metadata.get("current_volume_index") or 1)
+    volume_text = normalize_generated_volume_outline(synthesis, metadata)
+    ok, issues = validate_chapter_outline_volume(volume_text, metadata)
+    if not ok:
+        role_outputs = "\n\n".join(
+            f"## {item.get('role', '角色短评')}\n{item.get('content', '')}" for item in (role_reviews or [])
+        )
+        repair_prompt = (
+            "AGENT: chapter_outline_structure_repair\n"
+            "你正在修复 chapter_outline 阶段当前目标卷输出。不要分析，不要解释，只输出完整 Markdown。\n"
+            f"结构问题：{issues}\n\n"
+            "必须只修复当前目标卷，不重写已确认卷；必须包含卷内章节总体规划、章节列表总表、每章 profile、PacingTarget、稳定结构模块状态和连续性字段。\n"
+            "不要机械填满能力池 26 项；按 profile 决定详写、简写或本章不适用。不要写场景卡、正文或对白。\n\n"
+            f"目标卷上下文：\n{build_chapter_outline_target_context(metadata)}\n\n"
+            f"章节大纲框架：\n{chapter_outline_framework_prompt('chapter_outline', state)}\n\n"
+            f"作者构思参考：\n{author_craft or '暂无'}\n\n"
+            f"前序已保存阶段内容：\n{previous_stage_context(state, 'chapter_outline')}\n\n"
+            f"角色短评：\n{role_outputs or '暂无'}\n\n"
+            f"原始当前卷章纲：\n{volume_text}\n"
+        )
+        try:
+            repaired = complete_with_metrics(
+                adapter=adapter,
+                prompt=repair_prompt,
+                project_dir=store.project_dir(state.project_id),
+                project_id=state.project_id,
+                graph="outline",
+                node="chapter_outline_structure_repair",
+                agent="chapter_outline_structure_repair",
+                prompt_profile="outline_chapter_outline_repair",
+            )
+            volume_text = normalize_generated_volume_outline(repaired, metadata)
+        except AgentAdapterError:
+            pass
+
+    ok, issues = validate_chapter_outline_volume(volume_text, metadata)
+    if not ok:
+        volume_text = append_missing_chapter_outline_volume_sections(volume_text, metadata, issues)
+
+    contents = metadata.get("volume_contents") if isinstance(metadata.get("volume_contents"), dict) else {}
+    contents[current_key] = volume_text.strip()
+    metadata["volume_contents"] = contents
+    statuses = metadata.get("volume_statuses") if isinstance(metadata.get("volume_statuses"), dict) else {}
+    statuses[current_key] = "options_ready"
+    metadata["volume_statuses"] = statuses
+    return merge_chapter_outline_volumes(metadata), metadata
+
+
+def chapter_outline_has_next_volume(metadata: dict) -> bool:
+    current = int(metadata.get("current_volume_index") or 1)
+    total = int(metadata.get("total_volumes") or 1)
+    return current < total
+
+
+def confirm_current_chapter_outline_volume(artifact: dict, state: NovelState, store: LocalStore) -> tuple[dict, int | None]:
+    volume_outline_text = stage_full_text(state, store, "volume_outline")
+    metadata = chapter_outline_metadata_from_artifact(artifact, volume_outline_text)
+    current = int(metadata.get("current_volume_index") or 1)
+    total = int(metadata.get("total_volumes") or 1)
+    completed = sorted({int(item) for item in metadata.get("completed_volumes", []) if str(item).isdigit()} | {current})
+    metadata["completed_volumes"] = [item for item in completed if 1 <= item <= total]
+    statuses = metadata.get("volume_statuses") if isinstance(metadata.get("volume_statuses"), dict) else {}
+    statuses[str(current)] = "locked"
+    next_index = None
+    if current < total:
+        next_index = current + 1
+        metadata["current_volume_index"] = next_index
+        statuses[str(next_index)] = "collecting"
+    metadata["volume_statuses"] = statuses
+    artifact = dict(artifact)
+    artifact["metadata"] = metadata
+    return artifact, next_index
+
+
 def summarize_worldbuilding_outline(text: str, max_chars: int = 1800) -> str:
     sections = split_worldbuilding_sections(text)
     key_headings = [
@@ -1399,6 +1554,8 @@ def summarize_outline_stage_for_artifact(stage: str, synthesis: str) -> str:
         from ai_novelist.outline.volume_outline_structure import summarize_volume_outline
 
         return summarize_volume_outline(synthesis)
+    if stage == "chapter_outline":
+        return chapter_outline_summary(synthesis)
     return summarize_stage_text(synthesis)
 
 
@@ -1417,6 +1574,8 @@ def extract_outline_stage_memory_for_artifact(stage: str, synthesis: str) -> lis
         from ai_novelist.outline.volume_outline_structure import extract_volume_outline_memory
 
         return extract_volume_outline_memory(synthesis)
+    if stage == "chapter_outline":
+        return extract_chapter_outline_memory(synthesis)
     return extract_stage_memory(synthesis)
 
 
@@ -1526,9 +1685,9 @@ def role_focus_instruction(stage: str, role: str) -> str:
         "世界观释放 Agent": "专注每卷的新地点、新势力、新规则、历史背景、力量体系推进和隐藏真相；世界观信息必须服务卷内冲突。",
         "爽点悬念 Agent": "专注这一卷要兑现的爽点、卖点、升级、反转、悬疑、误导和大场面；所有期待都要落到具体桥段。",
         "衔接约束 Agent": "专注前后卷承接、可选约束和不应擅改内容；判断卷末是否留下足够稳定的下一卷入口。",
-        "章节拆分 Agent": "专注章节颗粒度和执行顺序；章节必须能被写手直接转成场景任务。",
-        "章节钩子 Agent": "专注章末钩子、信息差和读者追读动力；钩子要服务主线推进，不制造无关悬念。",
-        "连续性编辑 Agent": "专注章节之间的因果、时间线和设定一致性；发现割裂点时优先提出低成本修补方式。",
+        "章节拆分 Agent": "专注目标卷的章节数量、章节范围、区间划分、章节列表总表和每章 profile；章节必须能被写手直接转成章节任务，但不得写成场景卡。",
+        "章节钩子 Agent": "专注目标卷内钩子分布、伏笔揭示、读者认知进度和追读动力；过渡/日常/收束章允许轻钩子，不制造无关悬念。",
+        "连续性编辑 Agent": "专注目标卷内时间、地点、人物状态、道具、能力限制、关系状态、未揭露信息和跨章因果；发现割裂点时优先提出低成本修补方式。",
         "总编辑 Agent": "专注七阶段整体一致性和可写性；判断当前大纲是否已经足够进入章节卡和正文生产。",
         "约束审计 Agent": "专注锁定约束、未决问题和设定边界；检查是否存在互相冲突或尚未闭环的约束。",
         "章节准备 Agent": "专注下一步章节生产准备度；指出章节卡、场景卡和正文写作前还缺哪些最小信息。",
@@ -1546,7 +1705,7 @@ def stage_continuity_requirement(stage: str) -> str:
         "characters": "人物关系必须承接方向定位和世界观规则；本阶段输出全文关系蓝图，区分作者侧真相、角色侧认知、读者侧认知和剧情侧演化；阵营/组织只能从世界观已有设定提取。",
         "story_flow": "故事流程必须承接方向定位、世界观代价和人物关系冲突；这里的流程是全书级主线骨架，必须覆盖主线推进、阶段划分、冲突升级、人物弧光、伏笔揭示、爽点情绪、分卷衔接和结局路径，但不能写成逐章列表或替代分卷大纲。",
         "volume_outline": "分卷大纲必须整合 direction、worldbuilding、characters 和 story_flow。本阶段只做卷级蓝图：分卷数量、卷功能、每卷目标、卷内推进、人物推进、世界观释放、爽点悬念、情绪节奏、开头结尾、前后卷衔接和可选约束备注。可以给大致章节范围和字数范围，但不得拆成逐章细纲，不得替代 chapter_outline。",
-        "chapter_outline": "章节大纲必须承接分卷大纲，只做章节目标、冲突、信息增量、人物变化、钩子和连续性提醒，不写场景卡或正文。",
+        "chapter_outline": "章节大纲必须承接分卷大纲并按卷渐进生成：每次只生成一整卷章节大纲，当前卷确认后再生成下一卷，最后一卷确认后才进入审稿锁定。每章必须先判定章级功能 profile，再按稳定结构灵活详写、简写或标注本章不适用；不写场景卡或正文。",
         "review_lock": "审稿锁定只做一致性检查、风险标注、锁定建议和章节卡准备度判断；不得新增 canon、重写人物关系、重写剧情流程或生成章节卡/正文。",
     }
     return requirements.get(stage, "本阶段必须承接前序已保存阶段内容继续创作。")

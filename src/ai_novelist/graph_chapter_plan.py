@@ -9,6 +9,7 @@ from ai_novelist.agent_metrics import complete_with_metrics
 from ai_novelist.agent_parallel import AgentJob, run_agent_jobs
 from ai_novelist.artifacts import ArtifactRecord, load_artifacts, register_artifact
 from ai_novelist.context_builder import build_context
+from ai_novelist.outline.chapter_outline_structure import extract_chapter_outline_slice
 from ai_novelist.corpus.craft_resolver import resolve_author_craft
 from ai_novelist.pacing import PacingTarget, infer_pacing_target_from_outline, parse_pacing_target_from_card, required_chapter_card_sections, select_chapter_agent_specs
 from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, run_with_progress, run_with_progress, with_agent_metadata
@@ -350,20 +351,24 @@ def pacing_from_state(state: NovelState) -> PacingTarget:
 
 
 def collect_chapter_outline(state: NovelState, store: LocalStore | None = None) -> str:
+    chapter = state.active_chapter or state.current_chapter or 1
     artifact = state.outline_stage_artifacts.get("chapter_outline", {})
+    full_text = ""
     if store is not None:
         saved = store.load_outline_artifact(state.project_id, "chapter_outline").strip()
         if saved:
-            return saved
-    if isinstance(artifact, dict) and str(artifact.get("synthesis", "")).strip():
-        return str(artifact.get("synthesis", "")).strip()
-    if isinstance(artifact, dict) and str(artifact.get("summary", "")).strip():
-        return str(artifact.get("summary", "")).strip()
-    if state.chapter_plan.strip():
-        return state.chapter_plan.strip()
-    if state.outline.strip():
-        return state.outline.strip()
-    return "暂无"
+            full_text = saved
+    if not full_text and isinstance(artifact, dict) and str(artifact.get("synthesis", "")).strip():
+        full_text = str(artifact.get("synthesis", "")).strip()
+    if not full_text and isinstance(artifact, dict) and str(artifact.get("summary", "")).strip():
+        full_text = str(artifact.get("summary", "")).strip()
+    if not full_text and state.chapter_plan.strip():
+        full_text = state.chapter_plan.strip()
+    if not full_text and state.outline.strip():
+        full_text = state.outline.strip()
+    if not full_text:
+        return "暂无"
+    return extract_chapter_outline_slice(full_text, chapter)
 
 
 def add_missing_sections(content: str, missing: list[str]) -> str:

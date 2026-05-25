@@ -2203,3 +2203,21 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 剩余限制：
 
 - 结构兜底只保证模块完整，不保证创作质量；真实质量主要依赖修复 Agent 结合 direction/worldbuilding/characters/story_flow 重写。
+
+## 2026-05-25 章节大纲按卷渐进生成整改
+
+本次完成：
+- `chapter_outline` 改为按卷生成、逐卷确认。当前卷确认后若还有下一卷，会继续停留在 `chapter_outline` 并生成下一卷；全部卷完成后才进入 `review_lock`。
+- 新增章节大纲框架与结构校验：卷级必填 `卷内章节总体规划`、`章节列表总表`；单章使用稳定结构和“详写 / 简写 / 本章不适用”状态。
+- 新增章级 profile 能力池：开篇、铺垫、过渡、冲突、爽点、反转、揭秘、感情推进、世界观释放、战斗、谋略、日常、高潮、收束、钩子，并映射到现有 `PacingTarget`。
+- `chapter_outline` metadata 持久化记录 `current_volume_index`、`completed_volumes`、`total_volumes`、`volume_statuses`、`volume_contents`。
+- 章节规划和上下文构建只抽取目标章节切片，旧格式章纲仍保留 fallback。
+
+验证结果：
+- `.venv/bin/python -m pytest tests/test_outline_collaboration.py tests/test_graph_chapter_plan.py tests/test_context_builder.py`：63 passed。
+- `.venv/bin/python -m pytest`：315 passed。
+- `.venv/bin/python tests/smoke_outline_collaboration.py`：outline collaboration smoke ok。
+
+剩余限制：
+- 卷信息抽取仍是基于 Markdown/中文卷序的启发式解析；如果 `volume_outline` 完全不写卷序，会按单卷兜底。
+- 章节切片对旧格式保持宽松 fallback，复杂非 Markdown 章纲可能仍会返回较大片段。
