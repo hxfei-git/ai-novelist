@@ -150,7 +150,7 @@ def _stage_structure(stage: str, slots: tuple[StageSlot, ...]) -> str:
             "- 每条 bullet 必须是当前小说世界的具体设定，不要写模板说明。\n"
             "- 信息不足时可以写“暂定：...”，但必须给出合理默认建议；全篇“暂定/待定”小节不得超过 6 个。\n"
             "- 必须继承前序方向和故事概念，不得推翻已锁定设定。\n"
-            "- 最后可追加 `## 仍需确认的问题`，最多 5 条，只问会影响后续剧情的大问题。\n"
+            "- 最后可追加 `## 仍需确认的问题`，最多 10 条，只问会影响后续剧情的大问题。\n"
             "- 不要按题材分类。\n"
             "- 不得只输出“世界运行原则、关键边界、冲突资源、代价红线”。\n\n"
             "必须包含并按顺序输出这些标题：\n"
@@ -170,7 +170,7 @@ def _stage_structure(stage: str, slots: tuple[StageSlot, ...]) -> str:
             "- 阵营 / 组织关系只能从 worldbuilding 已有设定提取；没有相关设定时写“暂无，不强行生成”。\n"
             "- 核心关系必须写清作者侧真相、角色侧认知、读者侧认知和剧情侧演化。\n"
             "- 重要秘密必须有伏笔、部分揭露、完整揭露和关系后果。\n"
-            "- `## 十三、待确认问题` 最多 4 条，只问会影响全文结构的问题；若无写“暂无，当前阶段可继续修改或确认进入下一阶段”。\n"
+            "- `## 十三、待确认问题` 最多 10 条，只问会影响全文结构的问题；若无写“暂无，当前阶段可继续修改或确认进入下一阶段”。\n"
             "- 不得写章节正文、完整故事流程、场景卡或无主线功能角色堆砌。\n\n"
             "必须包含并按顺序输出这些标题：\n"
             f"{heading_lines}"
@@ -187,7 +187,7 @@ def _stage_structure(stage: str, slots: tuple[StageSlot, ...]) -> str:
             "- 每个必填标题下必须有具体、可执行的内容，不能只有空泛概念或空标题。\n"
             "- 允许使用简洁表格，但不要输出逐章列表，不要写正文。\n"
             "- 必须承接 direction、worldbuilding、characters 已锁定内容；未锁定信息写成候选或待确认。\n"
-            "- `### 仍需确认的问题` 最多 3 条，只问会影响主线阶段、核心代价、关键反转或终局选择的问题；若无写“暂无”。\n"
+            "- `### 仍需确认的问题` 最多 10 条，只问会影响主线阶段、核心代价、关键反转或终局选择的问题；若无写“暂无”。\n"
             "- 不得替代 volume_outline 输出完整分卷细纲。\n\n"
             "必须包含并按顺序输出这些标题：\n"
             f"{heading_lines}"
@@ -204,7 +204,7 @@ def _stage_structure(stage: str, slots: tuple[StageSlot, ...]) -> str:
             "- 每个必填标题下必须有具体、可执行的内容，不能只有空泛概念或空标题。\n"
             "- 可以用紧凑表格，但不要输出逐章列表，不要写正文或场景卡。\n"
             "- 必须承接 direction、worldbuilding、characters 和 story_flow 的已保存内容；未确认信息写成候选、待确认或可选方案。\n"
-            "- 可选保留 `### 仍需确认的问题`，最多 3 条。\n"
+            "- 可选保留 `### 仍需确认的问题`，最多 10 条。\n"
             "- 可选保留 `### 卷级约束与待确认项（可选）`，只在确有必要时写。\n"
             "- 不得替代 chapter_outline。\n\n"
             "必须包含并按顺序输出这些标题：\n"
@@ -236,7 +236,7 @@ def _stage_structure(stage: str, slots: tuple[StageSlot, ...]) -> str:
             "## 需要回改的阶段\n"
             "## 是否可进入章节卡\n"
             "\n## 仍需确认的问题\n"
-            "- 仅允许锁定/回改决策问题。"
+            "- 最多 10 条，仅允许锁定/回改决策问题。"
         )
     lines = [f"## {get_stage_contract(stage).label}稿"]
     for slot in slots:
@@ -316,7 +316,7 @@ def render_direction_stage_markdown(markdown: str, pending_questions: list[str] 
         lines.append("## 仍需确认的问题")
         questions = [str(item).strip() for item in pending_questions if str(item).strip()]
         if questions:
-            for question in questions[:5]:
+            for question in questions:
                 lines.append(f"- {question}")
         else:
             lines.append("- 暂无，当前阶段可继续修改或确认进入下一阶段。")

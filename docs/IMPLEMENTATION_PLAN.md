@@ -713,6 +713,7 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 - `run_outline_stage_node` 现在会从阶段汇总中的 `仍需确认的问题` / `待确认问题` 小节抽取编号或列表问题。
 - 抽取到的问题会写入 `state.pending_questions` 和 `state.pending_question`，并进入 Director 后续上下文，不再只停留在 Markdown 产物中。
 - 保存到 `outline/<stage>.md` 的阶段 Markdown 会用过滤后的 `pending_questions` 回填“仍需确认的问题”，避免模型草稿和实际追问不一致。
+- 每个阶段最多允许 3 轮追问；超过第 3 轮后，系统会让模型直接回答未决问题并回填锁定摘要，不再继续追问。
 - 阶段完成回复会明确列出这些问题，引导用户直接逐条回答；如果没有问题，才回到“继续修改或确认进入下一阶段”。
 - 新增测试覆盖确认问题抽取。
 
@@ -1013,7 +1014,7 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 - `DirectorService` 增加大纲阶段专用确定性分类：查看阶段、极短确认推进、回答待确认问题、提供新修改意见、将剩余问题交由系统裁量并推进。
 - Director JSON prompt 增补 `active_workflow`、`outline_stage`、`outline_stage_status`、`pending_questions`、`pending_question` 和最新用户输入，并说明大纲阶段动作语义：`run_current_stage`、`advance_current_stage`、`answer_pending_questions`、`show_stage`、`ask_user`。
 - `DirectorDecision.from_dict` 支持把上述语义动作映射到现有执行动作，避免下游图大规模改名。
-- 待确认问题不再被视为必须逐项回答的阻塞项；用户可逐条补充，也可明确交给系统按当前建议默认裁量后推进。默认裁量摘要会写入 `locked_constraints`、`director_task_args.default_discretion_summary` 和锁定阶段 artifact。
+- 待确认问题不再被视为必须逐项回答的阻塞项；用户可逐条补充，也可明确交给系统处理后推进。锁定当前阶段前，剩余未决问题会由模型逐项回答，并写入阶段 artifact 的 `default_discretion_summary/default_discretion_answers`。
 - `graph_outline` 直接入口同步支持当前阶段查看、默认裁量推进和 JSON Director 输出解析；阶段提示文案从“必须确认”改为“可补充确认”。
 - `build_outline_collaboration_graph(adapter, store, progress=None)` 新增可选进度回调；阶段生成会输出准备上下文、3 个角色 Agent、汇总 Agent、保存产物；阶段推进会输出锁定、进入下一阶段、最终合并和 Bible 更新事件。
 - CLI `outline`、`plan-outline`、`compose` 路径传入同一 `[Stage] message` 进度回调；`DirectorService`/chat/飞书执行 outline 推进时也透传进度。
@@ -1081,7 +1082,7 @@ AI_NOVELIST_LOCAL_CORPUS_DIR=/data/novels .venv/bin/ai-novelist chat --project d
 
 - 阶段确认不再依赖单个词硬编码；`确定/确认/同意/继续` 单独出现不会触发推进。只有主脑判断用户明确表达“进入下一阶段/推进到下一阶段/锁定当前阶段并继续”等迁移意图时才推进。
 - `DirectorService` 和 `graph_outline` 的直接入口同步使用同一确认语义，避免 chat/CLI 路径行为不一致。
-- 锁定阶段前会自动闭环当前阶段未决问题：若 artifact 或 state 中仍有 `pending_questions`，系统会生成 `default_discretion_summary`，写入当前阶段 artifact、`stage_memory` 和 `locked_constraints`，并清空当前阶段待确认项，再进入下一阶段。
+- 锁定阶段前会自动处理当前阶段未决问题：若 artifact 或 state 中仍有 `pending_questions`，模型会逐项回答并生成 `default_discretion_summary/default_discretion_answers`，写入当前阶段 artifact 和 `stage_memory`，并清空当前阶段待确认项，再进入下一阶段。
 - 这避免了故事流程、分卷大纲、章节大纲等后续阶段带着上一阶段问题继续滚动污染上下文。
 - 新增 `progress.describe_agent_call()` / `with_agent_metadata()`，Agent 进度消息会打印模型与 effort，例如 DeepSeek 会显示 `model=deepseek-v4-pro, effort=medium` 或 `effort=disabled-medium`，mock 显示 `model=mock, effort=n/a`。
 - 大纲、章节卡、场景卡、审稿、修订和正文生成流程的 Agent 进度消息已接入模型/effort 信息。

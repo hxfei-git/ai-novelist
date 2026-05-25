@@ -13,6 +13,9 @@ CanonPolicy = Literal[
 ]
 
 
+MAX_STAGE_CONFIRMATION_QUESTIONS = 10
+
+
 @dataclass(frozen=True)
 class StageSlot:
     key: str
@@ -33,7 +36,7 @@ class StageContract:
     forbidden_intents: tuple[str, ...]
     slots: tuple[StageSlot, ...]
     confirmation_policy: str
-    max_questions: int = 1
+    max_questions: int = MAX_STAGE_CONFIRMATION_QUESTIONS
     max_total_chars: int | None = None
 
 
@@ -102,7 +105,7 @@ STAGE_CONTRACTS = {
             StageSlot("length", "篇幅结构", "预计体量、叙事结构、节奏特点和展开方式", True, 4, 120),
         ),
         confirmation_policy="只问会影响后续世界观、人物、剧情或篇幅判断的高层缺口；不要要求确认具体世界机制。",
-        max_questions=1,
+        max_questions=MAX_STAGE_CONFIRMATION_QUESTIONS,
         max_total_chars=2800,
     ),
     "worldbuilding": StageContract(
@@ -174,7 +177,7 @@ STAGE_CONTRACTS = {
             StageSlot("open_questions", "待确认", "真正影响后续人物、主线或章节写作的世界缺口", False, 5, 120),
         ),
         confirmation_policy="只问会影响后续人物、主线、分卷或章节写作的世界缺口；不得让用户选择模型自造机制。",
-        max_questions=5,
+        max_questions=MAX_STAGE_CONFIRMATION_QUESTIONS,
         max_total_chars=None,
     ),
     "characters": StageContract(
@@ -224,7 +227,7 @@ STAGE_CONTRACTS = {
             StageSlot("open_questions", "待确认问题", "只问会影响全文结构的问题", False, 4, 120),
         ),
         confirmation_policy="只问会影响全文关系结构、信息揭露顺序或锁定项的问题；不要把角色当成可自由增删的模板表。",
-        max_questions=4,
+        max_questions=MAX_STAGE_CONFIRMATION_QUESTIONS,
         max_total_chars=3200,
     ),
     "story_flow": StageContract(
@@ -283,7 +286,7 @@ STAGE_CONTRACTS = {
             StageSlot("ending_path", "结局路径", "提前规划主线、人物、关系、世界、主题和余味/续作空间的结局方向。", True, 6, 200),
         ),
         confirmation_policy="请确认故事流程中的主线目标升级、核心失败代价、关键反转尺度、终局选择是否符合预期；若有未锁定设定，请标为候选而不是写成正典。",
-        max_questions=3,
+        max_questions=MAX_STAGE_CONFIRMATION_QUESTIONS,
         max_total_chars=8000,
     ),
     "volume_outline": StageContract(
@@ -338,7 +341,7 @@ STAGE_CONTRACTS = {
             StageSlot("volume_bridges", "与前后卷的衔接", "继承前卷后果、本卷解决/制造的问题、下一卷接起点和全书作用", True, 8, 220),
         ),
         confirmation_policy="只问会影响分卷数量、卷末大事件、关键人物命运、世界观释放顺序或不可逆设定的问题；不要让用户在模型自造的细枝末节中选择。",
-        max_questions=3,
+        max_questions=MAX_STAGE_CONFIRMATION_QUESTIONS,
         max_total_chars=10000,
     ),
     "chapter_outline": StageContract(
@@ -379,7 +382,7 @@ STAGE_CONTRACTS = {
             StageSlot("continuity", "连续性提醒", "时间、地点、人物状态、道具、能力限制、关系状态、未揭露信息", True, 40, 160),
         ),
         confirmation_policy="每轮只确认当前卷章节大纲；确认后若还有下一卷则继续生成下一卷，最后一卷确认后才进入 review_lock。",
-        max_questions=2,
+        max_questions=MAX_STAGE_CONFIRMATION_QUESTIONS,
         max_total_chars=14000,
     ),
     "review_lock": StageContract(
@@ -397,7 +400,7 @@ STAGE_CONTRACTS = {
             StageSlot("ready", "是否可进入章节卡", "pass/revise/stop", True, 1, 40),
         ),
         confirmation_policy="不问创意题，只问是否锁定或回改。",
-        max_questions=1,
+        max_questions=MAX_STAGE_CONFIRMATION_QUESTIONS,
         max_total_chars=1200,
     ),
 }

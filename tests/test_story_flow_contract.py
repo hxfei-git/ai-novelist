@@ -24,7 +24,7 @@ def test_story_flow_contract_has_full_framework():
         assert heading in labels
 
     assert len(contract.slots) >= 14
-    assert contract.max_questions == 3
+    assert contract.max_questions == 10
     assert contract.max_total_chars is None or contract.max_total_chars >= 6500
 
 

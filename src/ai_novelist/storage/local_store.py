@@ -230,6 +230,14 @@ class LocalStore:
                     slim["locked_at"] = item.get("locked_at")
                 if item.get("default_discretion_summary"):
                     slim["default_discretion_summary"] = item.get("default_discretion_summary")
+                if item.get("default_discretion_answers"):
+                    slim["default_discretion_answers"] = item.get("default_discretion_answers")
+                if item.get("question_round") is not None:
+                    slim["question_round"] = item.get("question_round")
+                if item.get("max_question_rounds") is not None:
+                    slim["max_question_rounds"] = item.get("max_question_rounds")
+                if item.get("question_round_limit_reached"):
+                    slim["question_round_limit_reached"] = item.get("question_round_limit_reached")
                 if isinstance(item.get("metadata"), dict):
                     slim["metadata"] = item.get("metadata")
                 slim_artifacts[str(stage)] = {k: v for k, v in slim.items() if v not in (None, "", [])}

@@ -488,7 +488,7 @@ def build_service_director_prompt(state: NovelState, store: LocalStore, channel:
         "优先输出一个 JSON 对象，不要包裹 Markdown 代码块。字段：action, requires_confirmation, confidence, user_message, task_args, next_steps, intent, instruction, locked_constraints。\n"
         "task_args 可包含 research_query, work_title, author, chapter, instruction, stage, default_discretion_summary。\n"
         "大纲共创阶段可用动作语义：run_current_stage（继续重写/补充当前阶段）、advance_current_stage（锁定当前阶段并进入下一阶段）、answer_pending_questions（吸收用户对待确认问题的回答后重跑当前阶段）、show_stage（查看当前或指定阶段）、ask_user（信息不足再追问）。输出时也可使用等价旧动作 revise_outline、persist_outputs、show_outline。\n"
-        "判断大纲阶段意图时必须区分：用户提供新修改意见、用户回答问题、用户把剩余问题交给系统裁量并要求推进、用户只是查看状态。待确认问题不是必须逐项回答的阻塞项；只有用户明确要求进入/推进下一阶段，或明确锁定当前阶段并继续，才选择 advance_current_stage。不要因为句子里出现‘确定/确认/同意’就推进；如果用户是在确定某个设定、回答问题或补充细节，应留在当前阶段处理。若用户明确交给系统裁量并推进，请选择 advance_current_stage，并在 default_discretion_summary 中写一段简短裁量摘要。\n"
+        "判断大纲阶段意图时必须区分：用户提供新修改意见、用户回答问题、用户把剩余问题交给系统裁量并要求推进、用户只是查看状态。待确认问题不是必须逐项回答的阻塞项；只有用户明确要求进入/推进下一阶段，或明确锁定当前阶段并继续，才选择 advance_current_stage。不要因为句子里出现‘确定/确认/同意’就推进；如果用户是在确定某个设定、回答问题或补充细节，应留在当前阶段处理。若用户明确交给系统裁量并推进，请选择 advance_current_stage；未决问题会在锁定节点由模型逐项回答。\n"
         "像‘我现在该做什么’、‘接下来怎么办’、‘下一步呢’这类问句，应优先理解为状态引导或追问，而不是阶段推进。\n"
         "如果无法输出 JSON，才使用旧的 ACTION/MESSAGE 字段格式。\n\n"
         "## 当前通道\n"
@@ -1196,7 +1196,7 @@ def build_outline_next_step_message(state: NovelState) -> str:
         f"未决问题：{len(pending_items)} 项。{summary}\n"
         "可选下一步：\n"
         "1. 直接回答上述问题，系统会吸收回答并重跑当前阶段。\n"
-        "2. 明确说“按当前建议处理并进入下一阶段”，系统会闭环未决问题后推进。\n"
+        "2. 明确说“按当前建议处理并进入下一阶段”，系统会由模型逐项回答未决问题后推进。\n"
         "3. 说“查看当前阶段产物”，我会展示当前阶段内容。\n"
         "4. 提出具体修改，例如补充设定、选择答案或调整风格。"
     )
@@ -1231,9 +1231,9 @@ def parse_numbered_answers(text: str) -> dict[int, str]:
 def build_default_discretion_summary(state: NovelState, text: str) -> str:
     questions = [item.strip() for item in state.pending_questions if item.strip()]
     if questions:
-        joined = "；".join(questions[:4])
-        return f"锁定当前阶段前，系统按当前阶段产物和连续性要求自行闭环未决问题并推进；待裁量问题：{joined}；用户原话：{text}"
-    return f"用户认可当前阶段产物，并将细节交由系统按当前建议默认裁量后推进；用户原话：{text}"
+        joined = "；".join(questions[:10])
+        return f"锁定当前阶段前，系统会由模型按当前阶段产物和连续性要求逐项回答未决问题并推进；待裁量问题：{joined}；用户原话：{text}"
+    return f"用户认可当前阶段产物，并将细节交由模型按当前建议回答后推进；用户原话：{text}"
 
 
 def deterministic_view_decision(state: NovelState) -> DirectorDecision | None:

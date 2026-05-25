@@ -802,6 +802,40 @@ def test_non_direction_stage_markdown_rewrites_pending_questions_across_all_stag
         assert prefix in markdown
 
 
+def test_outline_stage_question_round_limit_autoclosed_after_three_rounds(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.idea = "重生魔门"
+    state.outline_stage = "story_flow"
+    state.outline_stage_status = "options_ready"
+    state.outline_stage_artifacts["story_flow"] = {
+        "stage": "story_flow",
+        "label": "故事流程",
+        "status": "options_ready",
+        "synthesis": (
+            "## 故事流程稿\n\n"
+            "## 仍需确认的问题\n"
+            "- 幕一确认习惯如何具象？\n"
+            "- 终局让渡之择如何回应？"
+        ),
+        "pending_questions": ["幕一确认习惯如何具象？", "终局让渡之择如何回应？"],
+        "stage_memory": ["四幕结构成立"],
+        "question_round": 3,
+    }
+    store.save_state(state)
+
+    from ai_novelist.graph_outline import run_outline_stage_node
+
+    result = NovelState.from_dict(run_outline_stage_node(state.to_dict(), CodexCLIAdapter(mock=True), store))
+
+    artifact = result.outline_stage_artifacts["story_flow"]
+    assert artifact["question_round"] == 4
+    assert artifact["question_round_limit_reached"] is True
+    assert artifact["pending_questions"] == []
+    assert "未决问题默认回答" in artifact["default_discretion_summary"]
+    assert "锁定摘要" in artifact["default_discretion_summary"]
+
+
 def test_compact_numbered_pending_answers_are_absorbed(tmp_path):
     store = LocalStore(tmp_path)
     state = store.create_project("Demo", "demo")
@@ -851,8 +885,8 @@ def test_determine_advance_closes_pending_questions_before_next_stage(tmp_path):
     assert state.outline_stage == "volume_outline"
     assert locked["status"] == "locked"
     assert locked["pending_questions"] == []
-    assert "自行闭环未决问题" in locked["default_discretion_summary"]
-    assert "幕一确认习惯如何具象" in locked["default_discretion_summary"]
+    assert "未决问题默认回答" in locked["default_discretion_summary"]
+    assert "幕一确认习惯如何具象" in locked["default_discretion_answers"]
     assert state.locked_constraints == []
 
 

@@ -118,6 +118,8 @@ class CodexCLIAdapter(AgentAdapter):
             return self._mock_full_chapter_outline(prompt)
         if "AGENT: outline_stage_synthesizer" in prompt:
             return self._mock_outline_stage_synthesizer(prompt)
+        if "AGENT: outline_question_answerer" in prompt:
+            return self._mock_outline_question_answerer(prompt)
         if "AGENT: bible_update_extractor" in prompt:
             return self._mock_bible_update_extractor()
         if "AGENT: bible_conflict_checker" in prompt:
@@ -235,6 +237,26 @@ class CodexCLIAdapter(AgentAdapter):
             f"- 风险：需要避免在{labels.get(stage, stage)}阶段提前写成完整大纲。\n"
             "- 建议：保留一个待用户确认的核心选择，并给出可锁定的阶段结论。"
         )
+
+    def _mock_outline_question_answerer(self, prompt: str) -> str:
+        questions = []
+        collecting = False
+        for raw_line in prompt.splitlines():
+            line = raw_line.strip()
+            if line == "待回答问题：":
+                collecting = True
+                continue
+            if collecting and line:
+                questions.append(line)
+        if not questions:
+            questions = ["1. 当前阶段无明确未决问题。"]
+        answers = ["## 未决问题默认回答"]
+        for item in questions[:10]:
+            question = item.split(".", 1)[1].strip() if "." in item else item
+            answers.append(f"- 问题：{question}；回答：按当前阶段产物采用最稳妥、便于后续连续写作的默认方案。")
+        answers.append("\n## 锁定摘要")
+        answers.append("- 未决问题已由模型按当前阶段产物默认回答，并作为锁定前裁量写入阶段记忆。")
+        return "\n".join(answers)
 
     def _mock_outline_stage_synthesizer(self, prompt: str) -> str:
         stage = self._extract_prompt_field(prompt, "STAGE") or "direction"
@@ -960,7 +982,7 @@ class CodexCLIAdapter(AgentAdapter):
                     "confidence": 95,
                     "target": "outline",
                     "intent": "approve",
-                    "user_message": "我会先让当前阶段自行闭环未决问题，再锁定并进入下一阶段。",
+                    "user_message": "我会先让模型回答当前阶段未决问题，再锁定并进入下一阶段。",
                     "task_args": task_args,
                 }, ensure_ascii=False)
             if any(word in request for word in ("加入", "增加", "补充", "强化", "削弱", "修改", "调整", "改成", "改为", "设为", "设定", "选择", "采用", "接受", "接收", "同意", "保留", "不要", "别", "更", "太")):

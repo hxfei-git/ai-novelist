@@ -35,5 +35,5 @@ def test_volume_outline_contract_relaxes_hard_locking():
     assert "只输出卷名和卷目标的短摘要" in forbidden
     assert "逐章细纲" in forbidden
     assert "锁定项、可变项、待确认项" not in allowed
-    assert contract.max_questions == 3
+    assert contract.max_questions == 10
     assert contract.max_total_chars == 10000

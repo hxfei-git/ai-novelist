@@ -75,6 +75,9 @@ STAGE_ROLES = {
 }
 
 
+MAX_STAGE_QUESTION_ROUNDS = 3
+
+
 def build_outline_collaboration_graph(adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc | None = None, search_backend=None) -> CompiledGraph:
     """Build an outline workflow whose natural-language routing goes through DirectorService."""
     return DirectorBackedOutlineGraph(adapter, store, progress or noop_progress, search_backend)
@@ -441,6 +444,7 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
         state.worldbuilding = synthesis
     questions = extract_stage_confirmation_questions(synthesis)
     questions = filter_stage_confirmation_questions(stage, questions, state, synthesis)
+    question_round = stage_question_round(state, stage, bool(questions))
     artifact = {
         "stage": stage,
         "label": STAGE_LABELS[stage],
@@ -451,6 +455,8 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
         "summary": summarize_outline_stage_for_artifact(stage, synthesis),
         "stage_memory": extract_outline_stage_memory_for_artifact(stage, synthesis),
         "pending_questions": questions,
+        "question_round": question_round,
+        "max_question_rounds": MAX_STAGE_QUESTION_ROUNDS,
         "guard_issues": [
             {
                 "code": issue.code,
@@ -465,6 +471,23 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
     }
     if stage == "chapter_outline":
         artifact["metadata"] = state.director_task_args.get("chapter_outline_metadata") or chapter_outline_metadata_from_artifact(None)
+    if questions and question_round > MAX_STAGE_QUESTION_ROUNDS:
+        answer = answer_stage_unresolved_questions(
+            state=state,
+            stage=stage,
+            artifact=artifact,
+            questions=questions,
+            user_text=f"当前阶段已达到最多 {MAX_STAGE_QUESTION_ROUNDS} 轮追问，系统自动闭环。",
+            adapter=adapter,
+            store=store,
+            progress=progress,
+        )
+        artifact["default_discretion_summary"] = answer
+        artifact["default_discretion_answers"] = answer
+        artifact["question_round_limit_reached"] = True
+        append_artifact_memory(artifact, answer)
+        questions = []
+        artifact["pending_questions"] = []
     state.outline_stage_artifacts[stage] = artifact
     state.outline_stage_status = "options_ready"
     state.review_status = "draft"
@@ -489,6 +512,75 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
     return state.to_dict()
 
 
+def stage_question_round(state: NovelState, stage: str, has_questions: bool) -> int:
+    artifact = state.outline_stage_artifacts.get(stage)
+    previous = 0
+    if isinstance(artifact, dict):
+        try:
+            previous = int(artifact.get("question_round") or 0)
+        except (TypeError, ValueError):
+            previous = 0
+    return previous + 1 if has_questions else previous
+
+
+def append_artifact_memory(artifact: dict, item: str) -> None:
+    text = str(item).strip()
+    if not text:
+        return
+    memory = artifact.get("stage_memory") if isinstance(artifact.get("stage_memory"), list) else []
+    artifact["stage_memory"] = [*memory, text]
+
+
+def answer_stage_unresolved_questions(
+    state: NovelState,
+    stage: str,
+    artifact: dict,
+    questions: list[str],
+    user_text: str,
+    adapter: AgentAdapter,
+    store: LocalStore,
+    progress: ProgressFunc = noop_progress,
+) -> str:
+    cleaned_questions = [item.strip() for item in questions if item.strip()]
+    if not cleaned_questions:
+        return ""
+    label = STAGE_LABELS.get(stage, stage)
+    emit_progress(progress, "大纲汇总 Agent", with_agent_metadata(f"正在回答「{label}」未决问题...", adapter, "outline_question_answerer"))
+    question_lines = "\n".join(f"{index}. {question}" for index, question in enumerate(cleaned_questions, start=1))
+    stage_text = str(artifact.get("synthesis") or "").strip() or stage_full_text(state, store, stage)
+    prompt = (
+        "AGENT: outline_question_answerer\n"
+        f"STAGE: {stage}\n"
+        f"阶段：{label}\n"
+        "任务：用户准备锁定当前大纲阶段或当前阶段已达到最多 3 轮追问。请根据当前阶段产物和前序上下文，逐项回答所有未决问题，并给出可写入阶段记忆的锁定摘要。\n"
+        "要求：\n"
+        "- 必须回答下面列出的每一个问题，不要跳过。\n"
+        "- 不要新增与当前阶段产物或前序阶段冲突的 canon。\n"
+        "- 信息不足时选择最稳妥、最利于后续写作连续性的默认方案，并标注为系统默认裁量。\n"
+        "- 只输出 Markdown，包含 `## 未决问题默认回答` 和 `## 锁定摘要` 两节。\n\n"
+        f"用户确认/触发语：{user_text or '未提供'}\n\n"
+        f"前序已保存阶段内容：\n{previous_stage_context(state, stage)}\n\n"
+        f"当前阶段产物：\n{stage_text or stage_memory_context(artifact, 2400) or '暂无'}\n\n"
+        f"待回答问题：\n{question_lines}\n"
+    )
+    try:
+        answer = complete_with_metrics(
+            adapter=adapter,
+            prompt=prompt,
+            project_dir=store.project_dir(state.project_id),
+            project_id=state.project_id,
+            graph="outline",
+            node="outline_question_answerer",
+            agent="outline_question_answerer",
+            prompt_profile="outline_question_answerer",
+        ).strip()
+    except AgentAdapterError:
+        answer = build_stage_closure_summary(stage, cleaned_questions, user_text)
+    if not answer:
+        answer = build_stage_closure_summary(stage, cleaned_questions, user_text)
+    return answer
+
+
 def advance_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc = noop_progress) -> dict:
     state = NovelState.from_dict(data)
     ensure_outline_stage(state)
@@ -507,15 +599,29 @@ def advance_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalSt
         return run_outline_stage_node(state.to_dict(), adapter, store, progress)
 
     artifact = dict(state.outline_stage_artifacts[stage])
-    default_summary = str(state.director_task_args.get("default_discretion_summary") or "").strip()
-    if not default_summary:
-        unresolved = stage_unresolved_questions(state, artifact)
-        if unresolved:
-            default_summary = build_stage_closure_summary(stage, unresolved, state.user_request)
+    unresolved = stage_unresolved_questions(state, artifact)
+    director_summary = str(state.director_task_args.get("default_discretion_summary") or "").strip()
+    default_summary = ""
+    if unresolved:
+        answer_trigger = state.user_request
+        if director_summary:
+            answer_trigger = f"{state.user_request}；Director 裁量提示：{director_summary}"
+        default_summary = answer_stage_unresolved_questions(
+            state=state,
+            stage=stage,
+            artifact=artifact,
+            questions=unresolved,
+            user_text=answer_trigger,
+            adapter=adapter,
+            store=store,
+            progress=progress,
+        )
+        artifact["default_discretion_answers"] = default_summary
+    elif director_summary:
+        default_summary = director_summary
     if default_summary:
         artifact["default_discretion_summary"] = default_summary
-        memory = artifact.get("stage_memory") if isinstance(artifact.get("stage_memory"), list) else []
-        artifact["stage_memory"] = [*memory, default_summary]
+        append_artifact_memory(artifact, default_summary)
     if stage == "chapter_outline":
         artifact, next_volume_index = confirm_current_chapter_outline_volume(artifact, state, store)
         if next_volume_index is not None:
@@ -583,14 +689,14 @@ def stage_unresolved_questions(state: NovelState, artifact: dict) -> list[str]:
         questions.extend(str(item).strip() for item in raw_artifact_questions if str(item).strip())
     questions.extend(item.strip() for item in state.pending_questions if item.strip())
     generic = f"请确认是否锁定{STAGE_LABELS.get(state.outline_stage, state.outline_stage)}并进入下一阶段，或继续提出修改。"
-    return [item for item in dict.fromkeys(questions) if item != generic][:8]
+    return [item for item in dict.fromkeys(questions) if item != generic][:10]
 
 
 def build_stage_closure_summary(stage: str, questions: list[str], user_text: str) -> str:
-    joined = "；".join(questions[:6])
+    joined = "；".join(questions[:10])
     return (
-        f"锁定{STAGE_LABELS.get(stage, stage)}前，系统按当前阶段产物和连续性要求自行闭环未决问题；"
-        f"已由本阶段 Agent 默认裁量：{joined}；用户确认语：{user_text}"
+        f"锁定{STAGE_LABELS.get(stage, stage)}前，模型按当前阶段产物和连续性要求逐项回答未决问题；"
+        f"已由本阶段 Agent 默认回答：{joined}；用户确认语：{user_text}"
     )
 
 def save_outline_stage_outputs(state: NovelState, stage: str, content: str, store: LocalStore) -> None:
@@ -781,8 +887,8 @@ def parse_compact_numbered_answers(text: str) -> dict[int, str]:
 def build_stage_default_discretion_summary(state: NovelState, text: str) -> str:
     questions = [item.strip() for item in state.pending_questions if item.strip()]
     if questions:
-        return f"用户将待确认问题交由系统按当前阶段产物默认裁量并推进；待裁量问题：{'；'.join(questions[:4])}；用户原话：{text}"
-    return f"用户认可当前阶段产物，并将细节交由系统按当前建议默认裁量后推进；用户原话：{text}"
+        return f"用户将待确认问题交由模型按当前阶段产物逐项回答并推进；待裁量问题：{'；'.join(questions[:10])}；用户原话：{text}"
+    return f"用户认可当前阶段产物，并将细节交由系统按当前建议由模型回答后推进；用户原话：{text}"
 
 def is_revision_request(text: str) -> bool:
     return any(marker in text for marker in ("修改", "调整", "重做", "重新", "不要", "更", "太", "强化", "补充"))
@@ -1885,7 +1991,7 @@ def extract_stage_confirmation_questions(markdown: str) -> list[str]:
         cleaned = cleaned.strip(" ：:")
         if cleaned:
             questions.append(cleaned)
-    return list(dict.fromkeys(questions))[:8]
+    return list(dict.fromkeys(questions))[:10]
 
 
 def finalize_locked_outline(state: NovelState, store: LocalStore) -> None:

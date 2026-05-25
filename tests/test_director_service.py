@@ -667,7 +667,8 @@ def test_director_treats_determine_enter_next_stage_as_approval(tmp_path):
 
     assert confirmed.state.outline_stage == "volume_outline"
     assert confirmed.state.outline_stage_artifacts["story_flow"]["status"] == "locked"
-    assert "自行闭环未决问题" in confirmed.state.outline_stage_artifacts["story_flow"]["default_discretion_summary"]
+    assert "未决问题默认回答" in confirmed.state.outline_stage_artifacts["story_flow"]["default_discretion_summary"]
+    assert "default_discretion_answers" in confirmed.state.outline_stage_artifacts["story_flow"]
 
 def test_director_does_not_advance_on_bare_determine_detail(tmp_path):
     store = LocalStore(tmp_path)

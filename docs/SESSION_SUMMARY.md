@@ -2227,3 +2227,9 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - 问题：大纲各阶段 Markdown 里的“仍需确认的问题”会保留模型草稿中的原始问题列表，可能比系统真正追问用户的 `pending_questions` 更多。
 - 调整：所有非方向阶段的保存输出现在都会用过滤后的 `pending_questions` 回填该段落，保证文件内容、状态机和用户实际看到的问题一致。
 - 验证：`.venv/bin/python -m pytest tests/test_outline_collaboration.py`：50 passed。
+## 28. 本轮调整：大纲待确认问题上限和轮数策略统一
+
+- 调整：所有大纲阶段的待确认问题上限统一到 10 条。
+- 调整：每个阶段最多允许 3 轮追问；第 4 轮仍产出问题时，系统会让模型直接回答未决问题并回填锁定摘要。
+- 调整：用户确认进入下一阶段时，剩余未决问题也会先由模型逐项回答，再锁定推进。
+- 验证：`.venv/bin/python -m pytest tests/test_outline_collaboration.py tests/test_director_service.py tests/test_story_flow_contract.py tests/test_volume_outline_contract.py tests/test_outline_stage_controls.py`：99 passed。
