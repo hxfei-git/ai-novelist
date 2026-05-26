@@ -1,7 +1,7 @@
 import json
 
 from ai_novelist.adapters.codex_cli import CodexCLIAdapter
-from ai_novelist.director_service import DirectorDecision, DirectorService, build_service_director_prompt, parse_service_director_output, update_project_context
+from ai_novelist.director_service import DirectorDecision, DirectorService, build_service_director_prompt, deterministic_outline_stage_pre_model_decision, parse_service_director_output, update_project_context
 from ai_novelist.research import MockSearchBackend
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
@@ -439,6 +439,26 @@ def test_director_service_confirms_existing_worldbuilding_stage(tmp_path):
     assert "## 三十三、结局后的世界格局" in synthesis
     assert store.outline_stage_path("重生魔门", "worldbuilding").exists()
 
+
+
+def test_review_lock_rework_request_prefers_explicit_revision_target_stage():
+    state = NovelState(project_id="demo", title="Demo")
+    state.active_workflow = "outline"
+    state.outline_stage = "review_lock"
+    state.outline_stage_status = "options_ready"
+    state.user_request = (
+        "请按审稿锁定意见先回改阻塞项，不进入章节卡。"
+        "优先回改人物关系阶段，补齐角色总表；"
+        "同时回改世界观设定；再回改章节大纲，补齐卷一前 3 章的事件、主要人物、结尾状态。"
+    )
+
+    decision = deterministic_outline_stage_pre_model_decision(state)
+
+    assert decision is not None
+    assert decision.action == "revise_outline"
+    assert decision.intent == "revise_previous_stage"
+    assert decision.task_args["stage"] == "characters"
+    assert decision.task_args["return_stage"] == "review_lock"
 
 def test_outline_stage_confirmation_phrase_is_deterministic_without_model_call(tmp_path):
     class FailingAdapter:

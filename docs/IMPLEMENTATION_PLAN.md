@@ -2510,3 +2510,18 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 验证：
 - `.venv/bin/python -m pytest tests/test_director_service.py tests/test_outline_collaboration.py`：90 passed。
 - `.venv/bin/python -m pytest`：322 passed。
+
+
+## 2026-05-26 审稿锁定回改长句路由修复
+
+目标：避免审稿锁定阶段的长回改指令因包含“结尾状态”等普通字段而误触发项目状态展示，并在多阶段回改句中优先识别“优先回改/先回改/回改”附近的目标阶段。
+
+已完成：
+- `deterministic_view_decision()` 收紧状态查询判断，只响应“查看状态 / 当前项目状态 / show status”等明确状态请求，不再因任意“状态”二字触发 `show_status`。
+- `deterministic_cross_stage_revision_decision()` 增加回改目标阶段识别：在“优先回改人物关系阶段”等短窗口内识别目标，且排除当前 `review_lock` 阶段本身，避免把“审稿锁定意见”误当作回改目标。
+- 增加回归测试，覆盖包含“审稿锁定意见”“优先回改人物关系阶段”“结尾状态”的长指令，确保路由到 `characters` 并返回 `review_lock`。
+
+验证：
+- `.venv/bin/python -m pytest tests/test_director_service.py`：37 passed。
+- `.venv/bin/python -m pytest tests/test_director_service.py tests/test_outline_collaboration.py`：91 passed。
+- `.venv/bin/python -m pytest`：323 passed。

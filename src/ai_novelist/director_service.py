@@ -991,7 +991,7 @@ def deterministic_outline_stage_decision(state: NovelState) -> DirectorDecision 
 
 def deterministic_cross_stage_revision_decision(state: NovelState) -> DirectorDecision | None:
     text = state.user_request.strip()
-    target_stage = detect_outline_stage_reference(text)
+    target_stage = detect_outline_revision_target_stage(text, exclude_stage=state.outline_stage) or detect_outline_stage_reference(text)
     if not target_stage or target_stage == state.outline_stage:
         return None
     if should_defer_outline_confirmation_to_director(text) or looks_like_outline_lock_feedback(text):
@@ -1064,6 +1064,35 @@ def outline_stage_index(stage: str) -> int:
         "review_lock",
     ]
     return stages.index(stage) if stage in stages else 999
+
+
+def detect_outline_revision_target_stage(text: str, exclude_stage: str = "") -> str:
+    stage_markers = {
+        "direction": ("方向定位", "创作方向", "方向阶段"),
+        "worldbuilding": ("世界观", "世界观设定", "世界观阶段"),
+        "characters": ("人物关系", "人物阶段", "角色关系"),
+        "story_flow": ("故事流程", "流程阶段", "剧情流程"),
+        "volume_outline": ("分卷大纲", "分卷阶段"),
+        "chapter_outline": ("章节大纲", "章节阶段", "章节拆分"),
+        "review_lock": ("审稿锁定", "终审阶段"),
+    }
+    revision_markers = ("优先回改", "先回改", "回改", "修订", "修改", "补齐")
+    best_stage = ""
+    best_index = len(text) + 1
+    for stage, markers in stage_markers.items():
+        if stage == exclude_stage:
+            continue
+        for marker in markers:
+            index = text.find(marker)
+            if index < 0:
+                continue
+            window_start = max(0, index - 8)
+            window_end = min(len(text), index + len(marker) + 8)
+            window = text[window_start:window_end]
+            if any(revision in window for revision in revision_markers) and index < best_index:
+                best_stage = stage
+                best_index = index
+    return best_stage
 
 
 def detect_outline_stage_reference(text: str) -> str:
@@ -1286,7 +1315,10 @@ def deterministic_view_decision(state: NovelState) -> DirectorDecision | None:
     text = state.user_request.strip()
     lowered = text.lower()
     wants_view = any(marker in text for marker in ("查看", "展示", "看一下", "看下", "看看", "显示")) or lowered.startswith("show ")
-    wants_status = any(marker in text for marker in ("状态", "当前状态", "项目状态")) or lowered in {"status", "show status"}
+    wants_status = (
+        any(marker in text for marker in ("查看状态", "查看当前状态", "项目状态", "显示状态", "当前项目状态"))
+        or lowered in {"status", "show status"}
+    )
     stage = detect_outline_stage_request(text)
     if wants_view and stage:
         return DirectorDecision(

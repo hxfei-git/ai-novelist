@@ -2298,3 +2298,17 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - `.venv/bin/python -m pytest`：322 passed。
 
 剩余限制：本次只修复路由，不自动改写 `projects/chat-test` 状态；该项目可继续使用，下一次用确认语推进即可。
+
+
+## 2026-05-26 审稿锁定回改长句误判修复
+
+根因：用户在 `review_lock / options_ready` 输入长回改指令时，句中“结尾状态”触发了过宽的状态查询规则，Director 直接展示项目状态；同时多阶段回改句会同时出现“审稿锁定、人物关系、世界观、章节大纲、方向定位”，需要优先抓取“优先回改”附近的真实目标阶段。
+
+修复：状态查询只匹配明确查看状态短语；回改路由新增目标阶段窗口识别，并排除当前审稿锁定阶段，让“优先回改人物关系阶段”确定性路由到 `characters`，完成后返回 `review_lock`。
+
+测试结果：
+- `.venv/bin/python -m pytest tests/test_director_service.py`：37 passed。
+- `.venv/bin/python -m pytest tests/test_director_service.py tests/test_outline_collaboration.py`：91 passed。
+- `.venv/bin/python -m pytest`：323 passed。
+
+剩余限制：多阶段回改仍会从识别到的首个优先目标阶段开始执行；后续阶段需要由返回审稿锁定后的审稿意见继续驱动或由用户再指定。
