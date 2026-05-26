@@ -162,6 +162,9 @@ def build_parser() -> argparse.ArgumentParser:
     web_parser.add_argument("--host", default="127.0.0.1", help="监听地址")
     web_parser.add_argument("--port", type=int, default=8000, help="监听端口")
     web_parser.add_argument("--mock", action="store_true", help="Web 生成接口默认使用本地 mock 输出")
+    web_parser.add_argument("--timeout", type=int, help="真实模型调用超时时间，单位秒")
+    web_parser.add_argument("--provider", choices=("codex", "deepseek"), help="模型提供方，默认读 AI_NOVELIST_MODEL_PROVIDER")
+    web_parser.add_argument("--model", help="模型名；DeepSeek 默认 deepseek-v4-pro")
 
     index_parser = subparsers.add_parser("index-corpus", help="索引本地作者小说语料")
     index_parser.add_argument("--corpus-dir", help="本地小说语料目录，默认读 AI_NOVELIST_AUTHOR_CORPUS_DIR")

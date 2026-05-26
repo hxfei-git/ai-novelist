@@ -48,6 +48,19 @@ class OutlineReviewAdapter(AgentAdapter):
         return "{}"
 
 
+class CapturingOutlineReviewAdapter(AgentAdapter):
+    def __init__(self) -> None:
+        self.reviser_prompt = ""
+
+    def complete(self, prompt: str, workspace: Path, options: AgentCallOptions | None = None) -> str:
+        if "outline_reviser" in prompt:
+            self.reviser_prompt = prompt
+            return "# 最终锁定总大纲\n\n## 方向定位\n只采纳选中建议。"
+        if "version_comparator" in prompt:
+            return "# 大纲版本比较\n\n只应用选中建议。"
+        return "{}"
+
+
 def test_project_and_outline_stage_file_roundtrip(tmp_path: Path) -> None:
     store = LocalStore(tmp_path)
     state = service.create_project(store, "Web Demo", "web-demo", idea="一个显式流程控制的小说项目")
@@ -115,6 +128,46 @@ def test_outline_review_roundtrip_and_apply_updates_outline(tmp_path: Path) -> N
     saved = store.load_state("web-demo")
     assert saved.outline_review_applied_run_id == report["run_id"]
     assert saved.outline_review_run_id == report["run_id"]
+
+
+def test_outline_review_report_exposes_selectable_suggestions(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+    state.outline = "# 最终锁定总大纲\n\n## 章节大纲\n旧稿。"
+    store.save_state(state)
+
+    report = service.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
+
+    suggestions = report["repair_suggestions"]
+    assert suggestions
+    assert suggestions[0]["id"]
+    assert suggestions[0]["selected"] is True
+    assert "章节列表总表偏概括" in suggestions[0]["message"]
+    assert any("补强最后一卷的收束钩子" in item["recommendation"] for item in suggestions)
+
+
+def test_apply_outline_review_uses_only_selected_suggestions(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+    state.outline = "# 最终锁定总大纲\n\n## 章节大纲\n旧稿。"
+    store.save_state(state)
+    report = service.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
+    suggestions = report["repair_suggestions"]
+    selected = next(item for item in suggestions if "补强最后一卷" in item["recommendation"])
+    unselected = next(item for item in suggestions if item["id"] != selected["id"])
+    adapter = CapturingOutlineReviewAdapter()
+
+    service.apply_outline_review(
+        store,
+        adapter,
+        "web-demo",
+        report["run_id"],
+        selected_issue_ids=[selected["id"]],
+    )
+
+    assert selected["recommendation"] in adapter.reviser_prompt
+    assert unselected["message"] not in adapter.reviser_prompt
+    assert unselected["recommendation"] not in adapter.reviser_prompt
 
 
 def test_chapter_batch_payload_sets_director_task_args(monkeypatch, tmp_path: Path) -> None:

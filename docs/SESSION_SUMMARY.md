@@ -100,7 +100,7 @@
 
 全章节审查与修复保持非破坏性：审查先做本地完整性扫描，再调用 `global_consistency_reviewer` 模型检查跨章连续性、设定一致性、人物状态和时间线；模型失败时回退本地扫描并在报告中记录 `model_review_error`。审查只写 `chapters/global_consistency/<run_id>/report.json` 和 `.md`，报告直接包含 `repair_suggestions`；前端按章节展示默认全选的修改建议，用户可取消单条建议，并按章提交修改。只有调用 apply repair 后才生成新的 `draft_vN.md`。章节读取 API：`GET /api/projects/{project_id}/chapters` 和 `GET /api/projects/{project_id}/chapters/{chapter}`，按 `final.md > 最高 draft_vN.md > chapter_###.md` 读取最新正文，生成批次完成后前端刷新章节列表并选中新章节。本轮进一步修复 Web 前端强制 `mock: true` 的问题，前端现在跟随后端启动模式；重复生成已有章节会追加更高 `draft_vN`，保留旧 mock 草稿但让最新正文指向真实新版本。章节总体审查增加运行中、完成摘要和 SSE 错误反馈；右侧进度日志按项目缓存在浏览器 localStorage 中，刷新页面后会恢复最近 10 条，并自动读取最新章节审查报告。
 
-验证：`tests/test_web_service.py` 覆盖项目/阶段持久化、显式阶段生成 payload、批量章节参数传递、章节列表/详情读取优先级、模型全章节审查、本地扫描兜底、审查报告不覆盖正文、默认全选修改建议与按章 apply；`tests/test_graph_volume_write.py` 覆盖重复批量生成追加新 draft 版本。最近一次已运行 `.venv/bin/python -m py_compile src/ai_novelist/graph_volume_write.py tests/test_graph_volume_write.py src/ai_novelist/web/service.py src/ai_novelist/web/app.py tests/test_web_service.py`、`.venv/bin/python -m pytest tests/test_web_service.py tests/test_graph_volume_write.py`、`npm --prefix web/frontend run build`、`.venv/bin/python -m pytest`，并用真实模式 `ai-novelist web --host 0.0.0.0 --port 8000` 供公网访问；需确保云安全组放行 TCP 8000。
+验证：`tests/test_web_service.py` 覆盖项目/阶段持久化、显式阶段生成 payload、批量章节参数传递、章节列表/详情读取优先级、模型全章节审查、本地扫描兜底、审查报告不覆盖正文、默认全选修改建议与按章 apply；`tests/test_graph_volume_write.py` 覆盖重复批量生成追加新 draft 版本。最近一次已运行 `.venv/bin/python -m py_compile src/ai_novelist/graph_volume_write.py tests/test_graph_volume_write.py src/ai_novelist/web/service.py src/ai_novelist/web/app.py tests/test_web_service.py`、`.venv/bin/python -m pytest tests/test_web_service.py tests/test_graph_volume_write.py`、`npm --prefix web/frontend run build`、`.venv/bin/python -m pytest`，并用真实模式 `ai-novelist web --host 0.0.0.0 --port 8000` 供公网访问；需确保云安全组放行 TCP 8000。 最新补充：`web` 命令支持 `--provider`、`--model`、`--timeout`，可直接用 `.venv/bin/ai-novelist web --provider deepseek --model deepseek-chat --timeout 180 --host 0.0.0.0 --port 8000` 启动真实 DeepSeek Web 服务；新增 `tests/test_web_app.py` 覆盖 parser 和启动参数传递。
 
 ### 大纲总体审查可选化：已完成
 
@@ -2362,3 +2362,10 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - 后端 API 审计确认既有大纲/章节审查端点已覆盖加载最新审查、运行审查和显式采纳应用，没有新增后端 endpoint。
 - `review-workspace` 类用于大纲总体审查工作区根节点；章节审查继续使用既有 review report、repair board 和 action 样式。
 - 验证：`git diff --check` 通过；`.venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py -q` 3 passed；`npm --prefix web/frontend run build` 通过。
+
+### 2026-05-26 大纲总体审查逐项采纳与进度栏固定
+
+- 根因：大纲总体审查前后端只保存整条 `revision_instruction`，apply 也忽略 payload，因此前端只能做整份采纳；右侧进度区域没有固定高度和内部滚动容器，日志会撑高页面。
+- 修复：大纲审查报告新增 `repair_suggestions`，前端按表格展示问题/建议与 checkbox，apply 传入 `selected_issue_ids` 并只让选中项进入 reviser prompt。
+- 修复：桌面 `.app` 固定为视口高，主工作区和右侧分别内部滚动，进度日志放入 `.progress-log` 固定框；移动端保持自然页面滚动。
+- 验证：`.venv/bin/python -m pytest tests/test_web_service.py tests/test_frontend_review_tabs_structure.py -q` 16 passed；`npm run build`（`web/frontend`）通过。

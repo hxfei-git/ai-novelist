@@ -6,6 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MAIN_TSX = ROOT / "web" / "frontend" / "src" / "main.tsx"
+STYLES_CSS = ROOT / "web" / "frontend" / "src" / "styles.css"
 
 
 def read_main() -> str:
@@ -31,6 +32,10 @@ def assert_union_type_includes(source: str, type_name: str, *values: str) -> Non
     body = union.group("body")
     for value in values:
         assert re.search(rf"['\"]{re.escape(value)}['\"]", body) is not None
+
+
+def read_styles() -> str:
+    return STYLES_CSS.read_text(encoding="utf-8")
 
 
 def test_review_entries_are_not_sidebar_navigation() -> None:
@@ -76,3 +81,20 @@ def test_chapter_workspace_uses_secondary_tabs() -> None:
     assert "setChapterView('batch')" not in sidebar
     assert "setChapterView('list')" not in sidebar
     assert "setChapterView('review')" not in sidebar
+
+def test_outline_review_uses_selectable_suggestion_board() -> None:
+    source = read_main()
+
+    assert "selectedOutlineRepairIds" in source
+    assert "OutlineRepairSuggestionBoard" in source
+    assert "selected_issue_ids" in source
+    assert "采纳选中项" in source
+
+
+def test_right_progress_has_fixed_scroll_area() -> None:
+    styles = read_styles()
+
+    assert "height: 100vh" in styles
+    assert ".progress-log" in styles
+    assert "overflow: auto" in styles
+    assert "min-height: 0" in styles

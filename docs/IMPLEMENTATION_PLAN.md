@@ -65,7 +65,7 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
 
 - `service.py` 提供不依赖 FastAPI 的项目列表、项目创建、大纲阶段读取/保存、显式阶段生成、显式阶段锁定、批量章节生成、全章节审查、默认全选的按章修改建议和按章应用修复能力。
 - `app.py` 提供 FastAPI `/api/*` 路由，并用 SSE 返回生成/锁定/批量章节/全章节审查进度。
-- CLI 新增 `ai-novelist web --host 127.0.0.1 --port 8000 --mock`，Web 依赖通过 `pip install -e '.[web]'` 安装。
+- CLI 新增 `ai-novelist web --host 127.0.0.1 --port 8000 --mock`，Web 依赖通过 `pip install -e '.[web]'` 安装。Web 启动命令现在也支持 `--provider`、`--model` 和 `--timeout`，与 `chat` 的真实模型参数保持一致；请求 payload 仍可覆盖启动默认值，优先级为请求 payload > Web 启动参数 > 环境变量。
 
 大纲 Web 流程不再让 Director 猜测阶段。前端请求显式携带 `stage` 与 action：`generate` 直接调用 `run_outline_stage_node`，`lock` 直接调用 `advance_outline_stage_node`。阶段内容保存会同步 `outline/<stage>.md`、`outline_stages/<stage>.md`、`state.json` 中的轻量 artifact；`worldbuilding` 额外同步根目录 `worldbuilding.md`。
 
@@ -2573,3 +2573,17 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - `git diff --check`：通过。
 - `.venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py -q`：3 passed。
 - `npm --prefix web/frontend run build`：通过。
+
+## 2026-05-26 大纲总体审查逐项采纳与进度栏固定
+
+目标：把大纲总体审查从整份报告的一键采纳，改为可逐项勾选的问题/建议表，并避免右侧进度日志撑高整页。
+
+已完成：
+- 大纲审查报告新增 `repair_suggestions`，从 editor notes / revision instruction 中抽取可勾选建议，默认全选并生成稳定 ID。
+- `/outline/review/{run_id}/apply` 接收 `selected_issue_ids`，只把选中的大纲审查建议写入修订指令；按项采纳时同步收窄 `editor_notes`，避免未选中建议进入 reviser prompt。
+- Web UI 大纲总体审查页新增表格式建议列表，左侧 checkbox 可逐项选择，主按钮改为“采纳选中项”。
+- 右侧进度栏固定在独立 `progress-log` 滚动容器中；桌面三栏页面不再被进度日志撑出全页滚动，窄屏仍恢复自然流式滚动。
+
+验证：
+- `.venv/bin/python -m pytest tests/test_web_service.py tests/test_frontend_review_tabs_structure.py -q`：16 passed。
+- `npm run build`（`web/frontend`）：通过。

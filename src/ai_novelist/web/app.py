@@ -15,7 +15,14 @@ from ai_novelist.storage.local_store import LocalStore, LocalStoreError
 from ai_novelist.web import service
 
 
-def make_app(settings: Settings | None = None, *, mock: bool = False):
+def make_app(
+    settings: Settings | None = None,
+    *,
+    mock: bool = False,
+    provider: str | None = None,
+    model: str | None = None,
+    timeout: int | None = None,
+):
     try:
         from fastapi import FastAPI, HTTPException
         from fastapi.middleware.cors import CORSMiddleware
@@ -25,6 +32,9 @@ def make_app(settings: Settings | None = None, *, mock: bool = False):
         raise RuntimeError("Install the web extra first: pip install -e '.[web]'") from exc
 
     settings = settings or load_settings()
+    default_provider = (provider or settings.model_provider).strip().lower()
+    default_model = model or settings.deepseek_model
+    default_timeout = timeout if timeout is not None else settings.codex_timeout_seconds
     store = LocalStore(settings.projects_dir)
     app = FastAPI(title="AI Novelist Web")
     app.add_middleware(
@@ -38,15 +48,15 @@ def make_app(settings: Settings | None = None, *, mock: bool = False):
     def adapter(payload: dict[str, Any] | None = None):
         payload = payload or {}
         use_mock = bool(payload.get("mock", mock))
-        timeout = payload.get("timeout")
-        timeout_seconds = int(timeout) if isinstance(timeout, int) else settings.codex_timeout_seconds
+        payload_timeout = payload.get("timeout")
+        timeout_seconds = int(payload_timeout) if isinstance(payload_timeout, int) else default_timeout
         if use_mock:
             return CodexCLIAdapter(timeout_seconds=timeout_seconds, mock=True)
-        provider = str(payload.get("provider") or settings.model_provider).strip().lower()
-        if provider == "deepseek":
+        selected_provider = str(payload.get("provider") or default_provider).strip().lower()
+        if selected_provider == "deepseek":
             return DeepSeekAdapter(
                 api_key=settings.deepseek_api_key,
-                model=str(payload.get("model") or settings.deepseek_model),
+                model=str(payload.get("model") or default_model),
                 base_url=settings.deepseek_base_url,
                 timeout_seconds=timeout_seconds,
             )
@@ -159,6 +169,11 @@ def make_app(settings: Settings | None = None, *, mock: bool = False):
     @app.post("/api/projects/{project_id}/outline/review/{run_id}/apply")
     def apply_outline_review(project_id: str, run_id: str, payload: dict[str, Any] | None = None):
         payload = payload or {}
+        selected_issue_ids = payload.get("selected_issue_ids")
+        if isinstance(selected_issue_ids, list):
+            selected_issue_ids = [str(item) for item in selected_issue_ids if str(item).strip()]
+        else:
+            selected_issue_ids = None
         return StreamingResponse(
             sse_events(
                 lambda progress: service.apply_outline_review(
@@ -167,6 +182,7 @@ def make_app(settings: Settings | None = None, *, mock: bool = False):
                     project_id,
                     run_id,
                     progress,
+                    selected_issue_ids=selected_issue_ids,
                 )
             ),
             media_type="text/event-stream",
@@ -257,7 +273,13 @@ def run_web_command(args: argparse.Namespace, settings: Settings | None = None) 
     except ModuleNotFoundError as exc:
         raise RuntimeError("Install the web extra first: pip install -e '.[web]'") from exc
 
-    app = make_app(settings, mock=bool(args.mock))
+    app = make_app(
+        settings,
+        mock=bool(args.mock),
+        provider=args.provider,
+        model=args.model,
+        timeout=args.timeout,
+    )
     uvicorn.run(app, host=args.host, port=args.port)
     return 0
 

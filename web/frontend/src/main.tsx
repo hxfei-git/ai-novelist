@@ -59,6 +59,15 @@ type OutlineReview = {
   revision_instruction: string;
   source_outline_summary: string;
   source_outline: string;
+  repair_suggestions?: OutlineReviewSuggestion[];
+};
+type OutlineReviewSuggestion = {
+  id: string;
+  severity: string;
+  category: string;
+  message: string;
+  recommendation: string;
+  selected: boolean;
 };
 type TopSection = 'outline' | 'chapters';
 type OutlineView = 'edit' | 'review';
@@ -99,6 +108,14 @@ function chapterVersionLabel(chapter: Chapter | null) {
 }
 
 function buildRepairSelectionMap(suggestions: ReviewSuggestion[]) {
+  const next: Record<string, boolean> = {};
+  suggestions.forEach((item) => {
+    next[item.id] = item.selected !== false;
+  });
+  return next;
+}
+
+function buildOutlineRepairSelectionMap(suggestions: OutlineReviewSuggestion[]) {
   const next: Record<string, boolean> = {};
   suggestions.forEach((item) => {
     next[item.id] = item.selected !== false;
@@ -198,6 +215,7 @@ function App() {
   const [outlineReview, setOutlineReview] = useState<OutlineReview | null>(null);
   const [outlineReviewRunning, setOutlineReviewRunning] = useState(false);
   const [outlineReviewApplying, setOutlineReviewApplying] = useState(false);
+  const [selectedOutlineRepairIds, setSelectedOutlineRepairIds] = useState<Record<string, boolean>>({});
 
   const stageRequestRef = useRef(0);
   const chapterRequestRef = useRef(0);
@@ -331,6 +349,7 @@ function App() {
   async function loadLatestOutlineReview() {
     const latest = await api<OutlineReview>(`/api/projects/${projectId}/outline/review/latest`);
     setOutlineReview(latest);
+    setSelectedOutlineRepairIds(buildOutlineRepairSelectionMap(latest.repair_suggestions || []));
   }
 
   async function runOutlineReview() {
@@ -349,10 +368,20 @@ function App() {
 
   async function applyOutlineReview() {
     if (!outlineReview?.run_id) return;
+    const suggestions = outlineReview.repair_suggestions || [];
+    const selectedIssueIds = suggestions.filter((item) => selectedOutlineRepairIds[item.id] !== false).map((item) => item.id);
+    if (suggestions.length > 0 && selectedIssueIds.length === 0) {
+      pushLog('大纲总体审查没有选中的修改建议');
+      return;
+    }
     setOutlineReviewApplying(true);
     pushLog(`大纲审查应用已开始：${outlineReview.run_id}`);
     try {
-      await streamAction(`/api/projects/${projectId}/outline/review/${outlineReview.run_id}/apply`, {}, (line) => pushLog(line));
+      await streamAction(
+        `/api/projects/${projectId}/outline/review/${outlineReview.run_id}/apply`,
+        { selected_issue_ids: selectedIssueIds },
+        (line) => pushLog(line),
+      );
       await loadLatestOutlineReview();
       pushLog('大纲审查建议已应用');
     } catch (error) {
@@ -474,6 +503,8 @@ function App() {
               applying={outlineReviewApplying}
               onInstructionChange={setInstruction}
               onRun={runOutlineReview}
+              selectedOutlineRepairIds={selectedOutlineRepairIds}
+              onToggleSuggestion={(id, checked) => setSelectedOutlineRepairIds((currentState) => ({ ...currentState, [id]: checked }))}
               onApply={applyOutlineReview}
               onDismiss={dismissOutlineReview}
             />
@@ -555,10 +586,12 @@ function App() {
       )}
 
       <aside className="right">
-        <section>
+        <section className="progress-panel">
           <h2>进度</h2>
-          {log.length === 0 && <p className="empty">暂无进度。</p>}
-          {log.map((item, index) => <pre key={`${index}-${item}`}>{item}</pre>)}
+          <div className="progress-log">
+            {log.length === 0 && <p className="empty">暂无进度。</p>}
+            {log.map((item, index) => <pre key={`${index}-${item}`}>{item}</pre>)}
+          </div>
         </section>
       </aside>
     </main>
@@ -573,6 +606,8 @@ function OutlineReviewWorkspace({
   applying,
   onInstructionChange,
   onRun,
+  selectedOutlineRepairIds,
+  onToggleSuggestion,
   onApply,
   onDismiss,
 }: {
@@ -580,8 +615,10 @@ function OutlineReviewWorkspace({
   instruction: string;
   running: boolean;
   applying: boolean;
+  selectedOutlineRepairIds: Record<string, boolean>;
   onInstructionChange: (value: string) => void;
   onRun: () => void;
+  onToggleSuggestion: (id: string, checked: boolean) => void;
   onApply: () => void;
   onDismiss: () => void;
 }) {
@@ -607,11 +644,18 @@ function OutlineReviewWorkspace({
             </div>
             <div className="review-buttons">
               <button onClick={onDismiss} disabled={running || applying}><X size={16} />不采纳</button>
-              <button onClick={onApply} disabled={running || applying || review?.decision === 'stop'}><Check size={16} />采纳修改</button>
+              <button onClick={onApply} disabled={running || applying || review?.decision === 'stop'}><Check size={16} />采纳选中项</button>
             </div>
           </div>
           <p>{review?.notes}</p>
           <small>参考大纲：{review?.source_outline_summary}</small>
+          {(review?.repair_suggestions || []).length > 0 && (
+            <OutlineRepairSuggestionBoard
+              suggestions={review?.repair_suggestions || []}
+              selectedOutlineRepairIds={selectedOutlineRepairIds}
+              onToggle={onToggleSuggestion}
+            />
+          )}
         </div>
       ) : (
         <div className="review-report outline-review-report empty-review">
@@ -620,6 +664,43 @@ function OutlineReviewWorkspace({
       )}
       {applying && <div className="loading">大纲审查建议正在应用...</div>}
     </section>
+  );
+}
+
+
+function OutlineRepairSuggestionBoard({
+  suggestions,
+  selectedOutlineRepairIds,
+  onToggle,
+}: {
+  suggestions: OutlineReviewSuggestion[];
+  selectedOutlineRepairIds: Record<string, boolean>;
+  onToggle: (id: string, checked: boolean) => void;
+}) {
+  return (
+    <div className="outline-repair-table" role="table" aria-label="大纲审查建议">
+      <div className="outline-repair-row outline-repair-head" role="row">
+        <span role="columnheader">选择</span>
+        <span role="columnheader">问题</span>
+        <span role="columnheader">建议</span>
+      </div>
+      {suggestions.map((item) => (
+        <label className="outline-repair-row" role="row" key={item.id}>
+          <span role="cell">
+            <input
+              type="checkbox"
+              checked={selectedOutlineRepairIds[item.id] ?? item.selected !== false}
+              onChange={(event) => onToggle(item.id, event.target.checked)}
+            />
+          </span>
+          <span role="cell">
+            <strong>{item.message}</strong>
+            <small>{item.severity || 'normal'} · {item.category || 'review'}</small>
+          </span>
+          <span role="cell">{item.recommendation}</span>
+        </label>
+      ))}
+    </div>
   );
 }
 

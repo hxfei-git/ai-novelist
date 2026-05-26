@@ -207,6 +207,75 @@ def render_outline_review_markdown(report: dict[str, Any]) -> str:
     return '\n'.join(lines).rstrip() + '\n'
 
 
+def extract_markdown_bullets(text: str) -> list[str]:
+    bullets: list[str] = []
+    for line in str(text or "").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        cleaned = re.sub(r"^[-*+\u2022]\s+", "", stripped)
+        cleaned = re.sub(r"^\d+[.)、]\s*", "", cleaned)
+        if cleaned != stripped or re.match(r"^\d+[.)、]", stripped):
+            cleaned = cleaned.strip()
+            if cleaned:
+                bullets.append(cleaned)
+    return bullets
+
+
+def outline_suggestion_identifier(message: str, recommendation: str) -> str:
+    text = f"outline_review|{message}|{recommendation}"
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:12]
+
+
+def build_outline_repair_suggestions(notes: str, revision_instruction: str, summary: str) -> list[dict[str, Any]]:
+    raw_items = [*extract_markdown_bullets(notes), *extract_markdown_bullets(revision_instruction)]
+    if not raw_items:
+        fallback = str(revision_instruction or summary or notes or "").strip()
+        if fallback:
+            raw_items = [fallback]
+    suggestions: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw_items:
+        text = summarize_text(item, max_chars=180).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        category = "revision" if re.search(r"建议|补|改|修|强化|调整|明确", text) else "issue"
+        suggestion = {
+            "id": outline_suggestion_identifier(text, text),
+            "severity": "normal",
+            "category": category,
+            "message": text,
+            "recommendation": text,
+            "selected": True,
+        }
+        suggestions.append(suggestion)
+    return suggestions
+
+
+def selected_outline_revision_instruction(report: dict[str, Any], selected_issue_ids: list[str] | None) -> str:
+    suggestions = [item for item in report.get("repair_suggestions", []) if isinstance(item, dict)]
+    selected_ids = [str(item) for item in (selected_issue_ids or []) if str(item).strip()]
+    if selected_issue_ids is not None and not selected_ids:
+        raise LocalStoreError("请选择至少一条大纲审查建议")
+    if selected_ids:
+        suggestions = [item for item in suggestions if str(item.get("id") or "") in selected_ids]
+        if not suggestions:
+            raise LocalStoreError("未找到选中的大纲审查建议")
+    if suggestions:
+        lines = []
+        for item in suggestions:
+            message = str(item.get("message") or "").strip()
+            recommendation = str(item.get("recommendation") or message).strip()
+            if message and recommendation and message != recommendation:
+                lines.append(f"- {message} -> {recommendation}")
+            elif recommendation:
+                lines.append(f"- {recommendation}")
+        if lines:
+            return "仅采纳以下选中的大纲审查建议：\n" + "\n".join(lines)
+    return str(report.get("revision_instruction") or report.get("summary") or report.get("notes") or "").strip()
+
+
 def write_outline_review_report(store: LocalStore, state: NovelState, report: dict[str, Any]) -> tuple[Path, Path]:
     run_id = str(report.get("run_id") or "").strip()
     if not run_id:
@@ -263,6 +332,11 @@ def review_outline(store: LocalStore, adapter: AgentAdapter, project_id: str, in
         "source_outline": source_outline,
         "source_outline_summary": summarize_text(strip_markdown_heading(source_outline), max_chars=360),
     }
+    report["repair_suggestions"] = build_outline_repair_suggestions(
+        str(report.get("notes") or ""),
+        str(report.get("revision_instruction") or ""),
+        str(report.get("summary") or ""),
+    )
     report_path, _markdown_path = write_outline_review_report(store, reviewed, report)
     reviewed.outline_review_run_id = run_id
     reviewed.outline_review_status = str(report["status"])
@@ -274,7 +348,7 @@ def review_outline(store: LocalStore, adapter: AgentAdapter, project_id: str, in
     return report
 
 
-def apply_outline_review(store: LocalStore, adapter: AgentAdapter, project_id: str, run_id: str, progress: ProgressFunc | None = None) -> dict[str, Any]:
+def apply_outline_review(store: LocalStore, adapter: AgentAdapter, project_id: str, run_id: str, progress: ProgressFunc | None = None, selected_issue_ids: list[str] | None = None) -> dict[str, Any]:
     emit = progress or (lambda _stage, _message: None)
     report = load_outline_review_report(store, project_id, run_id)
     state = store.load_state(project_id)
@@ -305,8 +379,8 @@ def apply_outline_review(store: LocalStore, adapter: AgentAdapter, project_id: s
         }
     emit("OutlineReview", "正在应用大纲审查建议...")
     state.outline = source_outline
-    state.editor_notes = str(report.get("notes") or "")
-    state.revision_instruction = str(report.get("revision_instruction") or report.get("summary") or state.editor_notes or "").strip()
+    state.revision_instruction = selected_outline_revision_instruction(report, selected_issue_ids)
+    state.editor_notes = state.revision_instruction if selected_issue_ids is not None else str(report.get("notes") or "")
     state.review_status = "draft"
     store.save_state(state)
     revised = NovelState.from_dict(revise_outline_node(state.to_dict(), adapter, store))
