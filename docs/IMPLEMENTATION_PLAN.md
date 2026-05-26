@@ -2573,4 +2573,3 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - `git diff --check`：通过。
 - `.venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py -q`：3 passed。
 - `npm --prefix web/frontend run build`：通过。
-

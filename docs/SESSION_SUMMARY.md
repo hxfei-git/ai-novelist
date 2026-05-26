@@ -2362,4 +2362,3 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - 后端 API 审计确认既有大纲/章节审查端点已覆盖加载最新审查、运行审查和显式采纳应用，没有新增后端 endpoint。
 - `review-workspace` 类用于大纲总体审查工作区根节点；章节审查继续使用既有 review report、repair board 和 action 样式。
 - 验证：`git diff --check` 通过；`.venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py -q` 3 passed；`npm --prefix web/frontend run build` 通过。
-
