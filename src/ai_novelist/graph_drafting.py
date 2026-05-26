@@ -50,31 +50,15 @@ class DraftingSequentialGraph:
 
 
 def build_drafting_graph(adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc | None = None) -> CompiledGraph:
-    progress_func = progress or noop_progress
-    try:
-        from langgraph.graph import END, StateGraph
-    except ModuleNotFoundError:
-        return DraftingSequentialGraph(adapter, store, progress_func)
+    """Build the current default chapter writing graph.
 
-    graph = StateGraph(dict)
-    graph.add_node("load_drafting_context", lambda data: progress_node(progress_func, "Drafting 1/8", "正在准备章节卡、场景卡和写作上下文...", lambda: load_drafting_context_node(data, adapter, store, progress_func)))
-    graph.add_node("draft_scene_batch", lambda data: progress_node(progress_func, "Drafting 2/8", with_agent_metadata("正在按场景生成正文草稿...", adapter, "chapter_writer"), lambda: draft_scene_batch_node(data, adapter, store)))
-    graph.add_node("merge_scenes", lambda data: progress_node(progress_func, "Drafting 3/8", "正在合并场景草稿...", lambda: merge_scenes_node(data, store)))
-    graph.add_node("dialogue_enhance", lambda data: progress_node(progress_func, "Drafting 4/8", with_agent_metadata("正在增强对白...", adapter, "dialogue_enhancer"), lambda: dialogue_enhance_node(data, adapter, store)))
-    graph.add_node("atmosphere_enhance", lambda data: progress_node(progress_func, "Drafting 5/8", with_agent_metadata("正在增强氛围和感官描写...", adapter, "atmosphere_enhancer"), lambda: atmosphere_enhance_node(data, adapter, store)))
-    graph.add_node("hook_enhance", lambda data: progress_node(progress_func, "Drafting 6/8", with_agent_metadata("正在执行节奏适配增强...", adapter, "hook_enhancer"), lambda: pacing_aware_enhance_node(data, adapter, store)))
-    graph.add_node("style_normalize", lambda data: progress_node(progress_func, "Drafting 7/8", with_agent_metadata("正在统一风格...", adapter, "style_normalizer"), lambda: style_normalize_node(data, adapter, store)))
-    graph.add_node("save_draft", lambda data: progress_node(progress_func, "Drafting 8/8", "正在保存章节草稿...", lambda: save_draft_node(data, store)))
-    graph.set_entry_point("load_drafting_context")
-    graph.add_conditional_edges("load_drafting_context", route_after_load, {"continue": "draft_scene_batch", "end": END})
-    graph.add_edge("draft_scene_batch", "merge_scenes")
-    graph.add_edge("merge_scenes", "dialogue_enhance")
-    graph.add_edge("dialogue_enhance", "atmosphere_enhance")
-    graph.add_edge("atmosphere_enhance", "hook_enhance")
-    graph.add_edge("hook_enhance", "style_normalize")
-    graph.add_edge("style_normalize", "save_draft")
-    graph.add_edge("save_draft", END)
-    return graph.compile()
+    The previous scene-card based drafting implementation remains in this module
+    for import compatibility, but the active path now writes directly from the
+    Novel Bible and chapter outline.
+    """
+    from ai_novelist.graph_chapter_write import build_chapter_write_graph
+
+    return build_chapter_write_graph(adapter, store, progress=progress)
 
 
 def progress_node(progress: ProgressFunc, stage: str, message: str, fn) -> dict:

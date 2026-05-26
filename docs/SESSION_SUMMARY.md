@@ -2254,3 +2254,20 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 
 剩余限制：
 - 轻修订依赖模型遵守“保留原结构”的 prompt；代码会做问题去重和边界 guard，但不在轻修订分支强制重跑各阶段结构 repair。
+
+## 2026-05-26 简化章节写作与批量写卷整改
+
+本次完成：
+- 默认 `write_chapter` / `build_drafting_graph` 改为直接使用小说圣经、锁定约束和章节大纲切片生成正文，不再自动补章节卡或场景卡。
+- 新增 `graph_chapter_write.py`：`load_context -> direct_chapter_writer -> save draft_v1 -> chapter_auto_reviser -> save draft_v2`。
+- 新增 `graph_volume_write.py`：支持 `write-volume` 按卷解析章节、并行生成初稿、并行自动修订、卷级一致性总检、阻塞问题自动修复和 manifest 保存。
+- 新增 `revise-volume`：读取人工审核意见后，对目标卷章节并行执行一轮人工意见修订，不自动定稿或更新小说圣经。
+- Director 新增 `write_volume`、`revise_volume`、`show_volume_status`；旧章节卡、场景卡和旧章节审稿/修订动作在 Director 中转为提示，不再作为默认链路执行。
+- 新增 prompts：`direct_chapter_writer`、`chapter_auto_reviser`、`volume_consistency_checker`、`volume_blocker_reviser`、`human_feedback_reviser`。
+
+验证：
+- `.venv/bin/python -m pytest tests/test_graph_drafting.py tests/test_graph_volume_write.py tests/test_graph_writer.py tests/test_director_service.py tests/test_cli_chat.py`：66 passed。
+
+剩余限制：
+- 卷章节范围解析仍基于章节大纲 Markdown 的卷标题和“第 N 章”启发式；复杂非标准格式可用 `--chapters` 手工覆盖。
+- 旧单步 `review` 命令仍作为兼容 CLI 存在，但不再由 Director 默认路由。

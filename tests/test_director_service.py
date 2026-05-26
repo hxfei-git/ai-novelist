@@ -513,13 +513,13 @@ def test_director_service_reports_execution_plan_for_write_chapter(tmp_path):
 
     assert result.choices[0].id == "confirm"
     assert result.state.director_action == "write_chapter"
-    assert ("Plan", "将生成第 1 章正文；缺少章节卡或场景卡时会先自动补齐。") not in events
+    assert ("Plan", "将根据小说圣经和章节大纲生成第 1 章，并自动做一轮一致性修订。") not in events
 
     confirmed = service.handle_turn("demo", "1", channel="cli")
 
     assert confirmed.state.director_action == "write_chapter"
-    assert ("Plan", "将生成第 1 章正文；缺少章节卡或场景卡时会先自动补齐。") in events
-    assert any(stage == "Drafting 1/8" for stage, _message in events)
+    assert ("Plan", "将根据小说圣经和章节大纲生成第 1 章，并自动做一轮一致性修订。") in events
+    assert any(stage == "ChapterWrite 1/5" for stage, _message in events)
 
 
 def make_characters_options_ready_state(store: LocalStore) -> NovelState:

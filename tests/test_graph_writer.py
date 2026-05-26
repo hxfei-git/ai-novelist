@@ -6,6 +6,27 @@ from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
 
 
+CHAPTER_OUTLINE = """## 章节大纲稿
+
+### 第一卷
+
+#### 卷内章节总体规划
+- 本卷建立月球城市、维修站异常和气闸倒计时。
+
+#### 章节列表总表
+| 章节 | 标题 | profile | PacingTarget | 一句话概括 | 结尾状态 |
+| --- | --- | --- | --- | --- | --- |
+| 第 1 章 | 空白手稿 | 铺垫章 | function=setup, intensity=3, hook=soft | 主角在维修站醒来并发现异常记录。 | 留下审计编号异常。 |
+| 第 2 章 | 气闸倒计时 | 推进章 | function=turn, intensity=4, hook=hard | 主角追查东七气闸倒计时。 | 危机升级。 |
+"""
+
+
+def seed_chapter_outline(store: LocalStore, state: NovelState) -> None:
+    state.outline_stage_artifacts["chapter_outline"] = {"summary": CHAPTER_OUTLINE}
+    store.save_outline_artifact(state, "chapter_outline", CHAPTER_OUTLINE)
+    store.save_state(state)
+
+
 def test_worldbuilding_outline_stage_persists_full_framework(tmp_path):
     store = LocalStore(tmp_path)
     state = store.create_project("Demo", "demo")
@@ -40,6 +61,7 @@ def test_writer_graph_write_chapter_and_review(tmp_path):
     store = LocalStore(tmp_path)
     state = store.create_project("Demo", "demo")
     state.current_chapter = 2
+    seed_chapter_outline(store, state)
 
     write_graph = build_writer_graph(
         CodexCLIAdapter(mock=True),
@@ -50,18 +72,9 @@ def test_writer_graph_write_chapter_and_review(tmp_path):
     written = write_graph.invoke(state.to_dict())
 
     assert written["review_status"] == "approved"
+    assert written["active_graph"] == "chapter_write"
     assert store.chapter_path("demo", 2).exists()
-
-    review_graph = build_writer_graph(
-        CodexCLIAdapter(mock=True),
-        store,
-        "review",
-        review_func=lambda _state, _task: "approve",
-    )
-    reviewed = review_graph.invoke(written)
-
-    assert reviewed["review_status"] == "approved"
-    assert store.editor_notes_path("demo", 2).exists()
+    assert store.chapter_draft_path("demo", 2, 2).exists()
 
 
 def test_writer_graph_plan_outline_persists_outline(tmp_path):
@@ -129,8 +142,8 @@ def test_composer_graph_stops_when_revision_is_not_allowed(tmp_path):
     )
     result = graph.invoke(state.to_dict())
 
-    assert result["review_status"] == "stopped"
-    assert result["editor_decision"] == "revise"
+    assert result["review_status"] == "approved"
+    assert result["editor_decision"] == "pass"
     assert store.chapter_draft_path("demo", 1, 1).exists()
 
 
@@ -146,6 +159,7 @@ def test_parse_director_output_extracts_action_message_and_chapter():
 def test_chat_graph_routes_worldbuilding_and_persist(tmp_path):
     store = LocalStore(tmp_path)
     state = store.create_project("Demo", "demo")
+    seed_chapter_outline(store, state)
     adapter = CodexCLIAdapter(mock=True)
     graph = build_chat_graph(adapter, store)
 
@@ -210,6 +224,7 @@ def test_chat_graph_routes_write_and_review(tmp_path):
     store = LocalStore(tmp_path)
     state = store.create_project("Demo", "demo")
     state.idea = "月球城市失忆工程师"
+    seed_chapter_outline(store, state)
     adapter = CodexCLIAdapter(mock=True)
     graph = build_chat_graph(adapter, store)
 
@@ -225,9 +240,8 @@ def test_chat_graph_routes_write_and_review(tmp_path):
     written["messages"].append({"role": "user", "content": "让编辑审稿"})
     reviewed = graph.invoke(written)
 
-    assert reviewed["director_action"] == "review_chapter"
-    assert reviewed["editor_decision"] in {"pass", "revise"}
-    assert reviewed["quality_score"] > 0
+    assert reviewed["director_action"] == "ask_user"
+    assert "旧审稿链路已下线" in reviewed["director_message"]
 
 
 def test_chat_graph_show_outline_returns_outline_body(tmp_path):

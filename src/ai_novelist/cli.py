@@ -81,6 +81,10 @@ def main(argv: list[str] | None = None) -> int:
             return run_writer_command(args, store, settings, "plan_chapters")
         if args.command == "write-chapter":
             return run_writer_command(args, store, settings, "write_chapter")
+        if args.command == "write-volume":
+            return run_write_volume_command(args, store, settings)
+        if args.command == "revise-volume":
+            return run_revise_volume_command(args, store, settings)
         if args.command == "review":
             return run_writer_command(args, store, settings, "review")
         if args.command == "finalize-chapter":
@@ -201,6 +205,21 @@ def build_parser() -> argparse.ArgumentParser:
     write_parser.add_argument("--project", required=True, help="项目 ID")
     write_parser.add_argument("--chapter", type=int, required=True, help="章节编号，从 1 开始")
     add_generation_flags(write_parser)
+
+    write_volume_parser = subparsers.add_parser("write-volume", help="并行生成指定卷章节正文并做卷级一致性总检")
+    write_volume_parser.add_argument("--project", required=True, help="项目 ID")
+    write_volume_parser.add_argument("--volume", type=int, required=True, help="卷号，从 1 开始")
+    write_volume_parser.add_argument("--chapters", help="手工指定章节范围，如 1-12 或 1,2,3")
+    write_volume_parser.add_argument("--max-workers", type=int, help="并行章节生成上限，默认 3")
+    add_generation_flags(write_volume_parser)
+
+    revise_volume_parser = subparsers.add_parser("revise-volume", help="按人工审核意见并行修订指定卷")
+    revise_volume_parser.add_argument("--project", required=True, help="项目 ID")
+    revise_volume_parser.add_argument("--volume", type=int, required=True, help="卷号，从 1 开始")
+    revise_volume_parser.add_argument("--notes", required=True, help="人工审核意见 Markdown/Text 路径")
+    revise_volume_parser.add_argument("--chapters", help="手工指定章节范围，如 1-12 或 1,2,3")
+    revise_volume_parser.add_argument("--max-workers", type=int, help="并行章节修订上限，默认 3")
+    add_generation_flags(revise_volume_parser)
 
     review_parser = subparsers.add_parser("review", help="生成编辑审稿意见")
     review_parser.add_argument("--project", required=True, help="项目 ID")
@@ -825,6 +844,74 @@ def run_writer_command(
     return 1 if result.review_status == "error" else 0
 
 
+
+
+def run_write_volume_command(args: argparse.Namespace, store: LocalStore, settings: Settings) -> int:
+    if args.volume < 1:
+        print("错误：卷号必须大于 0", file=sys.stderr)
+        return 2
+    state = store.load_state(args.project)
+    state.director_action = "write_volume"
+    state.director_task_args = {"volume": args.volume}
+    if args.chapters:
+        state.director_task_args["chapters"] = args.chapters
+    state.user_request = f"批量生成第 {args.volume} 卷"
+    state.review_status = "draft"
+    state.error = ""
+    apply_craft_args_to_state(state, args, settings)
+    store.save_state(state)
+    effective_timeout = args.timeout if args.timeout is not None else settings.codex_timeout_seconds
+    adapter = make_agent_adapter(args, settings, effective_timeout)
+    print_real_mode_notice(args.mock, adapter, effective_timeout)
+    apply_parallel_worker_env(args.max_workers)
+    from ai_novelist.graph_volume_write import build_volume_write_graph
+
+    result = NovelState.from_dict(build_volume_write_graph(adapter, store, progress=print_progress).invoke(state.to_dict()))
+    if result.error:
+        print(f"错误：{result.error}", file=sys.stderr)
+        return 1
+    print(result.director_message)
+    return 0
+
+
+def run_revise_volume_command(args: argparse.Namespace, store: LocalStore, settings: Settings) -> int:
+    if args.volume < 1:
+        print("错误：卷号必须大于 0", file=sys.stderr)
+        return 2
+    notes_path = Path(args.notes)
+    if not notes_path.exists():
+        print(f"错误：人工审核意见不存在：{notes_path}", file=sys.stderr)
+        return 2
+    state = store.load_state(args.project)
+    state.director_action = "revise_volume"
+    state.director_task_args = {"volume": args.volume, "notes_path": str(notes_path)}
+    if args.chapters:
+        state.director_task_args["chapters"] = args.chapters
+    state.user_request = f"按人工审核意见修订第 {args.volume} 卷"
+    state.review_status = "draft"
+    state.error = ""
+    apply_craft_args_to_state(state, args, settings)
+    store.save_state(state)
+    effective_timeout = args.timeout if args.timeout is not None else settings.codex_timeout_seconds
+    adapter = make_agent_adapter(args, settings, effective_timeout)
+    print_real_mode_notice(args.mock, adapter, effective_timeout)
+    apply_parallel_worker_env(args.max_workers)
+    from ai_novelist.graph_volume_write import build_volume_revision_graph
+
+    result = NovelState.from_dict(build_volume_revision_graph(adapter, store, progress=print_progress).invoke(state.to_dict()))
+    if result.error:
+        print(f"错误：{result.error}", file=sys.stderr)
+        return 1
+    print(result.director_message)
+    return 0
+
+
+def apply_parallel_worker_env(max_workers: int | None) -> None:
+    import os
+
+    workers = 3 if max_workers is None else max_workers
+    os.environ["AI_NOVELIST_PARALLEL_AGENTS"] = "1"
+    os.environ["AI_NOVELIST_MAX_PARALLEL_AGENTS"] = str(max(1, min(workers, 8)))
 
 
 def run_finalize_command(

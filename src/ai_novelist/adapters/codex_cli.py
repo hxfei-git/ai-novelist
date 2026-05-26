@@ -164,6 +164,16 @@ class CodexCLIAdapter(AgentAdapter):
             return self._mock_scene_cards()
         if "AGENT: chapter_planner" in prompt:
             return self._mock_chapter_plan()
+        if "AGENT: direct_chapter_writer" in prompt:
+            return self._mock_chapter(revised=False)
+        if "AGENT: chapter_auto_reviser" in prompt:
+            return self._mock_chapter(revised=True)
+        if "AGENT: volume_consistency_checker" in prompt:
+            return json.dumps({"status": "pass", "summary": "卷内章节连续性通过。", "blocking_issues": [], "issues": []}, ensure_ascii=False)
+        if "AGENT: volume_blocker_reviser" in prompt:
+            return self._mock_chapter(revised=True)
+        if "AGENT: human_feedback_reviser" in prompt:
+            return self._mock_chapter(revised=True)
         if "AGENT: chapter_writer" in prompt:
             return self._mock_chapter(revised=self._is_revised_prompt(prompt))
         if "AGENT: dialogue_enhancer" in prompt:

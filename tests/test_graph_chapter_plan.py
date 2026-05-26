@@ -85,7 +85,7 @@ def test_collect_chapter_outline_returns_target_chapter_slice(tmp_path):
 def test_director_decision_treats_plan_chapters_as_plan_chapter_alias():
     decision = DirectorDecision.from_dict({"action": "plan_chapters", "task_args": {"chapter": 1}})
 
-    assert decision.action == "plan_chapter"
+    assert decision.action == "ask_user"
     assert decision.chapter == 1
 
 
@@ -95,12 +95,10 @@ def test_director_service_routes_chapter_planning(tmp_path):
     service = DirectorService(store, CodexCLIAdapter(mock=True), MockSearchBackend())
 
     first = service.handle_turn("demo", "规划第 1 章", channel="cli")
-    result = service.handle_turn("demo", "1", channel="cli")
 
-    assert first.choices
-    assert result.state.director_action == "plan_chapter"
-    assert result.state.active_graph == "chapter_plan"
-    assert store.chapter_card_path("demo", 1).exists()
+    assert not first.choices
+    assert first.state.director_action == "ask_user"
+    assert not store.chapter_card_path("demo", 1).exists()
 
 
 def test_chapter_plan_parallel_path_records_three_reports(tmp_path, monkeypatch):

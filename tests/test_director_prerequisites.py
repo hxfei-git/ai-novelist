@@ -23,9 +23,6 @@ def test_director_routes_finalize_and_export(tmp_path):
     store.save_state(state)
 
     run_confirmed(service, "demo", "写第 1 章")
-    run_confirmed(service, "demo", "审稿第 1 章")
-    run_confirmed(service, "demo", "修订第 1 章")
-    run_confirmed(service, "demo", "审稿第 1 章")
     finalized = run_confirmed(service, "demo", "定稿第 1 章")
 
     assert finalized.state.director_action == "finalize_chapter"
@@ -46,7 +43,8 @@ def test_director_write_chapter_auto_completes_prerequisites(tmp_path):
     result = run_confirmed(service, "demo", "写第 1 章")
 
     assert result.state.director_action == "write_chapter"
-    assert store.chapter_card_path("demo", 1).exists()
-    assert store.scene_cards_path("demo", 1).exists()
+    assert not store.chapter_card_path("demo", 1).exists()
+    assert not store.scene_cards_path("demo", 1).exists()
     assert store.chapter_draft_path("demo", 1, 1).exists()
-    assert "草稿已生成" in result.state.director_message
+    assert store.chapter_draft_path("demo", 1, 2).exists()
+    assert "自动修订" in result.state.director_message

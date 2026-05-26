@@ -38,21 +38,17 @@ MUTATING_ACTIONS = {
     "review_outline",
     "revise_outline",
     "compare_versions",
-    "plan_chapters",
-    "plan_chapter",
-    "plan_scenes",
     "write_chapter",
-    "review",
-    "review_chapter",
-    "revise_chapter",
     "finalize_chapter",
+    "write_volume",
+    "revise_volume",
     "export_project",
     "persist_outputs",
     "init_bible",
     "update_bible",
 }
 CONFIRMATION_ACTIONS = MUTATING_ACTIONS
-DIRECT_ACTIONS = {"chat", "ask_user", "show_status", "show_outline", "show_reference", "show_bible", "stop"}
+DIRECT_ACTIONS = {"chat", "ask_user", "show_status", "show_outline", "show_reference", "show_bible", "show_volume_status", "stop"}
 
 
 @dataclass
@@ -94,10 +90,8 @@ class DirectorDecision:
             action = "persist_outputs"
         if action == "plan_outline":
             action = "generate_outline"
-        if action == "plan_chapters":
-            action = "plan_chapter"
-        if action == "review":
-            action = "review_chapter"
+        if action in {"plan_chapters", "plan_chapter", "plan_scenes", "review", "review_chapter", "revise_chapter"}:
+            action = "ask_user"
         if action == "export":
             action = "export_project"
         if action in {"run_current_stage", "answer_pending_questions"}:
@@ -243,6 +237,9 @@ class DirectorService:
         outline_decision = deterministic_outline_stage_pre_model_decision(state)
         if outline_decision is not None:
             return outline_decision
+        chapter_decision = deterministic_chapter_pipeline_decision(state)
+        if chapter_decision is not None:
+            return chapter_decision
 
         prompt = build_service_director_prompt(state, self.store, channel)
         try:
@@ -272,12 +269,14 @@ class DirectorService:
                 result_state = NovelState.from_dict(persist_available_outputs(state.to_dict(), self.store))
         elif decision.action in {"init_bible", "update_bible"}:
             result_state = self._run_bible(state)
-        elif decision.action == "plan_chapter":
-            result_state = self._run_chapter_plan(state)
-        elif decision.action == "plan_scenes":
-            result_state = self._run_scene_plan(state)
         elif decision.action == "finalize_chapter":
             result_state = self._run_finalize(state)
+        elif decision.action == "write_volume":
+            result_state = self._run_volume_write(state)
+        elif decision.action == "revise_volume":
+            result_state = self._run_volume_revision(state)
+        elif decision.action == "show_volume_status":
+            result_state = show_volume_status_state(state, self.store)
         elif decision.action == "export_project":
             result_state = self._run_export(state)
         elif decision.action == "show_bible":
@@ -349,6 +348,18 @@ class DirectorService:
         graph = build_finalize_graph(self.adapter, self.store, progress=self.progress)
         return NovelState.from_dict(graph.invoke(state.to_dict()))
 
+    def _run_volume_write(self, state: NovelState) -> NovelState:
+        from ai_novelist.graph_volume_write import build_volume_write_graph
+
+        graph = build_volume_write_graph(self.adapter, self.store, progress=self.progress)
+        return NovelState.from_dict(graph.invoke(state.to_dict()))
+
+    def _run_volume_revision(self, state: NovelState) -> NovelState:
+        from ai_novelist.graph_volume_write import build_volume_revision_graph
+
+        graph = build_volume_revision_graph(self.adapter, self.store, progress=self.progress)
+        return NovelState.from_dict(graph.invoke(state.to_dict()))
+
     def _run_export(self, state: NovelState) -> NovelState:
         from ai_novelist.graph_export import build_export_graph
 
@@ -387,22 +398,33 @@ class DirectorService:
 
 
 
+def show_volume_status_state(state: NovelState, store: LocalStore) -> NovelState:
+    volume = int(state.director_task_args.get("volume") or 1)
+    batch_root = store.project_dir(state.project_id) / "chapters" / "batches" / f"volume_{volume:03d}"
+    manifests = sorted(batch_root.glob("*/manifest.json")) if batch_root.exists() else []
+    human_manifests = sorted(batch_root.glob("*/human_revision_manifest.json")) if batch_root.exists() else []
+    latest = (human_manifests or manifests)[-1] if (human_manifests or manifests) else None
+    if not latest:
+        state.director_message = f"第 {volume} 卷暂无批量生成记录。"
+    else:
+        state.director_message = f"第 {volume} 卷最新批次：{latest}"
+    state.director_action = "show_volume_status"
+    store.save_state(state)
+    return state
+
+
 def execution_plan_message(decision: DirectorDecision) -> str:
     chapter = decision.chapter or normalize_chapter(decision.task_args.get("chapter"))
     if decision.action == "write_chapter":
-        return f"将生成第 {chapter or 1} 章正文；缺少章节卡或场景卡时会先自动补齐。"
-    if decision.action == "review_chapter":
-        return f"将审稿第 {chapter or 1} 章，包含连续性、结构、人物、风格和读者反馈。"
-    if decision.action == "revise_chapter":
-        return f"将按审稿任务修订第 {chapter or 1} 章，并保存新版草稿。"
+        return f"将根据小说圣经和章节大纲生成第 {chapter or 1} 章，并自动做一轮一致性修订。"
     if decision.action == "finalize_chapter":
         return f"将定稿第 {chapter or 1} 章，生成摘要并更新小说圣经。"
     if decision.action == "export_project":
         return "将收集已定稿章节并导出 manuscript、volume 和 novel_bible。"
-    if decision.action == "plan_chapter":
-        return f"将把第 {chapter or 1} 章大纲细化为章节卡。"
-    if decision.action == "plan_scenes":
-        return f"将把第 {chapter or 1} 章章节卡拆成场景卡。"
+    if decision.action == "write_volume":
+        return f"将并行生成第 {decision.task_args.get('volume') or 1} 卷，自动修订后做卷级一致性总检。"
+    if decision.action == "revise_volume":
+        return f"将按人工审核意见并行修订第 {decision.task_args.get('volume') or 1} 卷。"
     if decision.action in {"init_bible", "update_bible"}:
         return "将基于当前稳定产物更新小说圣经。"
     if decision.action == "research":
@@ -695,6 +717,7 @@ def deterministic_chapter_pipeline_decision(state: NovelState) -> DirectorDecisi
         return None
     lowered = text.lower()
     chapter = extract_chapter_from_text(text) or state.current_chapter
+    volume = extract_volume_from_text(text) or 1
     wants_export = any(marker in text for marker in ("导出小说", "导出全文", "导出手稿")) or any(marker in lowered for marker in ("export novel", "export manuscript", "export"))
     if wants_export:
         return DirectorDecision(
@@ -704,6 +727,39 @@ def deterministic_chapter_pipeline_decision(state: NovelState) -> DirectorDecisi
             confidence=95,
             target="export",
             intent="export",
+        )
+    wants_volume_status = "卷" in text and any(marker in text for marker in ("状态", "进度", "生成记录"))
+    if wants_volume_status:
+        return DirectorDecision(
+            "show_volume_status",
+            requires_confirmation=False,
+            user_message=f"我会查看第 {volume} 卷批量生成状态。",
+            confidence=95,
+            task_args={"volume": volume},
+            target="volume",
+            intent="status",
+        )
+    wants_revise_volume = "卷" in text and any(marker in text for marker in ("人工意见", "审核意见", "修订", "修改"))
+    if wants_revise_volume:
+        return DirectorDecision(
+            "revise_volume",
+            requires_confirmation=True,
+            user_message=f"我会按人工审核意见修订第 {volume} 卷。",
+            confidence=90,
+            task_args={"volume": volume, "human_notes": text},
+            target="volume",
+            intent="revise",
+        )
+    wants_write_volume = "卷" in text and any(marker in text for marker in ("写", "生成", "批量", "一次性"))
+    if wants_write_volume:
+        return DirectorDecision(
+            "write_volume",
+            requires_confirmation=True,
+            user_message=f"我会并行生成第 {volume} 卷并做卷级一致性总检。",
+            confidence=92,
+            task_args={"volume": volume},
+            target="volume",
+            intent="create",
         )
     wants_finalize = (any(marker in text for marker in ("定稿", "最终稿")) and "章" in text) or "finalize chapter" in lowered
     if wants_finalize:
@@ -717,60 +773,30 @@ def deterministic_chapter_pipeline_decision(state: NovelState) -> DirectorDecisi
             intent="approve",
             chapter=chapter,
         )
-    wants_scene = "章" in text and ("场景" in text or "scene" in lowered)
-    if wants_scene:
+    if "章节卡" in text or "场景卡" in text:
         return DirectorDecision(
-            "plan_scenes",
+            "ask_user",
             requires_confirmation=False,
-            user_message=f"我会为第 {chapter} 章生成场景卡。",
-            confidence=95,
-            task_args={"chapter": chapter},
-            target="scene_cards",
-            intent="create",
-            chapter=chapter,
-        )
-    wants_chapter_card = "章节卡" in text or ("规划" in text and "章" in text and "场景" not in text) or "chapter card" in lowered
-    if wants_chapter_card:
-        return DirectorDecision(
-            "plan_chapter",
-            requires_confirmation=False,
-            user_message=f"我会为第 {chapter} 章生成章节卡。",
-            confidence=95,
-            task_args={"chapter": chapter},
-            target="chapter_card",
-            intent="create",
-            chapter=chapter,
-        )
-    wants_review = ("章" in text and any(marker in text for marker in ("审稿", "审查", "检查"))) or "review chapter" in lowered
-    if wants_review:
-        return DirectorDecision(
-            "review_chapter",
-            requires_confirmation=False,
-            user_message=f"我会审稿第 {chapter} 章。",
-            confidence=95,
-            task_args={"chapter": chapter},
+            user_message="章节卡和场景卡链路已下线。现在可以直接写章节或批量生成一卷。",
+            confidence=90,
             target="chapter",
-            intent="review",
-            chapter=chapter,
+            intent="answer",
         )
-    wants_revise = ("章" in text and any(marker in text for marker in ("修订", "修改", "重写", "改写"))) or "revise chapter" in lowered
-    if wants_revise:
+    if any(marker in text for marker in ("审稿", "审查", "检查")):
         return DirectorDecision(
-            "revise_chapter",
+            "ask_user",
             requires_confirmation=False,
-            user_message=f"我会修订第 {chapter} 章。",
-            confidence=95,
-            task_args={"chapter": chapter},
+            user_message="旧审稿链路已下线。请先查看自动修订稿，人工审核后可用 revise-volume 修订整卷。",
+            confidence=90,
             target="chapter",
-            intent="revise",
-            chapter=chapter,
+            intent="answer",
         )
     wants_write = ("章" in text and any(marker in text for marker in ("写", "生成正文", "正文"))) or "write chapter" in lowered
     if wants_write:
         return DirectorDecision(
             "write_chapter",
-            requires_confirmation=False,
-            user_message=f"我会生成第 {chapter} 章正文。",
+            requires_confirmation=True,
+            user_message=f"我会根据小说圣经和章节大纲生成第 {chapter} 章，并自动修订一轮。",
             confidence=95,
             task_args={"chapter": chapter},
             target="chapter",
@@ -778,7 +804,6 @@ def deterministic_chapter_pipeline_decision(state: NovelState) -> DirectorDecisi
             chapter=chapter,
         )
     return None
-
 
 def extract_chapter_from_text(text: str) -> int | None:
     match = re.search(r"第\s*(\d+)\s*章", text)
@@ -789,6 +814,16 @@ def extract_chapter_from_text(text: str) -> int | None:
         return max(1, int(match.group(1)))
     return None
 
+
+
+def extract_volume_from_text(text: str) -> int | None:
+    match = re.search(r"第\s*(\d+)\s*卷", text)
+    if match:
+        return max(1, int(match.group(1)))
+    match = re.search(r"volume\s*(\d+)", text, re.IGNORECASE)
+    if match:
+        return max(1, int(match.group(1)))
+    return None
 
 def deterministic_bible_decision(state: NovelState, store: LocalStore) -> DirectorDecision | None:
     text = state.user_request.strip()
@@ -1319,8 +1354,12 @@ def hydrate_decision_args(decision: DirectorDecision, state: NovelState) -> None
         query = first_text(decision.task_args, "research_query", "work_title", "author") or extract_research_query(state.user_request)
         if query:
             decision.task_args["research_query"] = query
-    if decision.action in {"plan_chapter", "plan_scenes", "write_chapter", "review", "review_chapter", "revise_chapter", "finalize_chapter"} and not decision.task_args.get("chapter"):
+    if decision.action in {"write_chapter", "finalize_chapter"} and not decision.task_args.get("chapter"):
         decision.task_args["chapter"] = state.current_chapter
+    if decision.action in {"write_volume", "revise_volume", "show_volume_status"} and not decision.task_args.get("volume"):
+        decision.task_args["volume"] = extract_volume_from_text(state.user_request) or 1
+    if decision.action == "revise_volume" and not decision.task_args.get("human_notes"):
+        decision.task_args["human_notes"] = decision.instruction or state.user_request
 
 
 def update_project_context(state: NovelState, store: LocalStore, decision: DirectorDecision) -> None:

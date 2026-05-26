@@ -5,31 +5,53 @@ from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
 
 
-def test_drafting_auto_completes_chapter_and_scene_cards(tmp_path):
+CHAPTER_OUTLINE = """## 章节大纲稿
+
+### 第一卷
+
+#### 卷内章节总体规划
+- 本卷建立月球城市、失忆工程师和维修站异常。
+
+#### 章节列表总表
+| 章节 | 标题 | profile | PacingTarget | 一句话概括 | 结尾状态 |
+| --- | --- | --- | --- | --- | --- |
+| 第 1 章 | 空白手稿 | 铺垫章 | function=setup, intensity=3, hook=soft | 主角在维修站醒来并发现异常记录。 | 留下审计编号异常。 |
+| 第 2 章 | 气闸倒计时 | 推进章 | function=turn, intensity=4, hook=hard | 主角追查东七气闸倒计时。 | 危机升级。 |
+"""
+
+
+def seed_chapter_outline(store: LocalStore, state: NovelState) -> None:
+    state.outline_stage_artifacts["chapter_outline"] = {"summary": CHAPTER_OUTLINE}
+    store.save_outline_artifact(state, "chapter_outline", CHAPTER_OUTLINE)
+    store.save_state(state)
+
+
+def test_drafting_uses_direct_chapter_outline_without_cards(tmp_path):
     store = LocalStore(tmp_path)
     state = store.create_project("Demo", "demo")
     state.idea = "月球城市失忆工程师"
     state.current_chapter = 1
-    store.save_state(state)
+    seed_chapter_outline(store, state)
 
     result = NovelState.from_dict(build_drafting_graph(CodexCLIAdapter(mock=True), store).invoke(state.to_dict()))
 
-    assert store.chapter_card_path("demo", 1).exists()
-    assert store.scene_cards_path("demo", 1).exists()
+    assert not store.chapter_card_path("demo", 1).exists()
+    assert not store.scene_cards_path("demo", 1).exists()
     assert store.chapter_draft_path("demo", 1, 1).exists()
+    assert store.chapter_draft_path("demo", 1, 2).exists()
     assert store.chapter_path("demo", 1).exists()
-    assert "空白手稿" in result.chapter_draft
-    assert result.active_graph == "drafting"
-    assert result.active_stage == "draft"
+    assert "修订版" in result.chapter_draft
+    assert result.active_graph == "chapter_write"
+    assert result.active_stage == "auto_revision"
     assert result.active_chapter == 1
-    assert any(item["type"] == "chapter_draft" and item["graph"] == "drafting" for item in result.artifact_registry)
+    assert any(item["type"] == "chapter_draft" and item["graph"] == "chapter_write" for item in result.artifact_registry)
 
 
-def test_legacy_write_chapter_wrapper_uses_drafting_graph(tmp_path):
+def test_legacy_write_chapter_wrapper_uses_direct_graph(tmp_path):
     store = LocalStore(tmp_path)
     state = store.create_project("Demo", "demo")
     state.current_chapter = 2
-    store.save_state(state)
+    seed_chapter_outline(store, state)
 
     result = build_writer_graph(
         CodexCLIAdapter(mock=True),
@@ -39,15 +61,17 @@ def test_legacy_write_chapter_wrapper_uses_drafting_graph(tmp_path):
     ).invoke(state.to_dict())
 
     assert result["review_status"] == "approved"
-    assert result["active_graph"] == "drafting"
+    assert result["active_graph"] == "chapter_write"
     assert store.chapter_draft_path("demo", 2, 1).exists()
+    assert store.chapter_draft_path("demo", 2, 2).exists()
     assert store.chapter_path("demo", 2).exists()
 
-def test_drafting_reports_progress_events(tmp_path):
+
+def test_drafting_reports_simplified_progress_events(tmp_path):
     store = LocalStore(tmp_path)
     state = store.create_project("Demo", "demo")
     state.current_chapter = 1
-    store.save_state(state)
+    seed_chapter_outline(store, state)
     events = []
 
     result = NovelState.from_dict(
@@ -58,43 +82,31 @@ def test_drafting_reports_progress_events(tmp_path):
         ).invoke(state.to_dict())
     )
 
-    assert result.active_graph == "drafting"
-    assert any(stage == "Drafting 1/8" for stage, _message in events)
-    assert any(stage == "ChapterPlan 1/9" for stage, _message in events)
-    assert any(stage == "SceneDesign 1/6" for stage, _message in events)
-    assert any(stage == "Drafting 8/8" for stage, _message in events)
+    assert result.active_graph == "chapter_write"
+    assert any(stage == "ChapterWrite 1/5" for stage, _message in events)
+    assert any(stage == "ChapterWrite 5/5" for stage, _message in events)
+    assert not any(stage.startswith("ChapterPlan") for stage, _message in events)
+    assert not any(stage.startswith("SceneDesign") for stage, _message in events)
 
-
-def test_drafting_uses_low_intensity_polishers_when_no_hard_hook(tmp_path):
-    store = LocalStore(tmp_path)
-    state = store.create_project("Demo", "demo")
-    state.current_chapter = 1
-    store.save_state(state)
-
-    result = NovelState.from_dict(build_drafting_graph(CodexCLIAdapter(mock=True), store).invoke(state.to_dict()))
-
-    agents = [item.get("agent") for item in result.last_agent_reports]
-    assert "restraint_polisher" in agents
-    assert "emotional_resonance_polisher" in agents
 
 class AlwaysFailAdapter:
     def complete(self, prompt, workspace, options=None):
         from ai_novelist.adapters.base import AgentAdapterError
 
-        raise AgentAdapterError("draft dependency failed")
+        raise AgentAdapterError("direct draft failed")
 
 
-def test_drafting_dependency_failure_does_not_save_draft_or_empty_cards(tmp_path):
+def test_drafting_failure_does_not_save_draft_or_cards(tmp_path):
     store = LocalStore(tmp_path)
     state = store.create_project("Demo", "demo")
     state.idea = "月球城市失忆工程师"
     state.current_chapter = 1
-    store.save_state(state)
+    seed_chapter_outline(store, state)
 
     result = NovelState.from_dict(build_drafting_graph(AlwaysFailAdapter(), store).invoke(state.to_dict()))
 
     assert result.review_status == "error"
-    assert result.error == "draft dependency failed"
+    assert result.error == "direct draft failed"
     assert not store.chapter_card_path("demo", 1).exists()
     assert not store.chapter_draft_path("demo", 1, 1).exists()
     assert store.load_state("demo").review_status == "error"

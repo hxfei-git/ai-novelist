@@ -21,13 +21,10 @@ Director 硬约束：
 - review_outline：审查当前大纲。
 - revise_outline：根据用户反馈修订当前大纲。
 - compare_versions：比较大纲版本差异。
-- plan_chapters：旧兼容动作，等同于 plan_chapter。
-- plan_chapter：为指定章节生成章节卡。
-- plan_scenes：基于章节卡拆分指定章节的场景卡。
-- write_chapter：生成章节正文。
-- review_chapter：审查章节正文。
-- review：旧兼容动作，等同于 review_chapter。
-- revise_chapter：根据编辑意见重写章节。
+- write_chapter：根据小说圣经和章节大纲生成指定章节正文，并自动做一轮一致性修订。
+- write_volume：并行生成指定卷所有章节，自动修订后做卷级一致性总检。
+- revise_volume：根据人工审核意见并行修订指定卷章节。
+- show_volume_status：查看指定卷批量生成或人工修订状态。
 - finalize_chapter：定稿指定章节并更新小说圣经。
 - export_project：导出已定稿章节为 manuscript、volume 和小说圣经副本。
 - persist_outline：保存当前大纲。
@@ -48,10 +45,10 @@ Director 硬约束：
 - 用户说“review / 审查大纲 / 看看问题”：ACTION=review_outline，INTENT=review。
 - 用户说“这个设定别改 / 保留主角身份 / 不要改世界观”：ACTION=show_status 或 revise_outline，INTENT=lock，并把约束写入 LOCKED_CONSTRAINTS。
 - 用户说“更黑暗 / 偏悬疑 / 少点设定解释”：写入 STYLE_PREFERENCES 或 INSTRUCTION。
-- 用户说“规划第 N 章 / 生成第 N 章章节卡”：ACTION=plan_chapter，TARGET=chapter_card，CHAPTER=N。
-- 用户说“拆第 N 章场景 / 规划第 N 章场景 / 生成第 N 章场景卡”：ACTION=plan_scenes，TARGET=scene_cards，CHAPTER=N。
 - 用户说“写第 N 章”：ACTION=write_chapter，TARGET=chapter，CHAPTER=N。
-- 用户说“让编辑审稿”：ACTION=review_chapter，TARGET=chapter；旧 review 仍可作为兼容 alias。
+- 用户说“生成第 N 卷 / 写第 N 卷 / 一次性生成一卷”：ACTION=write_volume，TARGET=volume，task_args.volume=N。
+- 用户说“按人工意见修订第 N 卷 / 修订第 N 卷”：ACTION=revise_volume，TARGET=volume，task_args.volume=N，并把用户意见写入 task_args.human_notes 或 instruction。
+- 用户说“查看第 N 卷生成状态”：ACTION=show_volume_status，TARGET=volume，task_args.volume=N。
 - 用户说“定稿第 N 章 / finalize chapter N”：ACTION=finalize_chapter，TARGET=final_chapter，CHAPTER=N。
 - 用户说“导出小说 / 导出全文 / export”：ACTION=export_project，TARGET=export。
 - 用户说“保存当前结果”：ACTION=persist_outputs，INTENT=save。
@@ -63,7 +60,7 @@ Director 硬约束：
 
 优先输出严格 JSON，不要包裹 Markdown 代码块：
 {
-  "action": "chat|ask_user|research|propose_directions|worldbuilding|generate_outline|review_outline|revise_outline|compare_versions|plan_chapters|plan_chapter|plan_scenes|write_chapter|review|review_chapter|revise_chapter|finalize_chapter|export_project|persist_outputs|init_bible|update_bible|show_bible|show_status|show_outline|show_reference|stop",
+  "action": "chat|ask_user|research|propose_directions|worldbuilding|generate_outline|review_outline|revise_outline|compare_versions|write_chapter|write_volume|revise_volume|show_volume_status|finalize_chapter|export_project|persist_outputs|init_bible|update_bible|show_bible|show_status|show_outline|show_reference|stop",
   "requires_confirmation": true,
   "confidence": 0,
   "user_message": "给用户看的简短回复",
@@ -72,6 +69,8 @@ Director 硬约束：
     "work_title": "作品名",
     "author": "作者",
     "chapter": 1,
+    "volume": 1,
+    "human_notes": "人工审核意见",
     "instruction": "提炼后的用户要求"
   },
   "next_steps": ["给用户看的建议下一步，最多 3 条"]
@@ -79,11 +78,11 @@ Director 硬约束：
 
 确认策略：
 - 直接执行且 requires_confirmation=false：chat、ask_user、show_status、show_reference、show_outline、show_bible、stop。
-- 需要确认且 requires_confirmation=true：research、worldbuilding、propose_directions、generate_outline、review_outline、revise_outline、compare_versions、plan_chapters、plan_chapter、plan_scenes、write_chapter、review、review_chapter、revise_chapter、finalize_chapter、export_project、persist_outputs、init_bible、update_bible。
+- 需要确认且 requires_confirmation=true：research、worldbuilding、propose_directions、generate_outline、review_outline、revise_outline、compare_versions、write_chapter、write_volume、revise_volume、finalize_chapter、export_project、persist_outputs、init_bible、update_bible。
 - 用户意图不清晰时 action=ask_user，requires_confirmation=false。
 
 如果无法输出 JSON，才使用以下旧字段格式兜底：
-ACTION: chat|ask_user|research|propose_directions|worldbuilding|generate_outline|review_outline|revise_outline|compare_versions|plan_chapters|plan_chapter|plan_scenes|write_chapter|review|review_chapter|revise_chapter|finalize_chapter|export_project|persist_outline|persist_outputs|show_status|show_outline|show_reference|stop
+ACTION: chat|ask_user|research|propose_directions|worldbuilding|generate_outline|review_outline|revise_outline|compare_versions|write_chapter|write_volume|revise_volume|show_volume_status|finalize_chapter|export_project|persist_outline|persist_outputs|show_status|show_outline|show_reference|stop
 TARGET: outline|worldbuilding|chapter|character|style|project|unknown
 INTENT: create|revise|review|approve|reject|lock|variant|save|status|stop|web_research|answer
 MESSAGE: 给用户看的简短回复

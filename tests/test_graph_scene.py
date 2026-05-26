@@ -53,12 +53,10 @@ def test_director_service_routes_scene_planning(tmp_path):
     service = DirectorService(store, CodexCLIAdapter(mock=True), MockSearchBackend())
 
     first = service.handle_turn("demo", "规划第 1 章场景", channel="cli")
-    result = service.handle_turn("demo", "1", channel="cli")
 
-    assert first.choices
-    assert result.state.director_action == "plan_scenes"
-    assert result.state.active_graph == "scene"
-    assert store.scene_cards_path("demo", 1).exists()
+    assert not first.choices
+    assert first.state.director_action == "ask_user"
+    assert not store.scene_cards_path("demo", 1).exists()
 
 class AlwaysFailAdapter:
     def complete(self, prompt, workspace, options=None):

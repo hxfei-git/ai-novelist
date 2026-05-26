@@ -88,10 +88,9 @@ Director 可路由动作：
 - `ask_user`：追问缺失信息。
 - `worldbuilding`：进入 outline 的 `worldbuilding` 阶段。
 - `generate_outline` / `revise_outline` / `review_outline`：调度交互式大纲共创节点。
-- `plan_chapter` / `plan_scenes`：生成章节卡和场景卡。
-- `write_chapter`：自动补齐章节卡/场景卡并生成章节草稿。
-- `review_chapter`：调度多编辑审稿，旧 `review` 仍兼容。
-- `revise_chapter`：按审稿任务定向修订章节。
+- `write_chapter`：根据小说圣经和章节大纲直接生成章节正文，并自动做一轮一致性修订。
+- `write_volume`：并行生成指定卷章节，自动修订后做卷级一致性总检。
+- `revise_volume`：按人工审核意见并行修订指定卷。
 - `finalize_chapter`：保存定稿章节、章节摘要，并更新小说圣经。
 - `export_project`：导出已定稿章节为 manuscript / volume / novel_bible。
 - `persist_outputs`：保存当前已有产物。
@@ -105,9 +104,8 @@ Director 可路由动作：
 
 ```text
 写第 1 章
-审稿第 1 章
-修订第 1 章
-审稿第 1 章
+批量生成第 1 卷
+按这些人工审核意见修订第 1 卷：...
 定稿第 1 章
 导出小说
 ```
@@ -116,7 +114,8 @@ Director 可路由动作：
 
 ```bash
 .venv/bin/ai-novelist write-chapter --project demo --chapter 1 --mock --auto-approve
-.venv/bin/ai-novelist review --project demo --chapter 1 --mock --auto-approve
+.venv/bin/ai-novelist write-volume --project demo --volume 1 --mock --max-workers 3
+.venv/bin/ai-novelist revise-volume --project demo --volume 1 --notes notes.md --mock --max-workers 3
 .venv/bin/ai-novelist finalize-chapter --project demo --chapter 1 --mock --auto-approve
 .venv/bin/ai-novelist export --project demo
 ```
@@ -124,13 +123,12 @@ Director 可路由动作：
 关键产物路径：
 
 ```text
-projects/<project>/chapters/chapter_001/chapter_card.md
-projects/<project>/chapters/chapter_001/scene_cards.md
-projects/<project>/chapters/chapter_001/draft_v1.md
-projects/<project>/chapters/chapter_001/review_v1.md
-projects/<project>/chapters/chapter_001/review_v1.json
-projects/<project>/chapters/chapter_001/revision_plan_v1.md
-projects/<project>/chapters/chapter_001/draft_v2.md
+projects/<project>/chapters/chapter_001/draft_v1.md      # 直接初稿
+projects/<project>/chapters/chapter_001/draft_v2.md      # 自动一致性修订稿
+projects/<project>/chapters/chapter_001/draft_v3.md      # 卷级总检或人工意见修订稿（按需）
+projects/<project>/chapters/batches/volume_001/<run_id>/manifest.json
+projects/<project>/chapters/batches/volume_001/<run_id>/consistency_report_v1.json
+projects/<project>/chapters/batches/volume_001/<run_id>/human_revision_manifest.json
 projects/<project>/chapters/chapter_001/final.md
 projects/<project>/chapters/chapter_001/summary.md
 projects/<project>/novel_bible.md
@@ -138,6 +136,8 @@ projects/<project>/exports/manuscript.md
 projects/<project>/exports/volume_001.md
 projects/<project>/exports/novel_bible.md
 ```
+
+章节卡、场景卡和旧多编辑审稿链路不再是默认写作路径。新的章节正文只依赖小说圣经、锁定约束和章节大纲切片。
 
 `--mock` 下完整闭环不调用真实模型，适合本地验证。
 

@@ -21,6 +21,8 @@ def prepared_review(tmp_path, max_revisions=1):
 
 def test_revision_generates_plan_and_draft_v2(tmp_path):
     store, state = prepared_review(tmp_path)
+    state.revision_count = 0
+    store.save_state(state)
 
     result = NovelState.from_dict(build_revision_graph(CodexCLIAdapter(mock=True), store).invoke(state.to_dict()))
 
@@ -48,7 +50,8 @@ def test_revision_stops_at_max_revisions(tmp_path):
 
     assert result.review_status == "stopped"
     assert "最大修订次数" in result.director_message
-    assert not store.chapter_draft_path("demo", 1, 2).exists()
+    assert store.chapter_draft_path("demo", 1, 2).exists()
+    assert not store.revision_plan_path("demo", 1, 1).exists()
 
 class AlwaysFailAdapter:
     def complete(self, prompt, workspace, options=None):
@@ -59,11 +62,14 @@ class AlwaysFailAdapter:
 
 def test_revision_agent_failure_does_not_save_revised_draft(tmp_path):
     store, state = prepared_review(tmp_path)
+    state.revision_count = 0
+    store.save_state(state)
 
     result = NovelState.from_dict(build_revision_graph(AlwaysFailAdapter(), store).invoke(state.to_dict()))
 
     assert result.review_status == "error"
     assert result.error == "revision agent failed"
     assert not store.revision_plan_path("demo", 1, 1).exists()
-    assert not store.chapter_draft_path("demo", 1, 2).exists()
+    assert store.chapter_draft_path("demo", 1, 2).exists()
+    assert not store.revision_plan_path("demo", 1, 1).exists()
     assert store.load_state("demo").review_status == "error"
