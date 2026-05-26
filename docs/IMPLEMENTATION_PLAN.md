@@ -69,7 +69,7 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
 
 大纲 Web 流程不再让 Director 猜测阶段。前端请求显式携带 `stage` 与 action：`generate` 直接调用 `run_outline_stage_node`，`lock` 直接调用 `advance_outline_stage_node`。阶段内容保存会同步 `outline/<stage>.md`、`outline_stages/<stage>.md`、`state.json` 中的轻量 artifact；`worldbuilding` 额外同步根目录 `worldbuilding.md`。
 
-章节页 API 复用 `build_volume_write_graph()`，`POST /api/projects/{project_id}/chapters/generate-batch` 会把 `{ volume, chapters, max_workers }` 写入 `director_task_args`，并设置并发环境变量。
+章节页 API 复用 `build_volume_write_graph()`，`POST /api/projects/{project_id}/chapters/generate-batch` 会把 `{ volume, chapters, max_workers }` 写入 `director_task_args`，并设置并发环境变量。Web 前端不传 `mock` 字段，真实/mock 模式只由后端启动参数决定；不带 `--mock` 启动时与 `ai-novelist chat --project ...` 一样走真实模型配置。重复生成已存在章节时，批量写作图追加新的 `draft_vN.md`，不覆盖旧 draft，旧路径 `chapter_###.md` 作为最新正文副本同步更新。
 
 全章节审查第一版是文件安全流程：`review-all` 只扫描最新 final/draft 并写 `chapters/global_consistency/<run_id>/report.json` 与 `.md`，不改正文；`repair-proposals` 只为 serious 问题写 `chapters/chapter_###/proposed_repair_<run_id>.md`；`apply-repair` 才把用户确认的 proposed repair 另存为新的 `draft_vN.md`，同时保留原 draft。
 

@@ -70,9 +70,21 @@ async function streamAction(path: string, body: unknown, onProgress: (line: stri
     const events = buffer.split('\n\n');
     buffer = events.pop() || '';
     for (const event of events) {
-      const dataLine = event.split('\n').find((line) => line.startsWith('data: '));
+      const lines = event.split('\n');
+      const eventLine = lines.find((line) => line.startsWith('event: '));
+      const dataLine = lines.find((line) => line.startsWith('data: '));
       if (!dataLine) continue;
-      onProgress(dataLine.slice(6));
+      const data = dataLine.slice(6);
+      if (eventLine?.slice(7) === 'error') {
+        try {
+          const parsed = JSON.parse(data);
+          throw new Error(parsed.error || data);
+        } catch (error) {
+          if (error instanceof Error && error.message !== data) throw error;
+          throw new Error(data);
+        }
+      }
+      onProgress(data);
     }
   }
 }
@@ -97,6 +109,7 @@ function App() {
   const [chapterDetail, setChapterDetail] = useState<Chapter | null>(null);
   const [loadingChapter, setLoadingChapter] = useState(false);
   const [review, setReview] = useState<any>(null);
+  const [reviewRunning, setReviewRunning] = useState(false);
 
   const stageRequestRef = useRef(0);
   const chapterRequestRef = useRef(0);
@@ -167,7 +180,7 @@ function App() {
   async function runStage(action: 'generate' | 'lock') {
     await streamAction(
       `/api/projects/${projectId}/outline/stages/${activeStage}/${action}`,
-      { instruction, mock: true },
+      { instruction },
       (line) => setLog((items) => [line, ...items].slice(0, 10)),
     );
     await refreshStages();
@@ -198,25 +211,33 @@ function App() {
   async function generateBatch() {
     await streamAction(
       `/api/projects/${projectId}/chapters/generate-batch`,
-      { volume, chapters: chapterSelector, max_workers: maxWorkers, mock: true },
+      { volume, chapters: chapterSelector, max_workers: maxWorkers },
       (line) => setLog((items) => [line, ...items].slice(0, 10)),
     );
     await refreshChapters(true);
   }
 
   async function reviewAll() {
-    await streamAction(`/api/projects/${projectId}/chapters/review-all`, { mock: true }, (line) =>
-      setLog((items) => [line, ...items].slice(0, 10)),
-    );
-    const latest = await api<any>(`/api/projects/${projectId}/chapters/review-all/latest`);
-    setReview(latest);
+    setReviewRunning(true);
+    setReview(null);
+    setLog((items) => ['章节总体审查已开始', ...items].slice(0, 10));
+    try {
+      await streamAction(`/api/projects/${projectId}/chapters/review-all`, {}, (line) =>
+        setLog((items) => [line, ...items].slice(0, 10)),
+      );
+      const latest = await api<any>(`/api/projects/${projectId}/chapters/review-all/latest`);
+      setReview(latest);
+      setLog((items) => [`章节总体审查完成：${latest.summary || '无摘要'}`, ...items].slice(0, 10));
+    } finally {
+      setReviewRunning(false);
+    }
   }
 
   async function repairProposals() {
     if (!review?.run_id) return;
     const result = await api<any>(`/api/projects/${projectId}/chapters/review-all/${review.run_id}/repair-proposals`, {
       method: 'POST',
-      body: JSON.stringify({ mock: true }),
+      body: JSON.stringify({}),
     });
     setLog((items) => [`repair proposals: ${result.proposals.length}`, ...items].slice(0, 10));
   }
@@ -322,9 +343,10 @@ function App() {
             <>
               <header className="toolbar"><div><h1>章节总体审查</h1><p>审查已生成章节之间的连续性、设定一致性、人物状态、时间线、重复/断裂问题</p></div></header>
               <div className="review-actions">
-                <button onClick={reviewAll}><Check size={16} />开始审查</button>
-                <button onClick={repairProposals} disabled={!review?.run_id}><RefreshCw size={16} />生成修复草稿</button>
+                <button onClick={reviewAll} disabled={reviewRunning}><Check size={16} />{reviewRunning ? '审查中' : '开始审查'}</button>
+                <button onClick={repairProposals} disabled={reviewRunning || !review?.run_id}><RefreshCw size={16} />生成修复草稿</button>
               </div>
+              {reviewRunning && <div className="loading">章节总体审查正在运行...</div>}
               {review && <ReviewReport review={review} />}
             </>
           )}

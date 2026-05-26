@@ -246,11 +246,14 @@ def save_volume_drafts_node(data: dict, store: LocalStore) -> dict:
         chapter = item.chapter
         draft1 = str(v1.get(str(chapter), "")).strip()
         draft2 = str(v2.get(str(chapter), "")).strip()
+        version = next_chapter_draft_version(state, store, chapter, default=1)
         if draft1:
-            write_chapter_version(state, store, chapter, draft1, 1, "direct_chapter_writer", "draft")
+            path = write_chapter_version(state, store, chapter, draft1, version, "direct_chapter_writer", "draft")
+            latest[str(chapter)] = {"version": version, "path": path}
+            version += 1
         if draft2:
-            path = write_chapter_version(state, store, chapter, draft2, 2, "chapter_auto_reviser", "auto_revision")
-            latest[str(chapter)] = {"version": 2, "path": path}
+            path = write_chapter_version(state, store, chapter, draft2, version, "chapter_auto_reviser", "auto_revision")
+            latest[str(chapter)] = {"version": version, "path": path}
     state.director_task_args["batch_latest_drafts"] = latest
     state.active_stage = "save_drafts"
     state.artifact_registry = [item.to_dict() for item in load_artifacts(store.project_dir(state.project_id))][-20:]
@@ -316,8 +319,9 @@ def repair_volume_blockers_node(data: dict, adapter: AgentAdapter, store: LocalS
     repaired: list[int] = []
     for result in results:
         chapter = int(result.key)
-        path = write_chapter_version(state, store, chapter, normalize_markdown(result.output), 3, "volume_blocker_reviser", "consistency_repair")
-        state.director_task_args.setdefault("batch_latest_drafts", {})[str(chapter)] = {"version": 3, "path": path}
+        version = next_chapter_draft_version(state, store, chapter, default=1)
+        path = write_chapter_version(state, store, chapter, normalize_markdown(result.output), version, "volume_blocker_reviser", "consistency_repair")
+        state.director_task_args.setdefault("batch_latest_drafts", {})[str(chapter)] = {"version": version, "path": path}
         repaired.append(chapter)
     state.director_task_args["batch_repaired_chapters"] = repaired
     state.active_stage = "repair"
@@ -654,21 +658,37 @@ def group_issues_by_chapter(issues: Any) -> dict[int, list[dict[str, Any]]]:
 
 
 def load_latest_chapter_draft(state: NovelState, store: LocalStore, chapter: int) -> str:
-    for version in (4, 3, 2, 1):
-        path = store.chapter_draft_path(state.project_id, chapter, version)
-        if path.exists():
-            return path.read_text(encoding="utf-8")
+    latest = latest_chapter_draft_path(state, store, chapter)
+    if latest:
+        return latest.read_text(encoding="utf-8")
     legacy = store.chapter_path(state.project_id, chapter)
     if legacy.exists():
         return legacy.read_text(encoding="utf-8")
     return ""
 
 
+def latest_chapter_draft_path(state: NovelState, store: LocalStore, chapter: int) -> Path | None:
+    chapter_dir = store.chapter_artifact_dir(state.project_id, chapter)
+    if not chapter_dir.exists():
+        return None
+    drafts: list[tuple[int, Path]] = []
+    for path in chapter_dir.glob("draft_v*.md"):
+        match = re.fullmatch(r"draft_v(\d+)\.md", path.name)
+        if match:
+            drafts.append((int(match.group(1)), path))
+    return max(drafts, key=lambda item: item[0])[1] if drafts else None
+
+
+def next_chapter_draft_version(state: NovelState, store: LocalStore, chapter: int, *, default: int) -> int:
+    latest = latest_chapter_draft_path(state, store, chapter)
+    if not latest:
+        return default
+    match = re.fullmatch(r"draft_v(\d+)\.md", latest.name)
+    return int(match.group(1)) + 1 if match else default
+
+
 def next_revision_version(state: NovelState, store: LocalStore, chapter: int) -> int:
-    for version in range(8, 0, -1):
-        if store.chapter_draft_path(state.project_id, chapter, version).exists():
-            return version + 1
-    return 3
+    return next_chapter_draft_version(state, store, chapter, default=3)
 
 
 def load_human_notes(state: NovelState) -> str:

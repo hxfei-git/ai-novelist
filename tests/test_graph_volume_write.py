@@ -73,3 +73,25 @@ def test_volume_revision_uses_human_notes_and_saves_new_versions(tmp_path, monke
     assert store.chapter_draft_path("demo", 2, 3).exists()
     manifest = next((tmp_path / "demo" / "chapters" / "batches" / "volume_001").glob("*/human_revision_manifest.json"))
     assert manifest.exists()
+
+
+def test_volume_write_appends_new_draft_versions_on_rerun(tmp_path, monkeypatch):
+    monkeypatch.setenv("AI_NOVELIST_PARALLEL_AGENTS", "1")
+    store, state = seed_project(tmp_path)
+    state.director_task_args = {"volume": 1}
+    store.save_state(state)
+
+    first = NovelState.from_dict(build_volume_write_graph(CodexCLIAdapter(mock=True), store).invoke(state.to_dict()))
+    first.director_task_args = {"volume": 1}
+    store.save_state(first)
+
+    result = NovelState.from_dict(build_volume_write_graph(CodexCLIAdapter(mock=True), store).invoke(first.to_dict()))
+
+    assert store.chapter_draft_path("demo", 1, 1).exists()
+    assert store.chapter_draft_path("demo", 1, 2).exists()
+    assert store.chapter_draft_path("demo", 1, 3).exists()
+    assert store.chapter_draft_path("demo", 1, 4).exists()
+    assert store.chapter_draft_path("demo", 2, 4).exists()
+    assert result.director_task_args["batch_latest_drafts"]["1"]["version"] == 4
+    assert result.director_task_args["batch_latest_drafts"]["2"]["version"] == 4
+
