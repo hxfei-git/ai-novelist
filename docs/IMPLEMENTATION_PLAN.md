@@ -2556,3 +2556,13 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - `.venv/bin/python -m pytest tests/test_director_service.py`：37 passed。
 - `.venv/bin/python -m pytest tests/test_director_service.py tests/test_outline_collaboration.py`：91 passed。
 - `.venv/bin/python -m pytest`：323 passed。
+
+## 2026-05-26 Web Review Secondary Tab Styling
+
+目标：完成大纲与章节审查工作区的二级标签视觉样式，使 `workspace-tabs`、`sidebar-note` 和 `review-workspace` 与现有密集工具 UI 保持一致。
+
+已完成：
+- `web/frontend/src/styles.css` 新增二级工作区标签样式，包括 active、disabled 和数量徽标状态。
+- 新增章节侧栏提示样式，章节子视图切换继续保留在主工作区顶部。
+- 新增审查工作区 flex 容器样式，供大纲和章节总体审查面板复用。
+

@@ -2352,3 +2352,10 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - 章节总体审查页按章节分组展示建议，用户可取消单条建议，并按章点击“提交修改”生成新的 `draft_vN.md`。
 - `apply-repair` 现在接收 `selected_issue_ids`，只把该章勾选的建议注入修复 prompt；旧 `repair-proposals` 路由保留为兼容读取建议。
 - 验证：`.venv/bin/python -m pytest tests/test_web_service.py` 通过；`npm --prefix web/frontend run build` 通过。
+
+### 2026-05-26 工作区二级标签样式
+
+- 为 Web 前端新增 `workspace-tabs`、`sidebar-note` 和 `review-workspace` 样式，覆盖大纲/章节工作区二级标签、章节侧栏提示和审查工作区容器。
+- 类名冲突检查：`rg -n "workspace-tabs|sidebar-note|review-workspace" web/frontend/src/styles.css web/frontend/src/main.tsx`，类名仅出现在样式定义和预期 JSX 位置。
+- 验证：`npm --prefix web/frontend run build` 通过。
+
