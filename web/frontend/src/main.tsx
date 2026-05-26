@@ -587,7 +587,7 @@ function OutlineReviewWorkspace({
 }) {
   const hasReview = Boolean(review);
   return (
-    <section className="outline-review-panel">
+    <section className="review-workspace outline-review-panel">
       <header className="toolbar">
         <div>
           <h1>大纲总体审查</h1>

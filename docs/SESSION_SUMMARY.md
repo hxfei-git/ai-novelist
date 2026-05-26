@@ -96,7 +96,7 @@
 
 已实现的 API/服务能力：项目列表与创建、项目 state 读取、大纲阶段列表/读取/保存、显式阶段生成、显式阶段锁定、批量章节生成、全章节审查、读取最新审查报告、直接生成默认全选的按章修改建议、按章提交应用修复。大纲生成/锁定直接调用既有 outline 节点，Web 请求显式传入 stage，避免 chat/Director 猜路由。
 
-新增 `web/frontend/` Vite + React + TypeScript 前端壳，并在本轮修订为两栏信息架构：一级只保留`大纲`和`章节`。大纲栏内显示大纲阶段编辑器；`review_lock` 不再作为普通阶段或必经步骤出现，大纲总体审查改为工具栏中的独立按钮和结果面板。章节栏内显示`章节批量生成`、`已生成章节`和`章节总体审查`（复用 `chapters/review-all` 连贯性审查）。阶段切换和章节切换现在使用 no-store 请求与请求 token，避免旧响应覆盖当前内容。
+新增 `web/frontend/` Vite + React + TypeScript 前端壳，并在本轮修订为两栏信息架构：一级只保留`大纲`和`章节`。Web UI 使用工作区二级标签：大纲为 `阶段编辑 / 总体审查`；章节为 `批量生成 / 已生成章节 / 总体审查`。大纲栏内显示大纲阶段编辑器；`review_lock` 不再作为普通阶段或必经步骤出现。大纲阶段编辑工具栏只保留阶段动作 `保存 / 生成/修订 / 锁定`；大纲总体审查在独立二级标签中运行，可在任意阶段基于当前已有 outline artifacts 发起审查。章节总体审查已从左侧导航移入章节工作区二级标签，并继续复用 `chapters/review-all` 连贯性审查。后端 API 审计确认既有大纲/章节审查端点已覆盖加载最新审查、运行审查和显式采纳应用，本次没有新增后端 endpoint。阶段切换和章节切换现在使用 no-store 请求与请求 token，避免旧响应覆盖当前内容。
 
 全章节审查与修复保持非破坏性：审查先做本地完整性扫描，再调用 `global_consistency_reviewer` 模型检查跨章连续性、设定一致性、人物状态和时间线；模型失败时回退本地扫描并在报告中记录 `model_review_error`。审查只写 `chapters/global_consistency/<run_id>/report.json` 和 `.md`，报告直接包含 `repair_suggestions`；前端按章节展示默认全选的修改建议，用户可取消单条建议，并按章提交修改。只有调用 apply repair 后才生成新的 `draft_vN.md`。章节读取 API：`GET /api/projects/{project_id}/chapters` 和 `GET /api/projects/{project_id}/chapters/{chapter}`，按 `final.md > 最高 draft_vN.md > chapter_###.md` 读取最新正文，生成批次完成后前端刷新章节列表并选中新章节。本轮进一步修复 Web 前端强制 `mock: true` 的问题，前端现在跟随后端启动模式；重复生成已有章节会追加更高 `draft_vN`，保留旧 mock 草稿但让最新正文指向真实新版本。章节总体审查增加运行中、完成摘要和 SSE 错误反馈；右侧进度日志按项目缓存在浏览器 localStorage 中，刷新页面后会恢复最近 10 条，并自动读取最新章节审查报告。
 
@@ -2353,9 +2353,13 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - `apply-repair` 现在接收 `selected_issue_ids`，只把该章勾选的建议注入修复 prompt；旧 `repair-proposals` 路由保留为兼容读取建议。
 - 验证：`.venv/bin/python -m pytest tests/test_web_service.py` 通过；`npm --prefix web/frontend run build` 通过。
 
-### 2026-05-26 工作区二级标签样式
+### 2026-05-26 大纲/章节审查二级标签
 
-- 为 Web 前端新增 `workspace-tabs`、`sidebar-note` 和 `review-workspace` 样式，覆盖大纲/章节工作区二级标签、章节侧栏提示和审查工作区容器。
-- 类名冲突检查：`rg -n "workspace-tabs|sidebar-note|review-workspace" web/frontend/src/styles.css web/frontend/src/main.tsx`，类名仅出现在样式定义和预期 JSX 位置。
-- 验证：`npm --prefix web/frontend run build` 通过。
+- Web UI 使用工作区二级标签：大纲为 `阶段编辑 / 总体审查`；章节为 `批量生成 / 已生成章节 / 总体审查`。
+- 大纲阶段编辑工具栏只保留阶段动作 `保存 / 生成/修订 / 锁定`。
+- 大纲总体审查在独立二级标签中运行，可在任意阶段基于已有 outline artifacts 发起审查。
+- 章节总体审查已从左侧导航移入章节工作区二级标签。
+- 后端 API 审计确认既有大纲/章节审查端点已覆盖加载最新审查、运行审查和显式采纳应用，没有新增后端 endpoint。
+- `review-workspace` 类用于大纲总体审查工作区根节点；章节审查继续使用既有 review report、repair board 和 action 样式。
+- 验证：`git diff --check` 通过；`.venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py -q` 3 passed；`npm --prefix web/frontend run build` 通过。
 

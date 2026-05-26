@@ -73,7 +73,7 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
 
 全章节审查是文件安全流程：`review-all` 先对最新 final/draft 做本地完整性扫描，再在存在章节正文时调用 `global_consistency_reviewer` 模型审查跨章连续性、设定一致性、人物状态和时间线问题；模型失败时保留本地扫描并记录 `model_review_error`。审查只写 `chapters/global_consistency/<run_id>/report.json` 与 `.md`，不改正文；报告会直接包含 `repair_suggestions`，前端按章节展示默认全选的修改建议；用户按章点击“提交修改”时，`apply-repair` 只使用该章当前勾选的建议生成新的 `draft_vN.md`，同时保留原 draft。`repair-proposals` 保留为兼容接口，主流程不再需要先生成 proposed repair 文件。
 
-前端位于 `web/frontend/`，使用 Vite + React + TypeScript。当前信息架构收敛为两个一级大栏：`大纲` 和 `章节`。`大纲`栏只承载方向定位、世界观设定、人物关系、故事流程、分卷大纲和章节大纲；`review_lock` 不再作为普通阶段展示，也不再是主流程必经项。大纲总体审查改为阶段编辑器工具栏里的独立按钮，调用 `/api/projects/{project_id}/outline/review` 生成审查报告，报告持久化在 `outline/reviews/<run_id>/report.json` 与 `.md`；用户确认“采纳修改”后再调用 `/api/projects/{project_id}/outline/review/{run_id}/apply`，把修订结果同步回相关阶段 artifact 和根目录 `outline.md`。旧项目中已有的 `review_lock` artifact 继续可读，但只作为兼容数据，不参与 Web 左侧阶段链。`章节`栏承载章节批量生成、已生成章节列表和`章节总体审查`；章节总体审查继续复用 `/chapters/review-all` 全章节连贯性审查，不受大纲审查拆分影响。
+前端位于 `web/frontend/`，使用 Vite + React + TypeScript。当前信息架构收敛为两个一级大栏：`大纲` 和 `章节`。Web UI 使用工作区二级标签组织功能：大纲工作区为 `阶段编辑 / 总体审查`，章节工作区为 `批量生成 / 已生成章节 / 总体审查`。`大纲`栏只承载方向定位、世界观设定、人物关系、故事流程、分卷大纲和章节大纲；`review_lock` 不再作为普通阶段展示，也不再是主流程必经项。大纲阶段编辑工具栏只保留阶段动作 `保存 / 生成/修订 / 锁定`。大纲总体审查在独立二级标签中运行，可在任意阶段基于当前已有 outline artifacts 发起审查，调用 `/api/projects/{project_id}/outline/review` 生成审查报告，报告持久化在 `outline/reviews/<run_id>/report.json` 与 `.md`；用户确认“采纳修改”后再调用 `/api/projects/{project_id}/outline/review/{run_id}/apply`，把修订结果同步回相关阶段 artifact 和根目录 `outline.md`。旧项目中已有的 `review_lock` artifact 继续可读，但只作为兼容数据，不参与 Web 左侧阶段链。章节总体审查已从左侧导航移入章节工作区二级标签，并继续复用 `/chapters/review-all` 全章节连贯性审查，不受大纲审查拆分影响。后端 API 审计结果：既有大纲/章节审查端点已覆盖加载最新审查、运行审查和显式采纳应用，本次没有新增后端 endpoint。
 
 章节读取 API 已补齐：`GET /api/projects/{project_id}/chapters` 返回已生成章节列表，`GET /api/projects/{project_id}/chapters/{chapter}` 返回单章最新正文、版本、来源和路径。最新正文选择优先级为 `chapters/chapter_###/final.md`，其次最高编号 `draft_vN.md`，最后回退旧路径 `chapters/chapter_###.md`。前端切换大纲阶段或章节时会先进入 loading 状态，请求使用 `cache: "no-store"`，并用请求 token 避免旧请求返回后覆盖当前选中内容；右侧进度日志按项目写入浏览器 `localStorage`，刷新后恢复最近 10 条，同时章节总体审查页会自动加载最新审查报告。Vite dev server 代理 `/api` 到 `127.0.0.1:8000`，build 产物存在时可由 FastAPI 静态托管。
 
@@ -2557,12 +2557,20 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - `.venv/bin/python -m pytest tests/test_director_service.py tests/test_outline_collaboration.py`：91 passed。
 - `.venv/bin/python -m pytest`：323 passed。
 
-## 2026-05-26 Web Review Secondary Tab Styling
+## 2026-05-26 大纲/章节审查二级标签
 
-目标：完成大纲与章节审查工作区的二级标签视觉样式，使 `workspace-tabs`、`sidebar-note` 和 `review-workspace` 与现有密集工具 UI 保持一致。
+目标：完成大纲与章节审查工作区的二级标签导航记录，并校正文档里把大纲审查描述为阶段工具栏按钮的旧说法。
 
 已完成：
-- `web/frontend/src/styles.css` 新增二级工作区标签样式，包括 active、disabled 和数量徽标状态。
-- 新增章节侧栏提示样式，章节子视图切换继续保留在主工作区顶部。
-- 新增审查工作区 flex 容器样式，供大纲和章节总体审查面板复用。
+- Web UI 使用工作区二级标签：大纲为 `阶段编辑 / 总体审查`；章节为 `批量生成 / 已生成章节 / 总体审查`。
+- 大纲阶段编辑工具栏只保留阶段动作 `保存 / 生成/修订 / 锁定`。
+- 大纲总体审查在独立二级标签中运行，可在任意阶段基于已有 outline artifacts 发起审查。
+- 章节总体审查已从左侧导航移入章节工作区二级标签。
+- 后端 API 审计确认既有大纲/章节审查端点已覆盖加载最新审查、运行审查和显式采纳应用，没有新增后端 endpoint。
+- `review-workspace` 样式用于大纲总体审查工作区根节点；章节审查继续使用既有 review report、repair board 和 action 样式。
+
+验证：
+- `git diff --check`：通过。
+- `.venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py -q`：3 passed。
+- `npm --prefix web/frontend run build`：通过。
 
