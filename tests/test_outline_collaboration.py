@@ -21,6 +21,16 @@ def run_outline_turn(graph, state, store, text):
     return NovelState.from_dict(graph.invoke(state.to_dict()))
 
 
+class RecordingCodexCLIAdapter(CodexCLIAdapter):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.prompts: list[str] = []
+
+    def complete(self, prompt, workspace, options=None):
+        self.prompts.append(prompt)
+        return super().complete(prompt, workspace, options)
+
+
 def test_outline_collaboration_generates_only_first_stage(tmp_path):
     store = LocalStore(tmp_path)
     state = store.create_project("Demo", "demo")
@@ -526,8 +536,10 @@ def test_chapter_outline_confirmation_advances_by_volume_before_review_lock(tmp_
             "volume_contents": {"1": "### 第一卷：入局卷\n\n#### 卷内章节总体规划\n- 第一卷规划。"},
         },
     }
-    graph = build_outline_collaboration_graph(CodexCLIAdapter(mock=True), store)
+    adapter = RecordingCodexCLIAdapter(mock=True)
+    graph = build_outline_collaboration_graph(adapter, store)
 
+    state.director_intent = "lock"
     state = run_outline_turn(graph, state, store, "确认进入下一阶段")
 
     assert state.outline_stage == "chapter_outline"
@@ -537,8 +549,18 @@ def test_chapter_outline_confirmation_advances_by_volume_before_review_lock(tmp_
     assert metadata["completed_volumes"] == [1]
     assert metadata["volume_statuses"]["1"] == "locked"
     assert metadata["volume_statuses"]["2"] == "options_ready"
+    synthesis = state.outline_stage_artifacts["chapter_outline"]["synthesis"]
+    assert "第二卷：成长卷" in synthesis
+    assert "卷2章1" in synthesis
+    assert "用户本轮反馈" not in synthesis
+    assert "确认进入下一阶段" not in synthesis
+    assert not any("AGENT: outline_stage_reviser" in prompt for prompt in adapter.prompts)
+    assert any("完整生成第 2 卷章节大纲" in prompt for prompt in adapter.prompts)
+    assert "chapter_outline_force_full_generation" not in state.director_task_args
+    assert "chapter_outline_internal_generation_request" not in state.director_task_args
     assert "review_lock" not in state.outline_stage_artifacts
 
+    state.director_intent = "lock"
     state = run_outline_turn(graph, state, store, "确认进入下一阶段")
 
     assert state.outline_stage == "review_lock"

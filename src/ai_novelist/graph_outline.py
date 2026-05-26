@@ -74,6 +74,9 @@ STAGE_ROLES = {
     "review_lock": ["总编辑 Agent", "约束审计 Agent", "章节准备 Agent"],
 }
 
+CHAPTER_OUTLINE_FORCE_FULL_KEY = "chapter_outline_force_full_generation"
+CHAPTER_OUTLINE_INTERNAL_REQUEST_KEY = "chapter_outline_internal_generation_request"
+
 
 MAX_STAGE_QUESTION_ROUNDS = 3
 
@@ -548,6 +551,7 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
     )
     if stage == "chapter_outline":
         artifact["metadata"] = state.director_task_args.get("chapter_outline_metadata") or chapter_outline_metadata_from_artifact(None)
+        clear_chapter_outline_generation_directives(state)
     if questions and question_round > MAX_STAGE_QUESTION_ROUNDS:
         answer = answer_stage_unresolved_questions(
             state=state,
@@ -744,6 +748,8 @@ def revise_outline_stage_from_existing(
 
 def should_lightly_revise_outline_stage(state: NovelState, stage: str, artifact: object, store: LocalStore) -> bool:
     if stage not in OUTLINE_STAGES:
+        return False
+    if chapter_outline_forced_full_generation(state, stage):
         return False
     if force_full_outline_stage_rerun(state.user_request):
         return False
@@ -1170,6 +1176,7 @@ def advance_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalSt
             state.outline_stage_status = "collecting"
             state.current_stage = "chapter_outline"
             state.director_action = "run_outline_stage"
+            set_next_chapter_outline_volume_generation_directive(state, next_volume_index)
             state.director_message = f"已确认第 {next_volume_index - 1} 卷章节大纲，继续生成第 {next_volume_index} 卷章节大纲。"
             record_stage_history(state, "lock_volume", stage, default_summary or state.user_request)
             save_outline_stage_outputs(state, stage, format_stage_markdown(artifact), store)
@@ -1584,8 +1591,39 @@ def volume_outline_framework_prompt(stage: str) -> str:
         f"{render_volume_outline_framework(mode='full')}\n"
     )
 
+
+def chapter_outline_forced_full_generation(state: NovelState, stage: str) -> bool:
+    return stage == "chapter_outline" and bool(state.director_task_args.get(CHAPTER_OUTLINE_FORCE_FULL_KEY))
+
+
+def chapter_outline_internal_generation_request(state: NovelState, stage: str) -> str:
+    if stage != "chapter_outline":
+        return ""
+    return str(state.director_task_args.get(CHAPTER_OUTLINE_INTERNAL_REQUEST_KEY) or "").strip()
+
+
+def outline_stage_user_request_for_prompt(state: NovelState, stage: str) -> str:
+    if chapter_outline_forced_full_generation(state, stage):
+        return chapter_outline_internal_generation_request(state, stage) or state.user_request
+    return state.user_request
+
+
+def clear_chapter_outline_generation_directives(state: NovelState) -> None:
+    state.director_task_args.pop(CHAPTER_OUTLINE_FORCE_FULL_KEY, None)
+    state.director_task_args.pop(CHAPTER_OUTLINE_INTERNAL_REQUEST_KEY, None)
+
+
+def set_next_chapter_outline_volume_generation_directive(state: NovelState, next_volume_index: int) -> None:
+    state.director_task_args[CHAPTER_OUTLINE_FORCE_FULL_KEY] = True
+    state.director_task_args[CHAPTER_OUTLINE_INTERNAL_REQUEST_KEY] = (
+        f"完整生成第 {next_volume_index} 卷章节大纲，不要轻修订已确认卷，"
+        "不要只回复确认状态。"
+    )
+
+
 def build_outline_stage_role_prompt(state: NovelState, stage: str, role: str, author_craft: str = "") -> str:
     contract = get_stage_contract(stage)
+    user_request = outline_stage_user_request_for_prompt(state, stage)
     return (
         "AGENT: outline_stage_role\n"
         f"ROLE: {role}\n"
@@ -1602,7 +1640,7 @@ def build_outline_stage_role_prompt(state: NovelState, stage: str, role: str, au
         "- 不写产品规则、游戏机制、编剧理论语言。\n"
         "- 世界观阶段多写角色能看见、听见、触碰、承受的事物。\n\n"
         f"角色专属关注点：\n{role_focus_instruction(stage, role)}\n\n"
-        f"用户最新输入：{state.user_request}\n"
+        f"用户最新输入：{user_request}\n"
         f"创意：{state.idea or '暂无'}\n"
         f"检索上下文：\n{state.retrieval_context or state.reference_brief or '暂无'}\n\n"
         f"作者构思参考：\n{author_craft or '暂无'}\n\n"
@@ -1629,6 +1667,7 @@ def build_outline_stage_role_prompt(state: NovelState, stage: str, role: str, au
 
 def build_outline_stage_synthesizer_prompt(state: NovelState, stage: str, role_reviews: list[dict[str, str]], author_craft: str = "") -> str:
     contract = get_stage_contract(stage)
+    user_request = outline_stage_user_request_for_prompt(state, stage)
     reviews = "\n\n".join(f"## {item['role']}\n{item['content']}" for item in role_reviews)
     return (
         "AGENT: outline_stage_synthesizer\n"
@@ -1645,7 +1684,7 @@ def build_outline_stage_synthesizer_prompt(state: NovelState, stage: str, role_r
         "- 不写产品规则、游戏机制、编剧理论语言。\n"
         "- 世界观阶段多写角色能看见、听见、触碰、承受的事物。\n\n"
         f"创意：{state.idea or '暂无'}\n"
-        f"用户最新输入：{state.user_request}\n"
+        f"用户最新输入：{user_request}\n"
         f"作者构思参考：\n{author_craft or '暂无'}\n\n"
         f"前序已保存阶段内容：\n{previous_stage_context(state, stage)}\n\n"
         f"当前阶段已有内容：\n{current_stage_context(state, stage)}\n\n"

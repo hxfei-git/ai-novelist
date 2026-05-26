@@ -2478,3 +2478,21 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 剩余限制：
 - 卷章节范围解析仍基于章节大纲 Markdown 的卷标题和“第 N 章”启发式；复杂非标准格式可用 `--chapters` 手工覆盖。
 - 旧单步 `review` 命令仍作为兼容 CLI 存在，但不再由 Director 默认路由。
+
+
+## 2026-05-26 章节大纲确认后按卷推进修复
+
+目标：修复 `chapter_outline` 当前卷确认后，下一卷生成被 `director_intent=lock` 和用户确认文本误判为轻修订的问题。
+
+已完成：
+- `graph_outline.py` 在确认当前卷且仍有下一卷时，写入一次性的 `chapter_outline_force_full_generation` 和内部生成指令，下一轮 `chapter_outline` 明确走完整角色 Agent + Synthesizer 流水。
+- role prompt 和 synthesizer prompt 在该内部指令存在时使用“完整生成第 N 卷章节大纲，不要轻修订已确认卷，不要只回复确认状态”替代原始用户确认文本，避免模型围绕“确认进入下一阶段”输出占位轻修订内容。
+- 下一卷完整生成成功并保存前会清理这两个临时标记，后续普通反馈仍按既有轻修订策略处理。
+- 最后一卷确认逻辑不变：锁定 `chapter_outline`，进入 `review_lock`，再由审稿锁定阶段生成最终锁定意见。
+
+验证：
+- `.venv/bin/python -m pytest tests/test_outline_collaboration.py`：54 passed。
+- `.venv/bin/python -m pytest tests/test_director_service.py`：35 passed。
+- `.venv/bin/python -m pytest`：321 passed。
+
+限制：若下一卷完整生成在 adapter 调用阶段失败，当前错误处理仍会保存错误状态；成功生成后才会清理一次性指令。

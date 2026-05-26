@@ -2271,3 +2271,17 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 剩余限制：
 - 卷章节范围解析仍基于章节大纲 Markdown 的卷标题和“第 N 章”启发式；复杂非标准格式可用 `--chapters` 手工覆盖。
 - 旧单步 `review` 命令仍作为兼容 CLI 存在，但不再由 Director 默认路由。
+
+
+## 2026-05-26 章节大纲确认死循环修复
+
+根因：`chapter_outline` 确认第 1 卷后递归触发下一卷生成时，状态仍保留 `director_intent=lock` 和用户输入“确认进入下一阶段”。已有 chapter_outline artifact 又满足轻修订条件，导致系统调用 `outline_stage_reviser`，把确认动作当成修订请求覆盖下一卷生成。
+
+修复：确认非最后一卷时写入一次性完整生成标记和内部生成指令；`should_lightly_revise_outline_stage()` 会跳过轻修订；role/synthesizer prompt 使用内部指令生成目标下一卷；完整生成保存前清理临时标记。最后一卷确认后仍进入 `review_lock`。
+
+测试结果：
+- `.venv/bin/python -m pytest tests/test_outline_collaboration.py`：54 passed。
+- `.venv/bin/python -m pytest tests/test_director_service.py`：35 passed。
+- `.venv/bin/python -m pytest`：321 passed。
+
+剩余限制：本次不恢复任何 `projects/chat-test` 生成数据，也不处理或提交 `chat.log`。
