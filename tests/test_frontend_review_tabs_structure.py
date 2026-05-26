@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 
@@ -12,9 +13,24 @@ def read_main() -> str:
 
 
 def sidebar_source(source: str) -> str:
-    start = source.index('<aside className="sidebar">')
-    end = source.index('{topSection ===', start)
+    sidebar = re.search(r"<aside\b[^>]*className=\"sidebar\"[^>]*>", source)
+    assert sidebar is not None
+
+    workspace = re.search(r"<section\b[^>]*className=\"[^\"]*\bworkspace\b", source[sidebar.end() :])
+    assert workspace is not None
+
+    start = sidebar.start()
+    end = sidebar.end() + workspace.start()
     return source[start:end]
+
+
+def assert_union_type_includes(source: str, type_name: str, *values: str) -> None:
+    union = re.search(rf"\btype\s+{re.escape(type_name)}\s*=\s*(?P<body>[^;]+);", source)
+    assert union is not None
+
+    body = union.group("body")
+    for value in values:
+        assert re.search(rf"['\"]{re.escape(value)}['\"]", body) is not None
 
 
 def test_review_entries_are_not_sidebar_navigation() -> None:
@@ -30,7 +46,7 @@ def test_review_entries_are_not_sidebar_navigation() -> None:
 def test_outline_workspace_uses_secondary_review_tab() -> None:
     source = read_main()
 
-    assert "type OutlineView = 'edit' | 'review';" in source
+    assert_union_type_includes(source, "OutlineView", "edit", "review")
     assert 'aria-label="大纲视图"' in source
     assert "outlineView === 'edit'" in source
     assert "outlineView === 'review'" in source
