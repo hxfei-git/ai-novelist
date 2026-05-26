@@ -58,6 +58,23 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
 - `extract-craft` 默认使用稳定规则提炼；真实模型提炼 prompt 已提供，后续可替换 extractor 实现。
 - StageCraftBrief 不注入长原文，只注入方法、适用条件、避免事项和来源摘要。
 
+
+### Web UI 与显式工作流控制 v1
+
+本次新增本地 Web/API 第一版，继续沿用 `projects/` 文件存储，不引入数据库。后端位于 `src/ai_novelist/web/`：
+
+- `service.py` 提供不依赖 FastAPI 的项目列表、项目创建、大纲阶段读取/保存、显式阶段生成、显式阶段锁定、批量章节生成、全章节审查、修复草稿生成和应用修复能力。
+- `app.py` 提供 FastAPI `/api/*` 路由，并用 SSE 返回生成/锁定/批量章节/全章节审查进度。
+- CLI 新增 `ai-novelist web --host 127.0.0.1 --port 8000 --mock`，Web 依赖通过 `pip install -e '.[web]'` 安装。
+
+大纲 Web 流程不再让 Director 猜测阶段。前端请求显式携带 `stage` 与 action：`generate` 直接调用 `run_outline_stage_node`，`lock` 直接调用 `advance_outline_stage_node`。阶段内容保存会同步 `outline/<stage>.md`、`outline_stages/<stage>.md`、`state.json` 中的轻量 artifact；`worldbuilding` 额外同步根目录 `worldbuilding.md`。
+
+章节页 API 复用 `build_volume_write_graph()`，`POST /api/projects/{project_id}/chapters/generate-batch` 会把 `{ volume, chapters, max_workers }` 写入 `director_task_args`，并设置并发环境变量。
+
+全章节审查第一版是文件安全流程：`review-all` 只扫描最新 final/draft 并写 `chapters/global_consistency/<run_id>/report.json` 与 `.md`，不改正文；`repair-proposals` 只为 serious 问题写 `chapters/chapter_###/proposed_repair_<run_id>.md`；`apply-repair` 才把用户确认的 proposed repair 另存为新的 `draft_vN.md`，同时保留原 draft。
+
+前端位于 `web/frontend/`，使用 Vite + React + TypeScript。当前界面包含项目列表/创建、阶段导航、Markdown 编辑保存、生成/修订、锁定、章节批量生成参数、全章节审查和修复草稿按钮。Vite dev server 代理 `/api` 到 `127.0.0.1:8000`，build 产物存在时可由 FastAPI 静态托管。
+
 ## 2. 总体架构
 
 ```text

@@ -63,6 +63,10 @@ def main(argv: list[str] | None = None) -> int:
             return run_chat_command(args, store, settings)
         if args.command == "feishu":
             return run_feishu_command(args, store, settings)
+        if args.command == "web":
+            from ai_novelist.web.app import run_web_command
+
+            return run_web_command(args, settings)
         if args.command == "index-corpus":
             return run_index_corpus_command(args, settings)
         if args.command == "extract-craft":
@@ -153,6 +157,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="搜索提供方，默认读 AI_NOVELIST_SEARCH_PROVIDER；--mock 会强制使用 mock",
     )
     add_author_craft_flags(feishu_parser)
+
+    web_parser = subparsers.add_parser("web", help="启动本地 Web UI/API 服务")
+    web_parser.add_argument("--host", default="127.0.0.1", help="监听地址")
+    web_parser.add_argument("--port", type=int, default=8000, help="监听端口")
+    web_parser.add_argument("--mock", action="store_true", help="Web 生成接口默认使用本地 mock 输出")
 
     index_parser = subparsers.add_parser("index-corpus", help="索引本地作者小说语料")
     index_parser.add_argument("--corpus-dir", help="本地小说语料目录，默认读 AI_NOVELIST_AUTHOR_CORPUS_DIR")

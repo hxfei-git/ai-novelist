@@ -1,0 +1,35 @@
+* { box-sizing: border-box; }
+body { margin: 0; font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f6f7f9; color: #1f2933; }
+button, input, select, textarea { font: inherit; }
+button { border: 1px solid #c9d1da; background: #ffffff; color: #17212f; border-radius: 6px; padding: 8px 10px; display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+button:hover { background: #eef3f7; }
+input, select, textarea { border: 1px solid #c9d1da; border-radius: 6px; background: #ffffff; color: #17212f; }
+.app { min-height: 100vh; display: grid; grid-template-columns: 260px minmax(520px, 1fr) 300px; }
+.sidebar { border-right: 1px solid #d9e0e7; background: #ffffff; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.brand { font-size: 20px; font-weight: 700; }
+.project-create { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.project-create input, .sidebar select { width: 100%; padding: 8px; }
+nav { display: flex; flex-direction: column; gap: 6px; }
+nav button { justify-content: flex-start; display: grid; grid-template-columns: 18px 1fr auto; text-align: left; }
+nav button.active { border-color: #2f6f73; background: #e8f3f1; }
+nav small { color: #5c6f7c; font-size: 11px; }
+.workspace { padding: 18px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.toolbar { display: flex; gap: 8px; align-items: center; }
+.toolbar div { margin-right: auto; }
+.toolbar h1 { margin: 0; font-size: 22px; }
+.toolbar p { margin: 2px 0 0; color: #60717e; }
+.instruction { width: 100%; padding: 10px; }
+.editor { width: 100%; flex: 1; min-height: 520px; padding: 14px; line-height: 1.55; resize: none; }
+.issues { border-left: 4px solid #b83232; background: #fff4f4; padding: 10px 12px; border-radius: 6px; }
+.right { border-left: 1px solid #d9e0e7; padding: 16px; background: #fbfcfd; display: flex; flex-direction: column; gap: 14px; }
+.right section { display: flex; flex-direction: column; gap: 8px; }
+.right h2 { margin: 0 0 4px; font-size: 15px; }
+.right label { display: grid; gap: 4px; font-size: 13px; color: #405261; }
+.right input { padding: 8px; width: 100%; }
+pre { white-space: pre-wrap; background: #eef3f7; border-radius: 6px; padding: 8px; margin: 0; font-size: 12px; }
+@media (max-width: 980px) {
+  .app { grid-template-columns: 1fr; }
+  .sidebar, .right { border: 0; }
+  .editor { min-height: 420px; }
+}
+

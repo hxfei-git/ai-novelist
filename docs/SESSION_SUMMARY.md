@@ -89,6 +89,19 @@
 - 轻量导入检查：人物关系框架标题校验通过，`characters` 阶段合成提示词包含 `## 人物关系稿`、`## 十三、待确认问题` 和关系蓝图约束，问题过滤上限为 4。
 - 当前环境缺少可用的 `.venv` 和 `pytest`，因此未运行完整 pytest / smoke 套件。
 
+
+### Web UI 与显式控制入口：已完成第一版
+
+本次新增 `src/ai_novelist/web/service.py` 和 `src/ai_novelist/web/app.py`，提供本地 FastAPI Web API，并新增 `ai-novelist web --host 127.0.0.1 --port 8000 --mock`。依赖通过 `.[web]` 可选组安装，默认测试可只导入不依赖 FastAPI 的 service 层。
+
+已实现的 API/服务能力：项目列表与创建、项目 state 读取、大纲阶段列表/读取/保存、显式阶段生成、显式阶段锁定、章节批量生成、全章节审查、读取最新审查报告、生成修复草稿、确认应用修复。大纲生成/锁定直接调用既有 outline 节点，Web 请求显式传入 stage，避免 chat/Director 猜路由。
+
+新增 `web/frontend/` Vite + React + TypeScript 前端壳，包含阶段导航、Markdown 编辑器、保存/生成/锁定按钮、章节批量生成控件、全章节审查与修复草稿控件，并配置 `/api` 代理到后端。
+
+全章节审查与修复保持非破坏性：审查只写 `chapters/global_consistency/<run_id>/report.json` 和 `.md`；修复草稿只写 `proposed_repair_<run_id>.md`；只有调用 apply repair 后才生成新的 `draft_vN.md`。
+
+验证：新增 `tests/test_web_service.py` 覆盖项目/阶段持久化、显式阶段生成 payload、批量章节参数传递、审查报告不覆盖正文、修复草稿与 apply 分离。已运行 `.venv/bin/python -m pytest tests/test_web_service.py`、`.venv/bin/python -m py_compile src/ai_novelist/web/service.py src/ai_novelist/web/app.py src/ai_novelist/cli.py tests/test_web_service.py`、`.venv/bin/python -m pytest`（327 passed）、`.venv/bin/ai-novelist web --help`、`.venv/bin/python tests/smoke_phase2.py`。前端 `npm --prefix web/frontend run build` 因本机尚未安装 frontend 依赖而停在 `tsc: not found`；随后尝试 `npm --prefix web/frontend install` 长时间无输出，已停止，未产生 node_modules/package-lock。
+
 ## 3. 最新架构摘要
 
 ```text
