@@ -481,6 +481,18 @@ function App() {
         </section>
       ) : (
         <section className="workspace chapter-workspace">
+          <div className="workspace-tabs" aria-label="章节视图">
+            <button className={chapterView === 'batch' ? 'active' : ''} onClick={() => setChapterView('batch')}>
+              <Play size={16} />批量生成
+            </button>
+            <button className={chapterView === 'list' ? 'active' : ''} onClick={() => setChapterView('list')}>
+              <FileText size={16} />已生成章节
+              <small>{chapters.length}</small>
+            </button>
+            <button className={chapterView === 'review' ? 'active' : ''} onClick={() => setChapterView('review')}>
+              <ListChecks size={16} />总体审查
+            </button>
+          </div>
           {chapterView === 'batch' && (
             <>
               <header className="toolbar"><div><h1>章节批量生成</h1><p>按卷号、章节范围和并发数生成章节正文</p></div></header>
