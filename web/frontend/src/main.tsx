@@ -443,19 +443,41 @@ function App() {
 
       {topSection === 'outline' ? (
         <section className="workspace">
-          <header className="toolbar">
-            <div>
-              <h1>{stageLabel(current, activeStage)}</h1>
-              <p>{current?.status || 'not_generated'}</p>
-            </div>
-            <button onClick={saveStage} disabled={loadingStage}><Save size={16} />保存</button>
-            <button onClick={() => runStage('generate')} disabled={loadingStage}><RefreshCw size={16} />生成/修订</button>
-            <button onClick={() => runStage('lock')} disabled={loadingStage}><Lock size={16} />锁定</button>
-            <button onClick={runOutlineReview} disabled={loadingStage || outlineReviewRunning}><ListChecks size={16} />{outlineReviewRunning ? '审查中' : '总体审查'}</button>
-          </header>
-          <input className="instruction" value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder="当前大纲阶段生成/修订说明" />
-          {loadingStage ? <div className="loading">正在读取 {stageLabel(current, activeStage)}...</div> : <textarea className="editor" value={content} onChange={(event) => setContent(event.target.value)} />}
-          <OutlineReviewPanel review={outlineReview} running={outlineReviewRunning} applying={outlineReviewApplying} onApply={applyOutlineReview} onDismiss={dismissOutlineReview} />
+          <div className="workspace-tabs" aria-label="大纲视图">
+            <button className={outlineView === 'edit' ? 'active' : ''} onClick={() => setOutlineView('edit')}>
+              <FileText size={16} />阶段编辑
+            </button>
+            <button className={outlineView === 'review' ? 'active' : ''} onClick={() => setOutlineView('review')}>
+              <ListChecks size={16} />总体审查
+            </button>
+          </div>
+          {outlineView === 'edit' && (
+            <>
+              <header className="toolbar">
+                <div>
+                  <h1>{stageLabel(current, activeStage)}</h1>
+                  <p>{current?.status || 'not_generated'}</p>
+                </div>
+                <button onClick={saveStage} disabled={loadingStage}><Save size={16} />保存</button>
+                <button onClick={() => runStage('generate')} disabled={loadingStage}><RefreshCw size={16} />生成/修订</button>
+                <button onClick={() => runStage('lock')} disabled={loadingStage}><Lock size={16} />锁定</button>
+              </header>
+              <input className="instruction" value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder="当前大纲阶段生成/修订说明" />
+              {loadingStage ? <div className="loading">正在读取 {stageLabel(current, activeStage)}...</div> : <textarea className="editor" value={content} onChange={(event) => setContent(event.target.value)} />}
+            </>
+          )}
+          {outlineView === 'review' && (
+            <OutlineReviewWorkspace
+              review={outlineReview}
+              instruction={instruction}
+              running={outlineReviewRunning}
+              applying={outlineReviewApplying}
+              onInstructionChange={setInstruction}
+              onRun={runOutlineReview}
+              onApply={applyOutlineReview}
+              onDismiss={dismissOutlineReview}
+            />
+          )}
         </section>
       ) : (
         <section className="workspace chapter-workspace">
@@ -532,43 +554,56 @@ function App() {
 }
 
 
-function OutlineReviewPanel({
+function OutlineReviewWorkspace({
   review,
+  instruction,
   running,
   applying,
+  onInstructionChange,
+  onRun,
   onApply,
   onDismiss,
 }: {
   review: OutlineReview | null;
+  instruction: string;
   running: boolean;
   applying: boolean;
+  onInstructionChange: (value: string) => void;
+  onRun: () => void;
   onApply: () => void;
   onDismiss: () => void;
 }) {
   const hasReview = Boolean(review);
   return (
     <section className="outline-review-panel">
-      <header className="review-header">
+      <header className="toolbar">
         <div>
-          <strong>大纲总体审查</strong>
-          <p>{hasReview ? `${review?.status || 'reviewed'} · ${review?.decision || 'revise'} · ${review?.score ?? 0}` : '暂无审查结果'}</p>
+          <h1>大纲总体审查</h1>
+          <p>审查当前已有的大纲阶段产物</p>
         </div>
-        <div className="review-buttons">
-          <button onClick={onDismiss} disabled={!hasReview || running || applying}><X size={16} />不采纳</button>
-          <button onClick={onApply} disabled={!hasReview || running || applying || review?.decision === 'stop'}><Check size={16} />采纳修改</button>
-        </div>
+        <button onClick={onRun} disabled={running || applying}><ListChecks size={16} />{running ? '审查中' : '开始审查'}</button>
       </header>
+      <input className="instruction" value={instruction} onChange={(event) => onInstructionChange(event.target.value)} placeholder="可选：本次审查关注点" />
       {running && <div className="loading">大纲总体审查正在运行...</div>}
       {hasReview ? (
         <div className="review-report outline-review-report">
-          <span>run_id: {review?.run_id}</span>
-          <strong>{review?.summary}</strong>
+          <div className="review-header">
+            <div>
+              <span>run_id: {review?.run_id}</span>
+              <strong>{review?.summary}</strong>
+              <small>{review?.status || 'reviewed'} · {review?.decision || 'revise'} · {review?.score ?? 0}</small>
+            </div>
+            <div className="review-buttons">
+              <button onClick={onDismiss} disabled={running || applying}><X size={16} />不采纳</button>
+              <button onClick={onApply} disabled={running || applying || review?.decision === 'stop'}><Check size={16} />采纳修改</button>
+            </div>
+          </div>
           <p>{review?.notes}</p>
           <small>参考大纲：{review?.source_outline_summary}</small>
         </div>
       ) : (
         <div className="review-report outline-review-report empty-review">
-          <p>点击“总体审查”生成大纲审查意见。</p>
+          <p>点击“开始审查”生成大纲审查意见。</p>
         </div>
       )}
       {applying && <div className="loading">大纲审查建议正在应用...</div>}
