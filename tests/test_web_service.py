@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ai_novelist.adapters.base import AgentAdapter, AgentCallOptions
+from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError, AgentCallOptions
 from ai_novelist.storage.local_store import LocalStore
 from ai_novelist.web import service
 
@@ -11,6 +11,24 @@ class DummyAdapter(AgentAdapter):
     def complete(self, prompt: str, workspace: Path, options: AgentCallOptions | None = None) -> str:
         if "global_consistency_repair" in prompt:
             return "# repaired chapter\n\n修复后的章节正文，保留原章节事件并补齐连续性。"
+        return "{}"
+
+
+class ModelReviewAdapter(AgentAdapter):
+    def complete(self, prompt: str, workspace: Path, options: AgentCallOptions | None = None) -> str:
+        assert "global_consistency_reviewer" in prompt
+        assert "Chapter 1" in prompt
+        return (
+            '{"status":"needs_repair","summary":"模型发现连续性问题。",'
+            '"issues":[{"severity":"serious","chapter":1,"category":"timeline",'
+            '"message":"第 1 章结尾与第 2 章开场时间线冲突。"}]}'
+        )
+
+
+class FailingReviewAdapter(AgentAdapter):
+    def complete(self, prompt: str, workspace: Path, options: AgentCallOptions | None = None) -> str:
+        if "global_consistency_reviewer" in prompt:
+            raise AgentAdapterError("model unavailable")
         return "{}"
 
 
@@ -133,4 +151,37 @@ def test_chapter_list_and_detail_prefer_final_then_highest_draft_then_legacy(tmp
     assert second["path"] == "chapters/chapter_002/draft_v12.md"
     assert "旧路径" in third["content"]
     assert third["path"] == "chapters/chapter_003.md"
+
+def test_global_review_uses_model_consistency_report(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+    store.save_outline_artifact(state, "chapter_outline", "# 章节大纲\n\n第一章进入雨城，第二章当天夜里继续。")
+    state.active_chapter = 1
+    state.current_chapter = 1
+    state.chapter_draft = "# 第 1 章\n\n" + "雨城的夜色压在港口上，主角追踪线索并在钟楼下确认了同伴留下的暗号。" * 4
+    store.save_chapter_draft(state, version=1)
+
+    report = service.review_all_chapters(store, ModelReviewAdapter(), "web-demo")
+
+    assert report["status"] == "needs_repair"
+    assert report["review_source"] == "model"
+    assert report["summary"] == "模型发现连续性问题。"
+    assert any(item["category"] == "timeline" for item in report["issues"])
+    saved = service.latest_global_review(store, "web-demo")
+    assert saved["run_id"] == report["run_id"]
+
+
+def test_global_review_falls_back_to_local_scan_on_model_error(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+    state.active_chapter = 1
+    state.current_chapter = 1
+    state.chapter_draft = "# 第 1 章\n\n" + "TODO：这里待补完整正文。" * 6
+    store.save_chapter_draft(state, version=1)
+
+    report = service.review_all_chapters(store, FailingReviewAdapter(), "web-demo")
+
+    assert report["review_source"] == "local"
+    assert any(item["category"] == "placeholder" for item in report["issues"])
+    assert any(item["category"] == "model_review_error" for item in report["issues"])
 

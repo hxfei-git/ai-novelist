@@ -71,7 +71,7 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
 
 章节页 API 复用 `build_volume_write_graph()`，`POST /api/projects/{project_id}/chapters/generate-batch` 会把 `{ volume, chapters, max_workers }` 写入 `director_task_args`，并设置并发环境变量。Web 前端不传 `mock` 字段，真实/mock 模式只由后端启动参数决定；不带 `--mock` 启动时与 `ai-novelist chat --project ...` 一样走真实模型配置。重复生成已存在章节时，批量写作图追加新的 `draft_vN.md`，不覆盖旧 draft，旧路径 `chapter_###.md` 作为最新正文副本同步更新。
 
-全章节审查第一版是文件安全流程：`review-all` 只扫描最新 final/draft 并写 `chapters/global_consistency/<run_id>/report.json` 与 `.md`，不改正文；`repair-proposals` 只为 serious 问题写 `chapters/chapter_###/proposed_repair_<run_id>.md`；`apply-repair` 才把用户确认的 proposed repair 另存为新的 `draft_vN.md`，同时保留原 draft。
+全章节审查是文件安全流程：`review-all` 先对最新 final/draft 做本地完整性扫描，再在存在章节正文时调用 `global_consistency_reviewer` 模型审查跨章连续性、设定一致性、人物状态和时间线问题；模型失败时保留本地扫描并记录 `model_review_error`。审查只写 `chapters/global_consistency/<run_id>/report.json` 与 `.md`，不改正文；`repair-proposals` 只为 serious 问题写 `chapters/chapter_###/proposed_repair_<run_id>.md`；`apply-repair` 才把用户确认的 proposed repair 另存为新的 `draft_vN.md`，同时保留原 draft。
 
 前端位于 `web/frontend/`，使用 Vite + React + TypeScript。当前信息架构收敛为两个一级大栏：`大纲` 和 `章节`。`大纲`栏只承载方向定位、世界观设定、人物关系、故事流程、分卷大纲、章节大纲和`大纲总体审查`；其中`大纲总体审查`复用既有 `review_lock` 阶段，但前端文案明确为总体审查，并展示阻塞问题、非阻塞问题和需回改阶段。`章节`栏承载章节批量生成、已生成章节列表和`章节总体审查`；章节总体审查继续复用 `/chapters/review-all` 全章节连贯性审查，不再作为独立一级大栏。
 

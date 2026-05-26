@@ -222,15 +222,50 @@ def load_chapter_payload(store: LocalStore, project_id: str, chapter: int) -> di
 
 
 def review_all_chapters(store: LocalStore, adapter: AgentAdapter, project_id: str, progress: ProgressFunc | None = None) -> dict[str, Any]:
-    del adapter
     emit = progress or (lambda _stage, _message: None)
     emit("GlobalReview", "正在扫描已生成章节...")
     state = store.load_state(project_id)
     chapters = collect_latest_chapters(store, project_id)
+    base_issues = local_chapter_review_issues(chapters)
+    model_report: dict[str, Any] | None = None
+    if chapters:
+        emit("GlobalReview", "正在调用模型审查章节连续性...")
+        try:
+            output = adapter.complete(build_global_review_prompt(state, store, chapters), store.project_dir(project_id)).strip()
+            model_report = normalize_global_review_output(output)
+        except AgentAdapterError as exc:
+            base_issues.append({"severity": "normal", "chapter": None, "category": "model_review_error", "message": f"模型审查失败，已回退本地扫描：{exc}"})
+    issues = merge_review_issues(base_issues, model_report.get("issues", []) if model_report else [])
+    run_id = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+    status = model_report.get("status") if model_report else ""
+    if any(item["severity"] == "serious" for item in issues):
+        status = "needs_repair"
+    elif status not in {"reviewed", "needs_repair"}:
+        status = "reviewed"
+    summary = model_report.get("summary") if model_report else ""
+    if not summary:
+        source = "模型审查" if model_report else "本地扫描"
+        summary = f"{source} {len(chapters)} 章，发现 {len(issues)} 个问题。"
+    report = {
+        "project_id": project_id,
+        "run_id": run_id,
+        "status": status,
+        "review_source": "model" if model_report else "local",
+        "chapters": [{"chapter": chapter, "path": path.relative_to(store.project_dir(project_id)).as_posix()} for chapter, path, _content in chapters],
+        "issues": issues,
+        "summary": summary,
+        "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
+    }
+    write_global_review_report(store, project_id, run_id, report)
+    emit("GlobalReview", "全章节审查报告已保存。")
+    return report
+
+
+def local_chapter_review_issues(chapters: list[tuple[int, Path, str]]) -> list[dict[str, Any]]:
     issues: list[dict[str, Any]] = []
     if not chapters:
         issues.append({"severity": "serious", "chapter": None, "category": "coverage", "message": "未找到可审查的章节正文。"})
-    for chapter, path, content in chapters:
+    for chapter, _path, content in chapters:
         if len(content.strip()) < 80:
             issues.append({"severity": "serious", "chapter": chapter, "category": "draft_length", "message": f"第 {chapter} 章正文过短，可能不是完整草稿。"})
         if re.search(r"(TODO|待补|占位|FIXME)", content, re.IGNORECASE):
@@ -238,19 +273,90 @@ def review_all_chapters(store: LocalStore, adapter: AgentAdapter, project_id: st
     for left, right in zip(chapters, chapters[1:]):
         if right[0] != left[0] + 1:
             issues.append({"severity": "normal", "chapter": right[0], "category": "chapter_gap", "message": f"第 {left[0]} 章后直接跳到第 {right[0]} 章。"})
-    run_id = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
-    report = {
-        "project_id": project_id,
-        "run_id": run_id,
-        "status": "needs_repair" if any(item["severity"] == "serious" for item in issues) else "reviewed",
-        "chapters": [{"chapter": chapter, "path": path.relative_to(store.project_dir(project_id)).as_posix()} for chapter, path, _content in chapters],
-        "issues": issues,
-        "summary": f"审查 {len(chapters)} 章，发现 {len(issues)} 个问题。",
-        "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
-    }
-    write_global_review_report(store, project_id, run_id, report)
-    emit("GlobalReview", "全章节审查报告已保存。")
-    return report
+    return issues
+
+
+def build_global_review_prompt(state: NovelState, store: LocalStore, chapters: list[tuple[int, Path, str]]) -> str:
+    outline = store.load_outline_artifact(state.project_id, "chapter_outline").strip()
+    parts = [
+        "AGENT: global_consistency_reviewer",
+        f"PROJECT_ID: {state.project_id}",
+        f"TITLE: {state.title}",
+        "",
+        "请审查已生成章节之间的连续性、设定一致性、人物状态、时间线、重复/断裂问题。",
+        "只输出 JSON，不要 Markdown，不要解释。",
+        "schema: {status, summary, issues}",
+        "status 只能是 reviewed 或 needs_repair。",
+        "issues 每项 schema: {severity, chapter, category, message}。",
+        "severity 只能是 serious 或 normal；chapter 可为章节号或 null。",
+        "serious 用于时间线硬冲突、同一事件重复/覆盖、人物状态矛盾、关键设定冲突、章节正文不完整。",
+        "normal 用于轻微衔接、命名不统一、可读性提示。",
+        "",
+        "## Chapter Outline",
+        outline[:12000] or "暂无",
+    ]
+    for chapter, path, content in chapters:
+        relative = path.relative_to(store.project_dir(state.project_id)).as_posix()
+        parts.extend(["", f"## Chapter {chapter} ({relative})", content[:18000]])
+    return "\n".join(parts).rstrip() + "\n"
+
+
+def normalize_global_review_output(output: str) -> dict[str, Any]:
+    data = parse_json_object(output)
+    issues = []
+    for item in data.get("issues", []) if isinstance(data.get("issues"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        severity = str(item.get("severity") or "normal").strip().lower()
+        if severity not in {"serious", "normal"}:
+            severity = "normal"
+        raw_chapter = item.get("chapter")
+        chapter = int(raw_chapter) if str(raw_chapter).isdigit() else None
+        message = str(item.get("message") or item.get("issue") or "").strip()
+        if not message:
+            continue
+        issues.append(
+            {
+                "severity": severity,
+                "chapter": chapter,
+                "category": str(item.get("category") or "model_review").strip() or "model_review",
+                "message": message,
+            }
+        )
+    status = str(data.get("status") or "").strip().lower()
+    if status not in {"reviewed", "needs_repair"}:
+        status = "needs_repair" if any(item["severity"] == "serious" for item in issues) else "reviewed"
+    return {"status": status, "summary": str(data.get("summary") or "").strip(), "issues": issues}
+
+
+def merge_review_issues(local_issues: list[dict[str, Any]], model_issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    seen: set[tuple[Any, str, str]] = set()
+    for item in [*local_issues, *model_issues]:
+        key = (item.get("chapter"), str(item.get("category") or ""), str(item.get("message") or ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(item)
+    return merged
+
+
+def parse_json_object(raw: str) -> dict[str, Any]:
+    text = str(raw or "").strip()
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start < 0 or end <= start:
+            return {}
+        try:
+            parsed = json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def latest_global_review(store: LocalStore, project_id: str) -> dict[str, Any]:
