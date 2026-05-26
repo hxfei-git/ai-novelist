@@ -1,6 +1,6 @@
 # 会话摘要与上下文压缩记录
 
-更新时间：2026-05-24
+更新时间：2026-05-26
 项目路径：`/home/ubuntu/1.project/ai-novelist`
 
 ## 1. 项目目标
@@ -96,11 +96,11 @@
 
 已实现的 API/服务能力：项目列表与创建、项目 state 读取、大纲阶段列表/读取/保存、显式阶段生成、显式阶段锁定、章节批量生成、全章节审查、读取最新审查报告、生成修复草稿、确认应用修复。大纲生成/锁定直接调用既有 outline 节点，Web 请求显式传入 stage，避免 chat/Director 猜路由。
 
-新增 `web/frontend/` Vite + React + TypeScript 前端壳，包含阶段导航、Markdown 编辑器、保存/生成/锁定按钮、章节批量生成控件、全章节审查与修复草稿控件，并配置 `/api` 代理到后端。
+新增 `web/frontend/` Vite + React + TypeScript 前端壳，并在本轮修订为两栏信息架构：一级只保留`大纲`和`章节`。大纲栏内显示大纲阶段编辑器和`大纲总体审查`（复用 `review_lock`，展示阻塞/非阻塞/回改阶段）；章节栏内显示`章节批量生成`、`已生成章节`和`章节总体审查`（复用 `chapters/review-all` 连贯性审查）。阶段切换和章节切换现在使用 no-store 请求与请求 token，避免旧响应覆盖当前内容。
 
-全章节审查与修复保持非破坏性：审查只写 `chapters/global_consistency/<run_id>/report.json` 和 `.md`；修复草稿只写 `proposed_repair_<run_id>.md`；只有调用 apply repair 后才生成新的 `draft_vN.md`。
+全章节审查与修复保持非破坏性：审查只写 `chapters/global_consistency/<run_id>/report.json` 和 `.md`；修复草稿只写 `proposed_repair_<run_id>.md`；只有调用 apply repair 后才生成新的 `draft_vN.md`。本轮新增章节读取 API：`GET /api/projects/{project_id}/chapters` 和 `GET /api/projects/{project_id}/chapters/{chapter}`，按 `final.md > 最高 draft_vN.md > chapter_###.md` 读取最新正文，生成批次完成后前端刷新章节列表并选中新章节。
 
-验证：新增 `tests/test_web_service.py` 覆盖项目/阶段持久化、显式阶段生成 payload、批量章节参数传递、审查报告不覆盖正文、修复草稿与 apply 分离。已运行 `.venv/bin/python -m pytest tests/test_web_service.py`、`.venv/bin/python -m py_compile src/ai_novelist/web/service.py src/ai_novelist/web/app.py src/ai_novelist/cli.py tests/test_web_service.py`、`.venv/bin/python -m pytest`（327 passed）、`.venv/bin/ai-novelist web --help`、`.venv/bin/python tests/smoke_phase2.py`。前端 `npm --prefix web/frontend run build` 因本机尚未安装 frontend 依赖而停在 `tsc: not found`；随后尝试 `npm --prefix web/frontend install` 长时间无输出，已停止，未产生 node_modules/package-lock。
+验证：`tests/test_web_service.py` 现覆盖项目/阶段持久化、显式阶段生成 payload、批量章节参数传递、章节列表/详情读取优先级、审查报告不覆盖正文、修复草稿与 apply 分离。已运行 `.venv/bin/python -m py_compile src/ai_novelist/web/service.py src/ai_novelist/web/app.py tests/test_web_service.py`、`.venv/bin/python -m pytest tests/test_web_service.py`（5 passed）、`npm --prefix web/frontend run build`、`.venv/bin/python -m pytest`（328 passed），并用 `timeout 5s .venv/bin/ai-novelist web --host 0.0.0.0 --port 8000 --mock` 验证 Web 服务可启动；公网访问需用同一 host/port 并确保云安全组放行 TCP 8000。
 
 ## 3. 最新架构摘要
 

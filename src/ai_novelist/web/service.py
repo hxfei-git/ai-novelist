@@ -30,6 +30,17 @@ class WebProject:
     path: str
 
 
+@dataclass(frozen=True)
+class WebChapter:
+    chapter: int
+    title: str
+    path: str
+    source: str
+    version: int | None
+    updated_at: str
+    summary: str
+
+
 def list_projects(store: LocalStore) -> list[WebProject]:
     if not store.root.exists():
         return []
@@ -192,6 +203,24 @@ def generate_chapter_batch(
     return NovelState.from_dict(result)
 
 
+def list_chapters(store: LocalStore, project_id: str) -> list[dict[str, Any]]:
+    store.load_state(project_id)
+    return [
+        chapter_payload(store, project_id, chapter, path, content, include_content=False)
+        for chapter, path, content in collect_latest_chapters(store, project_id)
+    ]
+
+
+def load_chapter_payload(store: LocalStore, project_id: str, chapter: int) -> dict[str, Any]:
+    if chapter < 1:
+        raise LocalStoreError("Chapter must be greater than 0")
+    store.load_state(project_id)
+    path = latest_chapter_path(store, project_id, chapter)
+    if not path:
+        raise LocalStoreError(f"Chapter does not exist: {chapter}")
+    return chapter_payload(store, project_id, chapter, path, path.read_text(encoding="utf-8"), include_content=True)
+
+
 def review_all_chapters(store: LocalStore, adapter: AgentAdapter, project_id: str, progress: ProgressFunc | None = None) -> dict[str, Any]:
     del adapter
     emit = progress or (lambda _stage, _message: None)
@@ -335,14 +364,53 @@ def collect_latest_chapters(store: LocalStore, project_id: str) -> list[tuple[in
     return chapters
 
 
+def chapter_payload(store: LocalStore, project_id: str, chapter: int, path: Path, content: str, *, include_content: bool) -> dict[str, Any]:
+    source, version = chapter_source(store, project_id, chapter, path)
+    relative = path.relative_to(store.project_dir(project_id)).as_posix()
+    payload = WebChapter(
+        chapter=chapter,
+        title=chapter_title(chapter, content),
+        path=relative,
+        source=source,
+        version=version,
+        updated_at=datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).isoformat(timespec="seconds"),
+        summary=summarize_text(strip_markdown_heading(content), max_chars=180),
+    ).__dict__
+    if include_content:
+        payload["content"] = content
+    return payload
+
+
+def chapter_source(store: LocalStore, project_id: str, chapter: int, path: Path) -> tuple[str, int | None]:
+    if path == store.final_chapter_path(project_id, chapter):
+        return "final", None
+    match = re.fullmatch(r"draft_v(\d+)\.md", path.name)
+    if match:
+        return "draft", int(match.group(1))
+    return "legacy", None
+
+
+def chapter_title(chapter: int, content: str) -> str:
+    for line in content.splitlines():
+        match = re.match(r"^\s*#\s+(.+?)\s*$", line)
+        if match:
+            return match.group(1).strip()
+    return f"第 {chapter} 章"
+
+
 def latest_chapter_path(store: LocalStore, project_id: str, chapter: int) -> Path | None:
     final = store.final_chapter_path(project_id, chapter)
     if final.exists():
         return final
-    for version in range(20, 0, -1):
-        draft = store.chapter_draft_path(project_id, chapter, version)
-        if draft.exists():
-            return draft
+    drafts: list[tuple[int, Path]] = []
+    chapter_dir = store.chapter_artifact_dir(project_id, chapter)
+    if chapter_dir.exists():
+        for path in chapter_dir.glob("draft_v*.md"):
+            match = re.fullmatch(r"draft_v(\d+)\.md", path.name)
+            if match:
+                drafts.append((int(match.group(1)), path))
+    if drafts:
+        return max(drafts, key=lambda item: item[0])[1]
     legacy = store.chapter_path(project_id, chapter)
     return legacy if legacy.exists() else None
 

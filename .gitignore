@@ -9,3 +9,5 @@ __pycache__/
 build/
 dist/
 projects/
+web/frontend/node_modules/
+web/frontend/tsconfig.tsbuildinfo

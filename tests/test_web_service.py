@@ -90,3 +90,47 @@ def test_global_review_and_repair_are_explicit_apply(tmp_path: Path) -> None:
     assert applied["version"] == 2
     assert store.chapter_draft_path("web-demo", 1, 2).exists()
 
+
+def test_chapter_list_and_detail_prefer_final_then_highest_draft_then_legacy(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+
+    state.active_chapter = 1
+    state.current_chapter = 1
+    state.chapter_draft = "# 第 1 章草稿五\n\n这是第五版草稿正文，用于确认最高版本读取。"
+    store.save_chapter_draft(state, version=5)
+    state.current_final_chapter = "# 第 1 章定稿\n\n这是定稿正文，应该优先于所有草稿。"
+    store.save_final_chapter(state)
+
+    state.active_chapter = 2
+    state.current_chapter = 2
+    state.chapter_draft = "# 第 2 章草稿一\n\n旧草稿。"
+    store.save_chapter_draft(state, version=1)
+    state.chapter_draft = "# 第 2 章草稿十二\n\n最高编号草稿，应该被选为最新正文。"
+    store.save_chapter_draft(state, version=12)
+
+    state.active_chapter = 3
+    state.current_chapter = 3
+    state.chapter_draft = "# 第 3 章旧路径\n\n只有 legacy chapter_003.md 时也能读取。"
+    store.save_chapter(state)
+
+    chapters = service.list_chapters(store, "web-demo")
+
+    assert [item["chapter"] for item in chapters] == [1, 2, 3]
+    assert chapters[0]["source"] == "final"
+    assert chapters[0]["version"] is None
+    assert chapters[1]["source"] == "draft"
+    assert chapters[1]["version"] == 12
+    assert chapters[2]["source"] == "legacy"
+
+    first = service.load_chapter_payload(store, "web-demo", 1)
+    second = service.load_chapter_payload(store, "web-demo", 2)
+    third = service.load_chapter_payload(store, "web-demo", 3)
+
+    assert "定稿正文" in first["content"]
+    assert first["path"] == "chapters/chapter_001/final.md"
+    assert "最高编号草稿" in second["content"]
+    assert second["path"] == "chapters/chapter_002/draft_v12.md"
+    assert "旧路径" in third["content"]
+    assert third["path"] == "chapters/chapter_003.md"
+

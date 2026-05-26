@@ -133,6 +133,20 @@ def make_app(settings: Settings | None = None, *, mock: bool = False):
             media_type="text/event-stream",
         )
 
+    @app.get("/api/projects/{project_id}/chapters")
+    def chapters(project_id: str):
+        try:
+            return service.list_chapters(store, project_id)
+        except LocalStoreError as exc:
+            raise as_http_error(exc)
+
+    @app.get("/api/projects/{project_id}/chapters/{chapter}")
+    def chapter_detail(project_id: str, chapter: int):
+        try:
+            return service.load_chapter_payload(store, project_id, chapter)
+        except LocalStoreError as exc:
+            raise as_http_error(exc)
+
     @app.post("/api/projects/{project_id}/chapters/generate-batch")
     def generate_chapter_batch(project_id: str, payload: dict[str, Any]):
         return StreamingResponse(
