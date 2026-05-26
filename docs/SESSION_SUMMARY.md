@@ -2325,3 +2325,9 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - `.venv/bin/python -m pytest`：323 passed。
 
 剩余限制：多阶段回改仍会从识别到的首个优先目标阶段开始执行；后续阶段需要由返回审稿锁定后的审稿意见继续驱动或由用户再指定。
+
+### 2026-05-26 修复章节修复草稿按钮反馈
+
+- 修复前端“生成修复草稿”点击后缺少可见反馈的问题：按钮现在进入“生成中”状态，右侧进度记录开始/完成/错误信息。
+- 修复草稿生成完成后，章节总体审查页会列出生成的 proposed repair 文件和对应问题，并提供逐章“应用修复”入口。
+- 验证：`npm run build`、`.venv/bin/python -m pytest tests/test_web_service.py`。

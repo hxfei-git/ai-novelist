@@ -24,6 +24,24 @@ type Chapter = {
   summary: string;
   content?: string;
 };
+type ReviewIssue = {
+  severity: string;
+  chapter: number | null;
+  category?: string;
+  message: string;
+};
+type ReviewReportData = {
+  project_id: string;
+  run_id: string;
+  status: string;
+  summary: string;
+  issues: ReviewIssue[];
+};
+type RepairProposal = {
+  chapter: number;
+  path: string;
+  issue: ReviewIssue;
+};
 type TopSection = 'outline' | 'chapters';
 type ChapterView = 'batch' | 'list' | 'review';
 
@@ -129,8 +147,10 @@ function App() {
   const [selectedChapter, setSelectedChapter] = useState<number | null>(null);
   const [chapterDetail, setChapterDetail] = useState<Chapter | null>(null);
   const [loadingChapter, setLoadingChapter] = useState(false);
-  const [review, setReview] = useState<any>(null);
+  const [review, setReview] = useState<ReviewReportData | null>(null);
   const [reviewRunning, setReviewRunning] = useState(false);
+  const [repairRunning, setRepairRunning] = useState(false);
+  const [repairProposalsResult, setRepairProposalsResult] = useState<RepairProposal[]>([]);
 
   const stageRequestRef = useRef(0);
   const chapterRequestRef = useRef(0);
@@ -251,17 +271,19 @@ function App() {
   }
 
   async function loadLatestReview() {
-    const latest = await api<any>(`/api/projects/${projectId}/chapters/review-all/latest`);
+    const latest = await api<ReviewReportData>(`/api/projects/${projectId}/chapters/review-all/latest`);
     setReview(latest);
+    setRepairProposalsResult([]);
   }
 
   async function reviewAll() {
     setReviewRunning(true);
     setReview(null);
+    setRepairProposalsResult([]);
     pushLog('章节总体审查已开始');
     try {
       await streamAction(`/api/projects/${projectId}/chapters/review-all`, {}, (line) => pushLog(line));
-      const latest = await api<any>(`/api/projects/${projectId}/chapters/review-all/latest`);
+      const latest = await api<ReviewReportData>(`/api/projects/${projectId}/chapters/review-all/latest`);
       setReview(latest);
       pushLog(`章节总体审查完成：${latest.summary || '无摘要'}`);
     } finally {
@@ -271,11 +293,37 @@ function App() {
 
   async function repairProposals() {
     if (!review?.run_id) return;
-    const result = await api<any>(`/api/projects/${projectId}/chapters/review-all/${review.run_id}/repair-proposals`, {
-      method: 'POST',
-      body: JSON.stringify({}),
-    });
-    pushLog(`repair proposals: ${result.proposals.length}`);
+    setRepairRunning(true);
+    setRepairProposalsResult([]);
+    pushLog(`修复草稿生成已开始：${review.run_id}`);
+    try {
+      const result = await api<{ proposals: RepairProposal[] }>(`/api/projects/${projectId}/chapters/review-all/${review.run_id}/repair-proposals`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      const proposals = Array.isArray(result.proposals) ? result.proposals : [];
+      setRepairProposalsResult(proposals);
+      pushLog(`修复草稿生成完成：${proposals.length} 章`);
+    } catch (error) {
+      showError(error);
+    } finally {
+      setRepairRunning(false);
+    }
+  }
+
+  async function applyRepair(chapter: number) {
+    if (!review?.run_id) return;
+    try {
+      const result = await api<{ path: string; draft_version: number }>(`/api/projects/${projectId}/chapters/${chapter}/apply-repair`, {
+        method: 'POST',
+        body: JSON.stringify({ run_id: review.run_id }),
+      });
+      pushLog(`已应用第 ${chapter} 章修复草稿：draft_v${result.draft_version}`);
+      await refreshChapters();
+      if (selectedChapter === chapter) await loadChapter(chapter);
+    } catch (error) {
+      showError(error);
+    }
   }
 
   return (
@@ -380,10 +428,16 @@ function App() {
               <header className="toolbar"><div><h1>章节总体审查</h1><p>审查已生成章节之间的连续性、设定一致性、人物状态、时间线、重复/断裂问题</p></div></header>
               <div className="review-actions">
                 <button onClick={reviewAll} disabled={reviewRunning}><Check size={16} />{reviewRunning ? '审查中' : '开始审查'}</button>
-                <button onClick={repairProposals} disabled={reviewRunning || !review?.run_id}><RefreshCw size={16} />生成修复草稿</button>
+                <button onClick={repairProposals} disabled={reviewRunning || repairRunning || !review?.run_id}>
+                  <RefreshCw size={16} />{repairRunning ? '生成中' : '生成修复草稿'}
+                </button>
               </div>
               {reviewRunning && <div className="loading">章节总体审查正在运行...</div>}
+              {repairRunning && <div className="loading">修复草稿正在生成...</div>}
               {review && <ReviewReport review={review} />}
+              {repairProposalsResult.length > 0 && (
+                <RepairProposalList proposals={repairProposalsResult} onApply={applyRepair} />
+              )}
             </>
           )}
         </section>
@@ -409,7 +463,7 @@ function IssueBlock({ title, items }: { title: string; items: string[] }) {
   );
 }
 
-function ReviewReport({ review }: { review: any }) {
+function ReviewReport({ review }: { review: ReviewReportData }) {
   const issues = Array.isArray(review.issues) ? review.issues : [];
   return (
     <div className="review-report">
@@ -417,6 +471,21 @@ function ReviewReport({ review }: { review: any }) {
       <span>run_id: {review.run_id}</span>
       {issues.map((item: any, index: number) => (
         <p key={`${index}-${item.message}`}>[{item.severity}] {item.chapter ? `第 ${item.chapter} 章` : '全局'} {item.message}</p>
+      ))}
+    </div>
+  );
+}
+
+function RepairProposalList({ proposals, onApply }: { proposals: RepairProposal[]; onApply: (chapter: number) => void }) {
+  return (
+    <div className="review-report repair-proposals">
+      <strong>已生成修复草稿</strong>
+      {proposals.map((item) => (
+        <div className="repair-proposal" key={`${item.chapter}-${item.path}`}>
+          <p>第 {item.chapter} 章 · {item.path}</p>
+          <small>{item.issue.message}</small>
+          <button onClick={() => onApply(item.chapter)}><Check size={16} />应用修复</button>
+        </div>
       ))}
     </div>
   );
