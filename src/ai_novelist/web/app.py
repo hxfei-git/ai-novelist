@@ -133,6 +133,45 @@ def make_app(settings: Settings | None = None, *, mock: bool = False):
             media_type="text/event-stream",
         )
 
+    @app.get("/api/projects/{project_id}/outline/review/latest")
+    def latest_outline_review(project_id: str):
+        try:
+            return service.latest_outline_review_report(store, project_id)
+        except LocalStoreError as exc:
+            raise as_http_error(exc)
+
+    @app.post("/api/projects/{project_id}/outline/review")
+    def review_outline(project_id: str, payload: dict[str, Any] | None = None):
+        payload = payload or {}
+        return StreamingResponse(
+            sse_events(
+                lambda progress: service.review_outline(
+                    store,
+                    adapter(payload),
+                    project_id,
+                    str(payload.get("instruction") or ""),
+                    progress,
+                )
+            ),
+            media_type="text/event-stream",
+        )
+
+    @app.post("/api/projects/{project_id}/outline/review/{run_id}/apply")
+    def apply_outline_review(project_id: str, run_id: str, payload: dict[str, Any] | None = None):
+        payload = payload or {}
+        return StreamingResponse(
+            sse_events(
+                lambda progress: service.apply_outline_review(
+                    store,
+                    adapter(payload),
+                    project_id,
+                    run_id,
+                    progress,
+                )
+            ),
+            media_type="text/event-stream",
+        )
+
     @app.get("/api/projects/{project_id}/chapters")
     def chapters(project_id: str):
         try:
@@ -189,7 +228,19 @@ def make_app(settings: Settings | None = None, *, mock: bool = False):
     @app.post("/api/projects/{project_id}/chapters/{chapter}/apply-repair")
     def apply_repair(project_id: str, chapter: int, payload: dict[str, Any]):
         try:
-            return service.apply_repair(store, project_id, chapter, str(payload.get("run_id") or ""))
+            selected_issue_ids = payload.get("selected_issue_ids")
+            if isinstance(selected_issue_ids, list):
+                selected_issue_ids = [str(item) for item in selected_issue_ids if str(item).strip()]
+            else:
+                selected_issue_ids = None
+            return service.apply_repair(
+                store,
+                adapter(payload),
+                project_id,
+                chapter,
+                str(payload.get("run_id") or ""),
+                selected_issue_ids=selected_issue_ids,
+            )
         except LocalStoreError as exc:
             raise as_http_error(exc)
 

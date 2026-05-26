@@ -32,6 +32,22 @@ class FailingReviewAdapter(AgentAdapter):
         return "{}"
 
 
+class OutlineReviewAdapter(AgentAdapter):
+    def complete(self, prompt: str, workspace: Path, options: AgentCallOptions | None = None) -> str:
+        if "outline_editor" in prompt:
+            return (
+                "STATUS: revise\nQUALITY_SCORE: 72\n"
+                "## 总体判断\n章节大纲缺少结尾收束。\n\n"
+                "## 主要问题\n- 章节列表总表偏概括。\n\n"
+                "## 修改建议\n- 补强最后一卷的收束钩子。\n"
+            )
+        if "outline_reviser" in prompt:
+            return "# 最终锁定总大纲\n\n## 方向定位\n已补强结尾收束。"
+        if "version_comparator" in prompt:
+            return "# 大纲版本比较\n\n修订补强了结尾收束。"
+        return "{}"
+
+
 def test_project_and_outline_stage_file_roundtrip(tmp_path: Path) -> None:
     store = LocalStore(tmp_path)
     state = service.create_project(store, "Web Demo", "web-demo", idea="一个显式流程控制的小说项目")
@@ -68,6 +84,39 @@ def test_generate_outline_stage_uses_explicit_stage(monkeypatch, tmp_path: Path)
     assert state.user_request == "补强人物关系"
 
 
+def test_outline_stage_list_hides_review_lock(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+    state.outline_stage_artifacts["direction"] = {"stage": "direction", "label": "方向定位", "status": "locked", "summary": "方向"}
+    state.outline_stage_artifacts["review_lock"] = {"stage": "review_lock", "label": "审稿锁定", "status": "options_ready", "summary": "旧审查"}
+    store.save_state(state)
+
+    stages = service.outline_stage_list(store, "web-demo")
+
+    assert all(item["stage"] != "review_lock" for item in stages)
+
+
+def test_outline_review_roundtrip_and_apply_updates_outline(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+    state.outline = "# 最终锁定总大纲\n\n## 方向定位\n旧稿。"
+    store.save_state(state)
+
+    report = service.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
+    assert report["decision"] == "revise"
+    assert report["score"] == 72
+    latest = service.latest_outline_review_report(store, "web-demo")
+    assert latest["run_id"] == report["run_id"]
+
+    applied = service.apply_outline_review(store, OutlineReviewAdapter(), "web-demo", report["run_id"])
+
+    assert applied["applied"] is True
+    assert store.outline_path("web-demo").exists()
+    saved = store.load_state("web-demo")
+    assert saved.outline_review_applied_run_id == report["run_id"]
+    assert saved.outline_review_run_id == report["run_id"]
+
+
 def test_chapter_batch_payload_sets_director_task_args(monkeypatch, tmp_path: Path) -> None:
     store = LocalStore(tmp_path)
     store.create_project("Web Demo", "web-demo")
@@ -97,14 +146,15 @@ def test_global_review_and_repair_are_explicit_apply(tmp_path: Path) -> None:
     report = service.review_all_chapters(store, DummyAdapter(), "web-demo")
     assert report["status"] == "needs_repair"
     assert store.chapter_draft_path("web-demo", 1, 1).read_text(encoding="utf-8") == original
-
-    proposals = service.generate_repair_proposals(store, DummyAdapter(), "web-demo", report["run_id"])
-    assert proposals["proposals"][0]["chapter"] == 1
-    proposed_path = store.project_dir("web-demo") / proposals["proposals"][0]["path"]
-    assert proposed_path.exists()
+    suggestions = report["repair_suggestions"]
+    assert suggestions[0]["chapter"] == 1
+    assert suggestions[0]["selected"] is True
     assert not store.chapter_draft_path("web-demo", 1, 2).exists()
 
-    applied = service.apply_repair(store, "web-demo", 1, report["run_id"])
+    proposals = service.generate_repair_proposals(store, DummyAdapter(), "web-demo", report["run_id"])
+    assert proposals["proposals"][0]["recommendation"]
+
+    applied = service.apply_repair(store, DummyAdapter(), "web-demo", 1, report["run_id"], selected_issue_ids=[suggestions[0]["id"]])
     assert applied["version"] == 2
     assert store.chapter_draft_path("web-demo", 1, 2).exists()
 
@@ -167,6 +217,8 @@ def test_global_review_uses_model_consistency_report(tmp_path: Path) -> None:
     assert report["review_source"] == "model"
     assert report["summary"] == "模型发现连续性问题。"
     assert any(item["category"] == "timeline" for item in report["issues"])
+    assert report["repair_suggestions"][0]["selected"] is True
+    assert "前后章节" in report["repair_suggestions"][0]["recommendation"]
     saved = service.latest_global_review(store, "web-demo")
     assert saved["run_id"] == report["run_id"]
 

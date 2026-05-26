@@ -38,14 +38,28 @@ nav small { color: #5c6f7c; font-size: 11px; }
 .chapter-meta { display: flex; gap: 10px; justify-content: space-between; align-items: baseline; flex-wrap: wrap; }
 .chapter-body { white-space: pre-wrap; background: #ffffff; border: 1px solid #d9e0e7; border-radius: 6px; padding: 14px; margin: 0; line-height: 1.6; min-height: 520px; overflow: auto; }
 .review-actions { display: flex; gap: 8px; }
+.outline-review-panel { display: flex; flex-direction: column; gap: 10px; border: 1px solid #d9e0e7; background: #fbfcfd; border-radius: 6px; padding: 12px; }
+.review-header { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+.review-header p { margin: 4px 0 0; color: #647582; line-height: 1.45; }
+.review-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+.outline-review-report { gap: 6px; }
+.outline-review-report strong { line-height: 1.45; }
+.outline-review-report small { color: #647582; line-height: 1.45; }
+.empty-review { color: #647582; }
 .review-report { display: flex; flex-direction: column; gap: 8px; border: 1px solid #d9e0e7; background: #ffffff; border-radius: 6px; padding: 12px; }
 .review-report span { color: #647582; font-size: 12px; }
 .review-report p { margin: 0; line-height: 1.45; }
 
 .repair-proposals { gap: 10px; }
-.repair-proposal { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; border-top: 1px solid #e1e7ed; padding-top: 10px; }
-.repair-proposal small { grid-column: 1 / -1; color: #647582; line-height: 1.45; }
-.repair-proposal button { justify-self: end; }
+.repair-chapter { display: flex; flex-direction: column; gap: 10px; border-top: 1px solid #e1e7ed; padding-top: 10px; }
+.repair-chapter-head { display: flex; justify-content: space-between; gap: 10px; align-items: center; flex-wrap: wrap; }
+.repair-chapter-head div { display: flex; flex-direction: column; gap: 3px; }
+.repair-chapter-head small { color: #647582; }
+.repair-suggestion-list { display: flex; flex-direction: column; gap: 8px; }
+.repair-suggestion { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; align-items: start; border: 1px solid #e1e7ed; border-radius: 6px; padding: 9px; background: #fbfcfd; }
+.repair-suggestion input { margin-top: 3px; }
+.repair-suggestion strong { line-height: 1.4; }
+.repair-suggestion p { margin: 3px 0 0; color: #647582; line-height: 1.45; }
 .right { border-left: 1px solid #d9e0e7; padding: 16px; background: #fbfcfd; display: flex; flex-direction: column; gap: 14px; }
 .right section { display: flex; flex-direction: column; gap: 8px; }
 .right h2 { margin: 0 0 4px; font-size: 15px; }

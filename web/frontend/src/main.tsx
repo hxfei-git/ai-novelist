@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Check, FileText, Layers, ListChecks, Lock, Play, RefreshCw, Save } from 'lucide-react';
+import { Check, FileText, Layers, ListChecks, Lock, Play, RefreshCw, Save, X } from 'lucide-react';
 import './styles.css';
 
 type Project = { project_id: string; title: string; path: string };
@@ -11,7 +11,7 @@ type Stage = {
   active: boolean;
   summary: string;
   pending_questions: string[];
-  review_lock_issues: { blocking: string[]; detail: string[]; revision_targets: string[] };
+  review_lock_issues?: { blocking: string[]; detail: string[]; revision_targets: string[] };
   content?: string;
 };
 type Chapter = {
@@ -30,23 +30,39 @@ type ReviewIssue = {
   category?: string;
   message: string;
 };
+type ReviewSuggestion = {
+  id: string;
+  chapter: number | null;
+  severity: string;
+  category: string;
+  message: string;
+  recommendation: string;
+  selected: boolean;
+};
 type ReviewReportData = {
   project_id: string;
   run_id: string;
   status: string;
   summary: string;
   issues: ReviewIssue[];
+  repair_suggestions?: ReviewSuggestion[];
 };
-type RepairProposal = {
-  chapter: number;
-  path: string;
-  issue: ReviewIssue;
+type OutlineReview = {
+  project_id: string;
+  run_id: string;
+  created_at: string;
+  status: string;
+  decision: string;
+  score: number;
+  summary: string;
+  notes: string;
+  revision_instruction: string;
+  source_outline_summary: string;
+  source_outline: string;
 };
 type TopSection = 'outline' | 'chapters';
 type ChapterView = 'batch' | 'list' | 'review';
 
-const emptyIssues = { blocking: [], detail: [], revision_targets: [] };
-const outlineReviewCopy = '大纲总体审查';
 const maxLogItems = 10;
 
 function progressLogKey(projectId: string) {
@@ -71,7 +87,7 @@ function writeProgressLog(projectId: string, items: string[]) {
 
 function stageLabel(stage: Stage | undefined, fallback: string) {
   if (!stage) return fallback;
-  return stage.stage === 'review_lock' ? outlineReviewCopy : stage.label;
+  return stage.label || fallback;
 }
 
 function chapterVersionLabel(chapter: Chapter | null) {
@@ -79,6 +95,32 @@ function chapterVersionLabel(chapter: Chapter | null) {
   if (chapter.source === 'final') return '定稿';
   if (chapter.source === 'draft') return `草稿 v${chapter.version ?? 1}`;
   return '旧正文';
+}
+
+function buildRepairSelectionMap(suggestions: ReviewSuggestion[]) {
+  const next: Record<string, boolean> = {};
+  suggestions.forEach((item) => {
+    next[item.id] = item.selected !== false;
+  });
+  return next;
+}
+
+function groupRepairSuggestions(suggestions: ReviewSuggestion[]) {
+  const groups = new Map<number | null, ReviewSuggestion[]>();
+  suggestions.forEach((item) => {
+    const key = item.chapter;
+    const items = groups.get(key) || [];
+    items.push(item);
+    groups.set(key, items);
+  });
+  return [...groups.entries()]
+    .sort((left, right) => {
+      if (left[0] === null && right[0] === null) return 0;
+      if (left[0] === null) return 1;
+      if (right[0] === null) return -1;
+      return left[0] - right[0];
+    })
+    .map(([chapter, items]) => ({ chapter, items }));
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -149,13 +191,16 @@ function App() {
   const [loadingChapter, setLoadingChapter] = useState(false);
   const [review, setReview] = useState<ReviewReportData | null>(null);
   const [reviewRunning, setReviewRunning] = useState(false);
-  const [repairRunning, setRepairRunning] = useState(false);
-  const [repairProposalsResult, setRepairProposalsResult] = useState<RepairProposal[]>([]);
+  const [selectedRepairIds, setSelectedRepairIds] = useState<Record<string, boolean>>({});
+  const [applyingChapter, setApplyingChapter] = useState<number | null>(null);
+  const [outlineReview, setOutlineReview] = useState<OutlineReview | null>(null);
+  const [outlineReviewRunning, setOutlineReviewRunning] = useState(false);
+  const [outlineReviewApplying, setOutlineReviewApplying] = useState(false);
 
   const stageRequestRef = useRef(0);
   const chapterRequestRef = useRef(0);
   const current = useMemo(() => stages.find((item) => item.stage === activeStage), [stages, activeStage]);
-  const currentIssues = current?.review_lock_issues || emptyIssues;
+  const visibleStages = useMemo(() => stages.filter((item) => item.stage !== 'review_lock'), [stages]);
 
   useEffect(() => {
     refreshProjects().catch(showError);
@@ -167,6 +212,7 @@ function App() {
     refreshStages().catch(showError);
     refreshChapters().catch(showError);
     loadLatestReview().catch(() => setReview(null));
+    loadLatestOutlineReview().catch(() => setOutlineReview(null));
   }, [projectId]);
 
   useEffect(() => {
@@ -206,6 +252,10 @@ function App() {
   async function refreshStages() {
     const items = await api<Stage[]>(`/api/projects/${projectId}/outline/stages`);
     setStages(items);
+    if (items.length > 0 && !items.find((item) => item.stage === activeStage)) {
+      const firstVisible = items.find((item) => item.stage !== 'review_lock');
+      if (firstVisible) setActiveStage(firstVisible.stage);
+    }
   }
 
   async function loadStage(stage: string) {
@@ -273,56 +323,86 @@ function App() {
   async function loadLatestReview() {
     const latest = await api<ReviewReportData>(`/api/projects/${projectId}/chapters/review-all/latest`);
     setReview(latest);
-    setRepairProposalsResult([]);
+    setSelectedRepairIds(buildRepairSelectionMap(latest.repair_suggestions || []));
+  }
+
+  async function loadLatestOutlineReview() {
+    const latest = await api<OutlineReview>(`/api/projects/${projectId}/outline/review/latest`);
+    setOutlineReview(latest);
+  }
+
+  async function runOutlineReview() {
+    setOutlineReviewRunning(true);
+    pushLog('大纲总体审查已开始');
+    try {
+      await streamAction(`/api/projects/${projectId}/outline/review`, { instruction: instruction.trim() }, (line) => pushLog(line));
+      await loadLatestOutlineReview();
+      pushLog('大纲总体审查完成');
+    } catch (error) {
+      showError(error);
+    } finally {
+      setOutlineReviewRunning(false);
+    }
+  }
+
+  async function applyOutlineReview() {
+    if (!outlineReview?.run_id) return;
+    setOutlineReviewApplying(true);
+    pushLog(`大纲审查应用已开始：${outlineReview.run_id}`);
+    try {
+      await streamAction(`/api/projects/${projectId}/outline/review/${outlineReview.run_id}/apply`, {}, (line) => pushLog(line));
+      await loadLatestOutlineReview();
+      pushLog('大纲审查建议已应用');
+    } catch (error) {
+      showError(error);
+    } finally {
+      setOutlineReviewApplying(false);
+    }
+  }
+
+  function dismissOutlineReview() {
+    if (!outlineReview) return;
+    pushLog(`已拒绝采纳大纲审查建议：${outlineReview.run_id}`);
+    setOutlineReview((currentReview) => (currentReview ? { ...currentReview, status: 'dismissed' } : currentReview));
   }
 
   async function reviewAll() {
     setReviewRunning(true);
     setReview(null);
-    setRepairProposalsResult([]);
+    setSelectedRepairIds({});
     pushLog('章节总体审查已开始');
     try {
       await streamAction(`/api/projects/${projectId}/chapters/review-all`, {}, (line) => pushLog(line));
       const latest = await api<ReviewReportData>(`/api/projects/${projectId}/chapters/review-all/latest`);
       setReview(latest);
+      setSelectedRepairIds(buildRepairSelectionMap(latest.repair_suggestions || []));
       pushLog(`章节总体审查完成：${latest.summary || '无摘要'}`);
     } finally {
       setReviewRunning(false);
     }
   }
 
-  async function repairProposals() {
-    if (!review?.run_id) return;
-    setRepairRunning(true);
-    setRepairProposalsResult([]);
-    pushLog(`修复草稿生成已开始：${review.run_id}`);
-    try {
-      const result = await api<{ proposals: RepairProposal[] }>(`/api/projects/${projectId}/chapters/review-all/${review.run_id}/repair-proposals`, {
-        method: 'POST',
-        body: JSON.stringify({}),
-      });
-      const proposals = Array.isArray(result.proposals) ? result.proposals : [];
-      setRepairProposalsResult(proposals);
-      pushLog(`修复草稿生成完成：${proposals.length} 章`);
-    } catch (error) {
-      showError(error);
-    } finally {
-      setRepairRunning(false);
-    }
-  }
-
   async function applyRepair(chapter: number) {
     if (!review?.run_id) return;
+    const suggestions = (review.repair_suggestions || []).filter((item) => item.chapter === chapter);
+    const selectedIssueIds = suggestions.filter((item) => selectedRepairIds[item.id] !== false).map((item) => item.id);
+    if (selectedIssueIds.length === 0) {
+      pushLog(`第 ${chapter} 章没有选中的修改建议`);
+      return;
+    }
+    setApplyingChapter(chapter);
     try {
-      const result = await api<{ path: string; draft_version: number }>(`/api/projects/${projectId}/chapters/${chapter}/apply-repair`, {
+      const result = await api<{ path: string; version: number }>(`/api/projects/${projectId}/chapters/${chapter}/apply-repair`, {
         method: 'POST',
-        body: JSON.stringify({ run_id: review.run_id }),
+        body: JSON.stringify({ run_id: review.run_id, selected_issue_ids: selectedIssueIds }),
       });
-      pushLog(`已应用第 ${chapter} 章修复草稿：draft_v${result.draft_version}`);
+      pushLog(`已提交第 ${chapter} 章修改：draft_v${result.version}`);
       await refreshChapters();
       if (selectedChapter === chapter) await loadChapter(chapter);
     } catch (error) {
       showError(error);
+    } finally {
+      setApplyingChapter(null);
     }
   }
 
@@ -344,7 +424,7 @@ function App() {
         </div>
         {topSection === 'outline' ? (
           <nav>
-            {stages.map((item) => (
+            {visibleStages.map((item) => (
               <button className={item.stage === activeStage ? 'active' : ''} key={item.stage} onClick={() => setActiveStage(item.stage)}>
                 <FileText size={16} />
                 <span>{stageLabel(item, item.stage)}</span>
@@ -366,21 +446,16 @@ function App() {
           <header className="toolbar">
             <div>
               <h1>{stageLabel(current, activeStage)}</h1>
-              <p>{activeStage === 'review_lock' ? '审查并锁定大纲阶段之间的继承、阻塞问题与回改目标' : current?.status || 'not_generated'}</p>
+              <p>{current?.status || 'not_generated'}</p>
             </div>
             <button onClick={saveStage} disabled={loadingStage}><Save size={16} />保存</button>
             <button onClick={() => runStage('generate')} disabled={loadingStage}><RefreshCw size={16} />生成/修订</button>
             <button onClick={() => runStage('lock')} disabled={loadingStage}><Lock size={16} />锁定</button>
+            <button onClick={runOutlineReview} disabled={loadingStage || outlineReviewRunning}><ListChecks size={16} />{outlineReviewRunning ? '审查中' : '总体审查'}</button>
           </header>
           <input className="instruction" value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder="当前大纲阶段生成/修订说明" />
           {loadingStage ? <div className="loading">正在读取 {stageLabel(current, activeStage)}...</div> : <textarea className="editor" value={content} onChange={(event) => setContent(event.target.value)} />}
-          {activeStage === 'review_lock' && (
-            <div className="issues-grid">
-              <IssueBlock title="阻塞问题" items={currentIssues.blocking} />
-              <IssueBlock title="非阻塞问题" items={currentIssues.detail} />
-              <IssueBlock title="需回改阶段" items={currentIssues.revision_targets} />
-            </div>
-          )}
+          <OutlineReviewPanel review={outlineReview} running={outlineReviewRunning} applying={outlineReviewApplying} onApply={applyOutlineReview} onDismiss={dismissOutlineReview} />
         </section>
       ) : (
         <section className="workspace chapter-workspace">
@@ -425,18 +500,20 @@ function App() {
           )}
           {chapterView === 'review' && (
             <>
-              <header className="toolbar"><div><h1>章节总体审查</h1><p>审查已生成章节之间的连续性、设定一致性、人物状态、时间线、重复/断裂问题</p></div></header>
+              <header className="toolbar"><div><h1>章节总体审查</h1><p>审查结果会直接显示默认勾选的修改建议，按章提交即可</p></div></header>
               <div className="review-actions">
                 <button onClick={reviewAll} disabled={reviewRunning}><Check size={16} />{reviewRunning ? '审查中' : '开始审查'}</button>
-                <button onClick={repairProposals} disabled={reviewRunning || repairRunning || !review?.run_id}>
-                  <RefreshCw size={16} />{repairRunning ? '生成中' : '生成修复草稿'}
-                </button>
               </div>
               {reviewRunning && <div className="loading">章节总体审查正在运行...</div>}
-              {repairRunning && <div className="loading">修复草稿正在生成...</div>}
               {review && <ReviewReport review={review} />}
-              {repairProposalsResult.length > 0 && (
-                <RepairProposalList proposals={repairProposalsResult} onApply={applyRepair} />
+              {review && (review.repair_suggestions || []).length > 0 && (
+                <RepairSuggestionBoard
+                  review={review}
+                  selectedRepairIds={selectedRepairIds}
+                  onToggle={(id, checked) => setSelectedRepairIds((currentState) => ({ ...currentState, [id]: checked }))}
+                  onSubmit={applyRepair}
+                  submittingChapter={applyingChapter}
+                />
               )}
             </>
           )}
@@ -451,6 +528,51 @@ function App() {
         </section>
       </aside>
     </main>
+  );
+}
+
+
+function OutlineReviewPanel({
+  review,
+  running,
+  applying,
+  onApply,
+  onDismiss,
+}: {
+  review: OutlineReview | null;
+  running: boolean;
+  applying: boolean;
+  onApply: () => void;
+  onDismiss: () => void;
+}) {
+  const hasReview = Boolean(review);
+  return (
+    <section className="outline-review-panel">
+      <header className="review-header">
+        <div>
+          <strong>大纲总体审查</strong>
+          <p>{hasReview ? `${review?.status || 'reviewed'} · ${review?.decision || 'revise'} · ${review?.score ?? 0}` : '暂无审查结果'}</p>
+        </div>
+        <div className="review-buttons">
+          <button onClick={onDismiss} disabled={!hasReview || running || applying}><X size={16} />不采纳</button>
+          <button onClick={onApply} disabled={!hasReview || running || applying || review?.decision === 'stop'}><Check size={16} />采纳修改</button>
+        </div>
+      </header>
+      {running && <div className="loading">大纲总体审查正在运行...</div>}
+      {hasReview ? (
+        <div className="review-report outline-review-report">
+          <span>run_id: {review?.run_id}</span>
+          <strong>{review?.summary}</strong>
+          <p>{review?.notes}</p>
+          <small>参考大纲：{review?.source_outline_summary}</small>
+        </div>
+      ) : (
+        <div className="review-report outline-review-report empty-review">
+          <p>点击“总体审查”生成大纲审查意见。</p>
+        </div>
+      )}
+      {applying && <div className="loading">大纲审查建议正在应用...</div>}
+    </section>
   );
 }
 
@@ -476,17 +598,58 @@ function ReviewReport({ review }: { review: ReviewReportData }) {
   );
 }
 
-function RepairProposalList({ proposals, onApply }: { proposals: RepairProposal[]; onApply: (chapter: number) => void }) {
+function RepairSuggestionBoard({
+  review,
+  selectedRepairIds,
+  onToggle,
+  onSubmit,
+  submittingChapter,
+}: {
+  review: ReviewReportData;
+  selectedRepairIds: Record<string, boolean>;
+  onToggle: (id: string, checked: boolean) => void;
+  onSubmit: (chapter: number) => void;
+  submittingChapter: number | null;
+}) {
+  const groups = groupRepairSuggestions(review.repair_suggestions || []);
   return (
     <div className="review-report repair-proposals">
-      <strong>已生成修复草稿</strong>
-      {proposals.map((item) => (
-        <div className="repair-proposal" key={`${item.chapter}-${item.path}`}>
-          <p>第 {item.chapter} 章 · {item.path}</p>
-          <small>{item.issue.message}</small>
-          <button onClick={() => onApply(item.chapter)}><Check size={16} />应用修复</button>
-        </div>
-      ))}
+      <strong>修改建议</strong>
+      {groups.map((group) => {
+        const chapter = typeof group.chapter === 'number' ? group.chapter : null;
+        const label = chapter ? `第 ${chapter} 章` : '全局问题';
+        const submitChapter = chapter === null ? undefined : () => onSubmit(chapter);
+        return (
+          <section className="repair-chapter" key={group.chapter ?? 'global'}>
+            <div className="repair-chapter-head">
+              <div>
+                <strong>{label}</strong>
+                <small>{group.items.length} 条建议，默认全选</small>
+              </div>
+              {chapter !== null && (
+                <button onClick={submitChapter} disabled={submittingChapter === chapter}>
+                  <Check size={16} />{submittingChapter === chapter ? '提交中' : '提交修改'}
+                </button>
+              )}
+            </div>
+            <div className="repair-suggestion-list">
+              {group.items.map((item) => (
+                <label className="repair-suggestion" key={item.id}>
+                  <input
+                    type="checkbox"
+                    checked={selectedRepairIds[item.id] ?? item.selected !== false}
+                    onChange={(event) => onToggle(item.id, event.target.checked)}
+                  />
+                  <div>
+                    <strong>{item.recommendation}</strong>
+                    <p>[{item.severity}] {item.message}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </section>
+        );
+      })}
     </div>
   );
 }

@@ -119,7 +119,6 @@ def test_seven_stage_confirmation_persists_final_outline_and_artifacts(tmp_path)
         "story_flow",
         "volume_outline",
         "chapter_outline",
-        "review_lock",
     ]
     for _ in range(14):
         if state.outline_stage == "done":
@@ -134,6 +133,8 @@ def test_seven_stage_confirmation_persists_final_outline_and_artifacts(tmp_path)
     assert "分卷大纲" in state.outline
     assert "章节大纲" in state.outline
     assert store.outline_path("demo").exists()
+    assert state.outline_stage_artifacts["chapter_outline"]["status"] == "locked"
+    assert "review_lock" not in state.outline_stage_artifacts
     assert store.novel_bible_json_path("demo").exists()
     assert store.novel_bible_markdown_path("demo").exists()
     records = load_artifacts(store.project_dir("demo"))
@@ -510,7 +511,7 @@ def test_chapter_profile_required_points_are_flexible_by_function():
     assert "结尾钩子" in profile_required_points("反转章")
 
 
-def test_chapter_outline_confirmation_advances_by_volume_before_review_lock(tmp_path):
+def test_chapter_outline_confirmation_advances_by_volume_then_finishes(tmp_path):
     store = LocalStore(tmp_path)
     state = store.create_project("Demo", "demo")
     state.idea = "重生魔门"
@@ -563,10 +564,12 @@ def test_chapter_outline_confirmation_advances_by_volume_before_review_lock(tmp_
     state.director_intent = "lock"
     state = run_outline_turn(graph, state, store, "确认进入下一阶段")
 
-    assert state.outline_stage == "review_lock"
+    assert state.outline_stage == "done"
+    assert state.outline_stage_status == "done"
     assert state.outline_stage_artifacts["chapter_outline"]["status"] == "locked"
     metadata = state.outline_stage_artifacts["chapter_outline"]["metadata"]
     assert metadata["completed_volumes"] == [1, 2]
+    assert "review_lock" not in state.outline_stage_artifacts
 
 
 def test_review_lock_prompt_is_status_first_and_non_creative():

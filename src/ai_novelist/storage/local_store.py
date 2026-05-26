@@ -52,6 +52,18 @@ class LocalStore:
     def outline_dir(self, project_id: str) -> Path:
         return self.project_dir(project_id) / "outline"
 
+    def outline_review_dir(self, project_id: str) -> Path:
+        return self.outline_dir(project_id) / "reviews"
+
+    def outline_review_run_dir(self, project_id: str, run_id: str) -> Path:
+        return self.outline_review_dir(project_id) / run_id
+
+    def outline_review_report_path(self, project_id: str, run_id: str) -> Path:
+        return self.outline_review_run_dir(project_id, run_id) / "report.json"
+
+    def outline_review_markdown_path(self, project_id: str, run_id: str) -> Path:
+        return self.outline_review_run_dir(project_id, run_id) / "report.md"
+
     def state_path(self, project_id: str) -> Path:
         return self.project_dir(project_id) / "state.json"
 

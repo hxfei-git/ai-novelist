@@ -30,6 +30,12 @@ class NovelState:
     outline: str = ""
     worldbuilding: str = ""
     chapter_plan: str = ""
+    outline_review_run_id: str = ""
+    outline_review_status: str = ""
+    outline_review_score: int = 0
+    outline_review_summary: str = ""
+    outline_review_report_path: str = ""
+    outline_review_applied_run_id: str = ""
     current_chapter: int = 1
     chapter_draft: str = ""
     editor_notes: str = ""
@@ -110,6 +116,12 @@ class NovelState:
             outline=str(data.get("outline", "")),
             worldbuilding=str(data.get("worldbuilding", "")),
             chapter_plan=str(data.get("chapter_plan", "")),
+            outline_review_run_id=str(data.get("outline_review_run_id", "")),
+            outline_review_status=str(data.get("outline_review_status", "")),
+            outline_review_score=int(data.get("outline_review_score", 0)),
+            outline_review_summary=str(data.get("outline_review_summary", "")),
+            outline_review_report_path=str(data.get("outline_review_report_path", "")),
+            outline_review_applied_run_id=str(data.get("outline_review_applied_run_id", "")),
             current_chapter=int(data.get("current_chapter", 1)),
             chapter_draft=str(data.get("chapter_draft", "")),
             editor_notes=str(data.get("editor_notes", "")),

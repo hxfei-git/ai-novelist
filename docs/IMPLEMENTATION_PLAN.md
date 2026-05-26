@@ -63,7 +63,7 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
 
 本次新增本地 Web/API 第一版，继续沿用 `projects/` 文件存储，不引入数据库。后端位于 `src/ai_novelist/web/`：
 
-- `service.py` 提供不依赖 FastAPI 的项目列表、项目创建、大纲阶段读取/保存、显式阶段生成、显式阶段锁定、批量章节生成、全章节审查、修复草稿生成和应用修复能力。
+- `service.py` 提供不依赖 FastAPI 的项目列表、项目创建、大纲阶段读取/保存、显式阶段生成、显式阶段锁定、批量章节生成、全章节审查、默认全选的按章修改建议和按章应用修复能力。
 - `app.py` 提供 FastAPI `/api/*` 路由，并用 SSE 返回生成/锁定/批量章节/全章节审查进度。
 - CLI 新增 `ai-novelist web --host 127.0.0.1 --port 8000 --mock`，Web 依赖通过 `pip install -e '.[web]'` 安装。
 
@@ -71,11 +71,23 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
 
 章节页 API 复用 `build_volume_write_graph()`，`POST /api/projects/{project_id}/chapters/generate-batch` 会把 `{ volume, chapters, max_workers }` 写入 `director_task_args`，并设置并发环境变量。Web 前端不传 `mock` 字段，真实/mock 模式只由后端启动参数决定；不带 `--mock` 启动时与 `ai-novelist chat --project ...` 一样走真实模型配置。重复生成已存在章节时，批量写作图追加新的 `draft_vN.md`，不覆盖旧 draft，旧路径 `chapter_###.md` 作为最新正文副本同步更新。
 
-全章节审查是文件安全流程：`review-all` 先对最新 final/draft 做本地完整性扫描，再在存在章节正文时调用 `global_consistency_reviewer` 模型审查跨章连续性、设定一致性、人物状态和时间线问题；模型失败时保留本地扫描并记录 `model_review_error`。审查只写 `chapters/global_consistency/<run_id>/report.json` 与 `.md`，不改正文；`repair-proposals` 只为 serious 问题写 `chapters/chapter_###/proposed_repair_<run_id>.md`；前端点击后会显示生成中状态、列出每章修复草稿路径，并提供逐章应用入口；`apply-repair` 才把用户确认的 proposed repair 另存为新的 `draft_vN.md`，同时保留原 draft。
+全章节审查是文件安全流程：`review-all` 先对最新 final/draft 做本地完整性扫描，再在存在章节正文时调用 `global_consistency_reviewer` 模型审查跨章连续性、设定一致性、人物状态和时间线问题；模型失败时保留本地扫描并记录 `model_review_error`。审查只写 `chapters/global_consistency/<run_id>/report.json` 与 `.md`，不改正文；报告会直接包含 `repair_suggestions`，前端按章节展示默认全选的修改建议；用户按章点击“提交修改”时，`apply-repair` 只使用该章当前勾选的建议生成新的 `draft_vN.md`，同时保留原 draft。`repair-proposals` 保留为兼容接口，主流程不再需要先生成 proposed repair 文件。
 
-前端位于 `web/frontend/`，使用 Vite + React + TypeScript。当前信息架构收敛为两个一级大栏：`大纲` 和 `章节`。`大纲`栏只承载方向定位、世界观设定、人物关系、故事流程、分卷大纲、章节大纲和`大纲总体审查`；其中`大纲总体审查`复用既有 `review_lock` 阶段，但前端文案明确为总体审查，并展示阻塞问题、非阻塞问题和需回改阶段。`章节`栏承载章节批量生成、已生成章节列表和`章节总体审查`；章节总体审查继续复用 `/chapters/review-all` 全章节连贯性审查，不再作为独立一级大栏。
+前端位于 `web/frontend/`，使用 Vite + React + TypeScript。当前信息架构收敛为两个一级大栏：`大纲` 和 `章节`。`大纲`栏只承载方向定位、世界观设定、人物关系、故事流程、分卷大纲和章节大纲；`review_lock` 不再作为普通阶段展示，也不再是主流程必经项。大纲总体审查改为阶段编辑器工具栏里的独立按钮，调用 `/api/projects/{project_id}/outline/review` 生成审查报告，报告持久化在 `outline/reviews/<run_id>/report.json` 与 `.md`；用户确认“采纳修改”后再调用 `/api/projects/{project_id}/outline/review/{run_id}/apply`，把修订结果同步回相关阶段 artifact 和根目录 `outline.md`。旧项目中已有的 `review_lock` artifact 继续可读，但只作为兼容数据，不参与 Web 左侧阶段链。`章节`栏承载章节批量生成、已生成章节列表和`章节总体审查`；章节总体审查继续复用 `/chapters/review-all` 全章节连贯性审查，不受大纲审查拆分影响。
 
 章节读取 API 已补齐：`GET /api/projects/{project_id}/chapters` 返回已生成章节列表，`GET /api/projects/{project_id}/chapters/{chapter}` 返回单章最新正文、版本、来源和路径。最新正文选择优先级为 `chapters/chapter_###/final.md`，其次最高编号 `draft_vN.md`，最后回退旧路径 `chapters/chapter_###.md`。前端切换大纲阶段或章节时会先进入 loading 状态，请求使用 `cache: "no-store"`，并用请求 token 避免旧请求返回后覆盖当前选中内容；右侧进度日志按项目写入浏览器 `localStorage`，刷新后恢复最近 10 条，同时章节总体审查页会自动加载最新审查报告。Vite dev server 代理 `/api` 到 `127.0.0.1:8000`，build 产物存在时可由 FastAPI 静态托管。
+
+### 大纲总体审查可选化
+
+大纲主阶段链现在在 `chapter_outline` 后结束；`next_outline_stage()` 不再把 `review_lock` 作为自动下一阶段，Web 阶段列表也过滤 `review_lock`。`review_lock` 的历史产物和 prompt 仍保留，供旧项目兼容读取和命令行调试场景使用。
+
+独立审查 API 复用既有 `review_outline_node`、`revise_outline_node` 和 `compare_outline_versions_node`：
+
+- `POST /api/projects/{project_id}/outline/review`：基于当前全量大纲文本生成审查报告，只写 `outline/reviews/<run_id>/report.json`、`.md` 和 state 中的轻量审查字段，不推进主阶段。
+- `GET /api/projects/{project_id}/outline/review/latest`：读取最近一次大纲审查报告，便于前端刷新后恢复面板。
+- `POST /api/projects/{project_id}/outline/review/{run_id}/apply`：用户显式采纳后才生成修订文本，刷新阶段文件、`outline_stages/*.md`、根目录 `outline.md` 和对应 artifact。
+
+该拆分保证“大纲保存/导出”的源文件仍以已确认阶段 artifact 为准；审查意见本身是独立 action 的结果，不会因为用户只是查看报告而改写大纲。
 
 ## 2. 总体架构
 

@@ -381,7 +381,7 @@ STAGE_CONTRACTS = {
             StageSlot("module_status", "模块详略状态", "每个单章模块标注详写、简写或本章不适用", True, 40, 120),
             StageSlot("continuity", "连续性提醒", "时间、地点、人物状态、道具、能力限制、关系状态、未揭露信息", True, 40, 160),
         ),
-        confirmation_policy="每轮只确认当前卷章节大纲；确认后若还有下一卷则继续生成下一卷，最后一卷确认后才进入 review_lock。",
+        confirmation_policy="每轮只确认当前卷章节大纲；确认后若还有下一卷则继续生成下一卷，最后一卷确认后默认结束本阶段，必要时再用独立总体审查入口。",
         max_questions=MAX_STAGE_CONFIRMATION_QUESTIONS,
         max_total_chars=14000,
     ),

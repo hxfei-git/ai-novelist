@@ -1482,6 +1482,8 @@ def stage_number(stage: str) -> int:
 
 
 def next_outline_stage(stage: str) -> str | None:
+    if stage == "chapter_outline":
+        return None
     if stage not in OUTLINE_STAGES:
         return "direction"
     index = OUTLINE_STAGES.index(stage)
@@ -2674,7 +2676,7 @@ def extract_stage_confirmation_questions(markdown: str) -> list[str]:
     return list(dict.fromkeys(questions))[:10]
 
 
-def finalize_locked_outline(state: NovelState, store: LocalStore) -> None:
+def build_final_outline_text(state: NovelState, store: LocalStore) -> str:
     sections = []
     for stage in OUTLINE_STAGES:
         synthesis = stage_full_text(state, store, stage).strip()
@@ -2685,7 +2687,11 @@ def finalize_locked_outline(state: NovelState, store: LocalStore) -> None:
         concept_text = str(concept_artifact.get("synthesis") or concept_artifact.get("summary") or "").strip()
         if concept_text:
             sections.append("## 旧版故事概念参考\n\n" + concept_text)
-    state.outline = "# 最终锁定总大纲\n\n" + "\n\n".join(sections)
+    return "# 最终锁定总大纲\n\n" + "\n\n".join(sections)
+
+
+def finalize_locked_outline(state: NovelState, store: LocalStore) -> None:
+    state.outline = build_final_outline_text(state, store)
     state.outline_stage = "done"
     state.outline_stage_status = "done"
     state.review_status = "approved"
@@ -2696,7 +2702,6 @@ def finalize_locked_outline(state: NovelState, store: LocalStore) -> None:
     state.director_message = f"七阶段大纲已锁定，并保存为最终大纲：{store.outline_path(state.project_id)}"
     add_outline_version(state, "outline", state.outline, "七阶段锁定大纲")
     store.save_outline(state)
-
 
 def human_feedback_node(data: dict, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)

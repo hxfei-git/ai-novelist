@@ -96,11 +96,25 @@
 
 已实现的 API/服务能力：项目列表与创建、项目 state 读取、大纲阶段列表/读取/保存、显式阶段生成、显式阶段锁定、章节批量生成、全章节审查、读取最新审查报告、生成修复草稿、确认应用修复。大纲生成/锁定直接调用既有 outline 节点，Web 请求显式传入 stage，避免 chat/Director 猜路由。
 
-新增 `web/frontend/` Vite + React + TypeScript 前端壳，并在本轮修订为两栏信息架构：一级只保留`大纲`和`章节`。大纲栏内显示大纲阶段编辑器和`大纲总体审查`（复用 `review_lock`，展示阻塞/非阻塞/回改阶段）；章节栏内显示`章节批量生成`、`已生成章节`和`章节总体审查`（复用 `chapters/review-all` 连贯性审查）。阶段切换和章节切换现在使用 no-store 请求与请求 token，避免旧响应覆盖当前内容。
+新增 `web/frontend/` Vite + React + TypeScript 前端壳，并在本轮修订为两栏信息架构：一级只保留`大纲`和`章节`。大纲栏内显示大纲阶段编辑器；`review_lock` 不再作为普通阶段或必经步骤出现，大纲总体审查改为工具栏中的独立按钮和结果面板。章节栏内显示`章节批量生成`、`已生成章节`和`章节总体审查`（复用 `chapters/review-all` 连贯性审查）。阶段切换和章节切换现在使用 no-store 请求与请求 token，避免旧响应覆盖当前内容。
 
-全章节审查与修复保持非破坏性：审查先做本地完整性扫描，再调用 `global_consistency_reviewer` 模型检查跨章连续性、设定一致性、人物状态和时间线；模型失败时回退本地扫描并在报告中记录 `model_review_error`。审查只写 `chapters/global_consistency/<run_id>/report.json` 和 `.md`；修复草稿只写 `proposed_repair_<run_id>.md`；只有调用 apply repair 后才生成新的 `draft_vN.md`。章节读取 API：`GET /api/projects/{project_id}/chapters` 和 `GET /api/projects/{project_id}/chapters/{chapter}`，按 `final.md > 最高 draft_vN.md > chapter_###.md` 读取最新正文，生成批次完成后前端刷新章节列表并选中新章节。本轮进一步修复 Web 前端强制 `mock: true` 的问题，前端现在跟随后端启动模式；重复生成已有章节会追加更高 `draft_vN`，保留旧 mock 草稿但让最新正文指向真实新版本。章节总体审查增加运行中、完成摘要和 SSE 错误反馈；右侧进度日志按项目缓存在浏览器 localStorage 中，刷新页面后会恢复最近 10 条，并自动读取最新章节审查报告。
+全章节审查与修复保持非破坏性：审查先做本地完整性扫描，再调用 `global_consistency_reviewer` 模型检查跨章连续性、设定一致性、人物状态和时间线；模型失败时回退本地扫描并在报告中记录 `model_review_error`。审查只写 `chapters/global_consistency/<run_id>/report.json` 和 `.md`，报告直接包含 `repair_suggestions`；前端按章节展示默认全选的修改建议，用户可取消单条建议，并按章提交修改。只有调用 apply repair 后才生成新的 `draft_vN.md`。章节读取 API：`GET /api/projects/{project_id}/chapters` 和 `GET /api/projects/{project_id}/chapters/{chapter}`，按 `final.md > 最高 draft_vN.md > chapter_###.md` 读取最新正文，生成批次完成后前端刷新章节列表并选中新章节。本轮进一步修复 Web 前端强制 `mock: true` 的问题，前端现在跟随后端启动模式；重复生成已有章节会追加更高 `draft_vN`，保留旧 mock 草稿但让最新正文指向真实新版本。章节总体审查增加运行中、完成摘要和 SSE 错误反馈；右侧进度日志按项目缓存在浏览器 localStorage 中，刷新页面后会恢复最近 10 条，并自动读取最新章节审查报告。
 
-验证：`tests/test_web_service.py` 覆盖项目/阶段持久化、显式阶段生成 payload、批量章节参数传递、章节列表/详情读取优先级、模型全章节审查、本地扫描兜底、审查报告不覆盖正文、修复草稿与 apply 分离；`tests/test_graph_volume_write.py` 覆盖重复批量生成追加新 draft 版本。最近一次已运行 `.venv/bin/python -m py_compile src/ai_novelist/graph_volume_write.py tests/test_graph_volume_write.py src/ai_novelist/web/service.py src/ai_novelist/web/app.py tests/test_web_service.py`、`.venv/bin/python -m pytest tests/test_web_service.py tests/test_graph_volume_write.py`、`npm --prefix web/frontend run build`、`.venv/bin/python -m pytest`，并用真实模式 `ai-novelist web --host 0.0.0.0 --port 8000` 供公网访问；需确保云安全组放行 TCP 8000。
+验证：`tests/test_web_service.py` 覆盖项目/阶段持久化、显式阶段生成 payload、批量章节参数传递、章节列表/详情读取优先级、模型全章节审查、本地扫描兜底、审查报告不覆盖正文、默认全选修改建议与按章 apply；`tests/test_graph_volume_write.py` 覆盖重复批量生成追加新 draft 版本。最近一次已运行 `.venv/bin/python -m py_compile src/ai_novelist/graph_volume_write.py tests/test_graph_volume_write.py src/ai_novelist/web/service.py src/ai_novelist/web/app.py tests/test_web_service.py`、`.venv/bin/python -m pytest tests/test_web_service.py tests/test_graph_volume_write.py`、`npm --prefix web/frontend run build`、`.venv/bin/python -m pytest`，并用真实模式 `ai-novelist web --host 0.0.0.0 --port 8000` 供公网访问；需确保云安全组放行 TCP 8000。
+
+### 大纲总体审查可选化：已完成
+
+能力：
+
+- 大纲主流程收敛到 `chapter_outline` 后结束，`review_lock` 不再由 `next_outline_stage()` 自动推进，也不会出现在 Web 左侧阶段列表。
+- 新增独立 API：`GET /outline/review/latest`、`POST /outline/review`、`POST /outline/review/{run_id}/apply`。审查报告持久化到 `outline/reviews/<run_id>/report.json` 和 `.md`，state 只保存最近 run 的状态、分数、摘要、报告路径和采纳记录。
+- 前端新增“总体审查”按钮与结果面板；生成报告不改写大纲，用户点“采纳修改”后才回写阶段文件、`outline_stages/*.md`、artifact 记录和根目录 `outline.md`。
+- 旧 `review_lock` artifact 继续兼容可读，但只作为历史数据，不再是主界面的流程节点。章节侧总体审查、修复建议和显式 apply 流程保持不变；本轮同时恢复了章节修复 proposal 的 `path` 字段和旧式 `apply_repair(store, project_id, chapter, run_id)` 调用兼容。
+
+验证：
+
+- `.venv/bin/python -m pytest tests/test_web_service.py tests/test_outline_collaboration.py tests/test_director_service.py tests/test_outline_stage_controls.py`：109 passed。
+- `npm --prefix web/frontend run build`：通过。
 
 ## 3. 最新架构摘要
 
@@ -2331,3 +2345,10 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - 修复前端“生成修复草稿”点击后缺少可见反馈的问题：按钮现在进入“生成中”状态，右侧进度记录开始/完成/错误信息。
 - 修复草稿生成完成后，章节总体审查页会列出生成的 proposed repair 文件和对应问题，并提供逐章“应用修复”入口。
 - 验证：`npm run build`、`.venv/bin/python -m pytest tests/test_web_service.py`。
+
+### 2026-05-26 章节总体审查按章建议流
+
+- `review-all` 现在直接在审查报告中生成 `repair_suggestions`，每条建议默认选中，前端不再要求先点击“生成修复草稿”。
+- 章节总体审查页按章节分组展示建议，用户可取消单条建议，并按章点击“提交修改”生成新的 `draft_vN.md`。
+- `apply-repair` 现在接收 `selected_issue_ids`，只把该章勾选的建议注入修复 prompt；旧 `repair-proposals` 路由保留为兼容读取建议。
+- 验证：`.venv/bin/python -m pytest tests/test_web_service.py` 通过；`npm --prefix web/frontend run build` 通过。
