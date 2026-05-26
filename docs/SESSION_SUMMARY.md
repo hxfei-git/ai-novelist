@@ -94,7 +94,7 @@
 
 本次新增 `src/ai_novelist/web/service.py` 和 `src/ai_novelist/web/app.py`，提供本地 FastAPI Web API，并新增 `ai-novelist web --host 127.0.0.1 --port 8000 --mock`。依赖通过 `.[web]` 可选组安装，默认测试可只导入不依赖 FastAPI 的 service 层。
 
-已实现的 API/服务能力：项目列表与创建、项目 state 读取、大纲阶段列表/读取/保存、显式阶段生成、显式阶段锁定、章节批量生成、全章节审查、读取最新审查报告、生成修复草稿、确认应用修复。大纲生成/锁定直接调用既有 outline 节点，Web 请求显式传入 stage，避免 chat/Director 猜路由。
+已实现的 API/服务能力：项目列表与创建、项目 state 读取、大纲阶段列表/读取/保存、显式阶段生成、显式阶段锁定、批量章节生成、全章节审查、读取最新审查报告、直接生成默认全选的按章修改建议、按章提交应用修复。大纲生成/锁定直接调用既有 outline 节点，Web 请求显式传入 stage，避免 chat/Director 猜路由。
 
 新增 `web/frontend/` Vite + React + TypeScript 前端壳，并在本轮修订为两栏信息架构：一级只保留`大纲`和`章节`。大纲栏内显示大纲阶段编辑器；`review_lock` 不再作为普通阶段或必经步骤出现，大纲总体审查改为工具栏中的独立按钮和结果面板。章节栏内显示`章节批量生成`、`已生成章节`和`章节总体审查`（复用 `chapters/review-all` 连贯性审查）。阶段切换和章节切换现在使用 no-store 请求与请求 token，避免旧响应覆盖当前内容。
 
