@@ -853,6 +853,17 @@ def deterministic_outline_stage_pre_model_decision(state: NovelState) -> Directo
     stage_revision = deterministic_cross_stage_revision_decision(state)
     if stage_revision is not None:
         return stage_revision
+    if state.outline_stage_status == "options_ready" and (is_simple_outline_stage_confirmation(text) or delegates_outline_stage_decision(text)):
+        return DirectorDecision(
+            "persist_outputs",
+            requires_confirmation=True,
+            user_message=f"已收到，将锁定{stage_display_name(state.outline_stage)}并进入下一阶段。",
+            confidence=96,
+            task_args={"advance_outline_stage": True},
+            target="outline",
+            intent="approve",
+            next_steps=["确认执行", "取消"],
+        )
     if state.pending_questions and (parse_numbered_answers(text) or looks_like_plain_pending_answer(text)):
         instruction = build_pending_answer_instruction(state, text)
         return DirectorDecision(
@@ -1542,7 +1553,29 @@ def merged_pending_user_request(pending: DirectorDecision, text: str, fallback: 
 
 
 def is_confirmation(text: str) -> bool:
-    return text.strip().lower() in {"1", "y", "yes", "ok", "okay", "confirm", "approve", "确认", "可以", "继续", "执行", "是", "接受", "接收", "同意", "认可"}
+    return text.strip().lower() in {
+        "1",
+        "y",
+        "yes",
+        "ok",
+        "okay",
+        "confirm",
+        "approve",
+        "确认",
+        "确定",
+        "可以",
+        "继续",
+        "执行",
+        "是",
+        "接受",
+        "接收",
+        "同意",
+        "认可",
+        "确认执行",
+        "确定执行",
+        "确认进入下一阶段",
+        "确定进入下一阶段",
+    }
 
 
 def is_rejection(text: str) -> bool:

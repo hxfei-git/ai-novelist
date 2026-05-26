@@ -439,6 +439,42 @@ def test_director_service_confirms_existing_worldbuilding_stage(tmp_path):
     assert "## 三十三、结局后的世界格局" in synthesis
     assert store.outline_stage_path("重生魔门", "worldbuilding").exists()
 
+
+def test_outline_stage_confirmation_phrase_is_deterministic_without_model_call(tmp_path):
+    class FailingAdapter:
+        def complete(self, prompt, workspace):
+            raise AssertionError("model should not be called for explicit stage confirmation")
+
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.active_workflow = "outline"
+    state.outline_stage = "chapter_outline"
+    state.outline_stage_status = "options_ready"
+    state.pending_questions = ["请确认是否锁定章节大纲并进入下一阶段，或继续提出修改。"]
+    state.outline_stage_artifacts["chapter_outline"] = {
+        "stage": "chapter_outline",
+        "label": "章节大纲",
+        "status": "options_ready",
+        "summary": "第六卷章节大纲已生成。",
+        "metadata": {
+            "current_volume_index": 1,
+            "completed_volumes": [],
+            "total_volumes": 1,
+            "volume_statuses": {"1": "options_ready"},
+            "volume_contents": {"1": "### 第一卷\n\n#### 卷内章节总体规划\n- 已生成。"},
+        },
+    }
+    store.save_state(state)
+    service = DirectorService(store, FailingAdapter(), MockSearchBackend())
+
+    result = service.handle_turn("demo", "确定进入下一阶段", channel="cli")
+
+    assert result.choices[0].id == "confirm"
+    assert result.decision.action == "persist_outputs"
+    assert result.decision.intent == "approve"
+    assert result.decision.task_args["advance_outline_stage"] is True
+    assert result.state.pending_director_decision
+
 def test_confirmation_accepts_receive_words():
     from ai_novelist.director_service import is_confirmation
 

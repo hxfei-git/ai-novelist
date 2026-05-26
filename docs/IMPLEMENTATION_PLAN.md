@@ -2496,3 +2496,17 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - `.venv/bin/python -m pytest`：321 passed。
 
 限制：若下一卷完整生成在 adapter 调用阶段失败，当前错误处理仍会保存错误状态；成功生成后才会清理一次性指令。
+
+
+## 2026-05-26 大纲确认语确定性路由修复
+
+目标：避免 `确定进入下一阶段` 这类明确确认语在 `options_ready` 大纲阶段被交给 Director 模型裁量后误判为 `ask_user`。
+
+已完成：
+- `DirectorService` 在模型调用前确定性识别 `确认进入下一阶段` / `确定进入下一阶段` / 委托推进语，直接生成 `persist_outputs` + `advance_outline_stage` 决策，并保留二次确认菜单。
+- `is_confirmation()` 增加完整确认短语，用户在确认菜单中输入完整句子时也按确认执行，不再把它当作补充反馈合并。
+- 增加回归测试，确保明确阶段确认不会调用模型。
+
+验证：
+- `.venv/bin/python -m pytest tests/test_director_service.py tests/test_outline_collaboration.py`：90 passed。
+- `.venv/bin/python -m pytest`：322 passed。

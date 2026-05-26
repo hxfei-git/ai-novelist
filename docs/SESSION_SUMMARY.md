@@ -2285,3 +2285,16 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - `.venv/bin/python -m pytest`：321 passed。
 
 剩余限制：本次不恢复任何 `projects/chat-test` 生成数据，也不处理或提交 `chat.log`。
+
+
+## 2026-05-26 大纲确认语卡住诊断与修复
+
+诊断：`projects/chat-test` 未损坏。当前状态停在 `chapter_outline / options_ready`，metadata 显示第 1-5 卷已锁定、第 6 卷已生成待确认；日志最后卡住是因为用户输入 `确定进入下一阶段` 后，Director 预判没有确定性接管该确认语，而真实模型返回 `ask_user`。
+
+修复：在 Director 模型调用前把明确确认进入下一阶段的语句直接路由为 `advance_outline_stage`，同时让确认菜单接受完整确认短语。
+
+测试结果：
+- `.venv/bin/python -m pytest tests/test_director_service.py tests/test_outline_collaboration.py`：90 passed。
+- `.venv/bin/python -m pytest`：322 passed。
+
+剩余限制：本次只修复路由，不自动改写 `projects/chat-test` 状态；该项目可继续使用，下一次用确认语推进即可。
