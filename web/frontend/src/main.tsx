@@ -29,6 +29,27 @@ type ChapterView = 'batch' | 'list' | 'review';
 
 const emptyIssues = { blocking: [], detail: [], revision_targets: [] };
 const outlineReviewCopy = '大纲总体审查';
+const maxLogItems = 10;
+
+function progressLogKey(projectId: string) {
+  return `ai-novelist:${projectId}:progress-log`;
+}
+
+function readProgressLog(projectId: string) {
+  if (!projectId) return [];
+  try {
+    const raw = window.localStorage.getItem(progressLogKey(projectId));
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string').slice(0, maxLogItems) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeProgressLog(projectId: string, items: string[]) {
+  if (!projectId) return;
+  window.localStorage.setItem(progressLogKey(projectId), JSON.stringify(items.slice(0, maxLogItems)));
+}
 
 function stageLabel(stage: Stage | undefined, fallback: string) {
   if (!stage) return fallback;
@@ -122,8 +143,10 @@ function App() {
 
   useEffect(() => {
     if (!projectId) return;
+    setLog(readProgressLog(projectId));
     refreshStages().catch(showError);
     refreshChapters().catch(showError);
+    loadLatestReview().catch(() => setReview(null));
   }, [projectId]);
 
   useEffect(() => {
@@ -136,8 +159,16 @@ function App() {
     loadChapter(selectedChapter).catch(showError);
   }, [projectId, selectedChapter]);
 
+  function pushLog(message: string) {
+    setLog((items) => {
+      const next = [message, ...items].slice(0, maxLogItems);
+      writeProgressLog(projectId, next);
+      return next;
+    });
+  }
+
   function showError(error: unknown) {
-    setLog((items) => [`error: ${error instanceof Error ? error.message : String(error)}`, ...items].slice(0, 10));
+    pushLog(`error: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   async function refreshProjects() {
@@ -174,14 +205,14 @@ function App() {
       body: JSON.stringify({ content }),
     });
     setStages((items) => items.map((item) => (item.stage === activeStage ? saved : item)));
-    setLog((items) => [`saved ${activeStage}`, ...items].slice(0, 10));
+    pushLog(`saved ${activeStage}`);
   }
 
   async function runStage(action: 'generate' | 'lock') {
     await streamAction(
       `/api/projects/${projectId}/outline/stages/${activeStage}/${action}`,
       { instruction },
-      (line) => setLog((items) => [line, ...items].slice(0, 10)),
+      (line) => pushLog(line),
     );
     await refreshStages();
     await loadStage(activeStage);
@@ -209,25 +240,30 @@ function App() {
   }
 
   async function generateBatch() {
+    pushLog(`章节批量生成已开始：第 ${volume} 卷 ${chapterSelector}`);
     await streamAction(
       `/api/projects/${projectId}/chapters/generate-batch`,
       { volume, chapters: chapterSelector, max_workers: maxWorkers },
-      (line) => setLog((items) => [line, ...items].slice(0, 10)),
+      (line) => pushLog(line),
     );
     await refreshChapters(true);
+    pushLog('章节批量生成完成，已刷新章节列表');
+  }
+
+  async function loadLatestReview() {
+    const latest = await api<any>(`/api/projects/${projectId}/chapters/review-all/latest`);
+    setReview(latest);
   }
 
   async function reviewAll() {
     setReviewRunning(true);
     setReview(null);
-    setLog((items) => ['章节总体审查已开始', ...items].slice(0, 10));
+    pushLog('章节总体审查已开始');
     try {
-      await streamAction(`/api/projects/${projectId}/chapters/review-all`, {}, (line) =>
-        setLog((items) => [line, ...items].slice(0, 10)),
-      );
+      await streamAction(`/api/projects/${projectId}/chapters/review-all`, {}, (line) => pushLog(line));
       const latest = await api<any>(`/api/projects/${projectId}/chapters/review-all/latest`);
       setReview(latest);
-      setLog((items) => [`章节总体审查完成：${latest.summary || '无摘要'}`, ...items].slice(0, 10));
+      pushLog(`章节总体审查完成：${latest.summary || '无摘要'}`);
     } finally {
       setReviewRunning(false);
     }
@@ -239,7 +275,7 @@ function App() {
       method: 'POST',
       body: JSON.stringify({}),
     });
-    setLog((items) => [`repair proposals: ${result.proposals.length}`, ...items].slice(0, 10));
+    pushLog(`repair proposals: ${result.proposals.length}`);
   }
 
   return (

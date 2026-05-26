@@ -75,7 +75,7 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
 
 前端位于 `web/frontend/`，使用 Vite + React + TypeScript。当前信息架构收敛为两个一级大栏：`大纲` 和 `章节`。`大纲`栏只承载方向定位、世界观设定、人物关系、故事流程、分卷大纲、章节大纲和`大纲总体审查`；其中`大纲总体审查`复用既有 `review_lock` 阶段，但前端文案明确为总体审查，并展示阻塞问题、非阻塞问题和需回改阶段。`章节`栏承载章节批量生成、已生成章节列表和`章节总体审查`；章节总体审查继续复用 `/chapters/review-all` 全章节连贯性审查，不再作为独立一级大栏。
 
-章节读取 API 已补齐：`GET /api/projects/{project_id}/chapters` 返回已生成章节列表，`GET /api/projects/{project_id}/chapters/{chapter}` 返回单章最新正文、版本、来源和路径。最新正文选择优先级为 `chapters/chapter_###/final.md`，其次最高编号 `draft_vN.md`，最后回退旧路径 `chapters/chapter_###.md`。前端切换大纲阶段或章节时会先进入 loading 状态，请求使用 `cache: "no-store"`，并用请求 token 避免旧请求返回后覆盖当前选中内容。Vite dev server 代理 `/api` 到 `127.0.0.1:8000`，build 产物存在时可由 FastAPI 静态托管。
+章节读取 API 已补齐：`GET /api/projects/{project_id}/chapters` 返回已生成章节列表，`GET /api/projects/{project_id}/chapters/{chapter}` 返回单章最新正文、版本、来源和路径。最新正文选择优先级为 `chapters/chapter_###/final.md`，其次最高编号 `draft_vN.md`，最后回退旧路径 `chapters/chapter_###.md`。前端切换大纲阶段或章节时会先进入 loading 状态，请求使用 `cache: "no-store"`，并用请求 token 避免旧请求返回后覆盖当前选中内容；右侧进度日志按项目写入浏览器 `localStorage`，刷新后恢复最近 10 条，同时章节总体审查页会自动加载最新审查报告。Vite dev server 代理 `/api` 到 `127.0.0.1:8000`，build 产物存在时可由 FastAPI 静态托管。
 
 ## 2. 总体架构
 
