@@ -61,6 +61,7 @@ type OutlineReview = {
   source_outline: string;
 };
 type TopSection = 'outline' | 'chapters';
+type OutlineView = 'edit' | 'review';
 type ChapterView = 'batch' | 'list' | 'review';
 
 const maxLogItems = 10;
@@ -175,6 +176,7 @@ function App() {
   const [projectId, setProjectId] = useState('');
   const [title, setTitle] = useState('demo-web');
   const [topSection, setTopSection] = useState<TopSection>('outline');
+  const [outlineView, setOutlineView] = useState<OutlineView>('edit');
   const [chapterView, setChapterView] = useState<ChapterView>('batch');
   const [stages, setStages] = useState<Stage[]>([]);
   const [activeStage, setActiveStage] = useState('direction');
@@ -433,10 +435,8 @@ function App() {
             ))}
           </nav>
         ) : (
-          <nav>
-            <button className={chapterView === 'batch' ? 'active' : ''} onClick={() => setChapterView('batch')}><Play size={16} /><span>章节批量生成</span></button>
-            <button className={chapterView === 'list' ? 'active' : ''} onClick={() => setChapterView('list')}><FileText size={16} /><span>已生成章节</span><small>{chapters.length}</small></button>
-            <button className={chapterView === 'review' ? 'active' : ''} onClick={() => setChapterView('review')}><ListChecks size={16} /><span>章节总体审查</span></button>
+          <nav className="sidebar-note">
+            <p>章节功能在右侧工作区切换。</p>
           </nav>
         )}
       </aside>
