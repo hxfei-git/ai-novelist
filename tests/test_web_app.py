@@ -90,7 +90,7 @@ def test_outline_stage_pending_api_returns_recommended_options(tmp_path) -> None
     state["outline_stage_artifacts"]["direction"] = {
         "stage": "direction",
         "status": "options_ready",
-        "pending_questions": ["主角是否保留灰色动机？"],
+        "pending_questions": ["主角是否保留灰色动机？——推荐方案：保留灰色动机，但仅作为秘密揭露的驱动力。"],
     }
     (tmp_path / "web-demo" / "state.json").write_text(__import__("json").dumps(state, ensure_ascii=False), encoding="utf-8")
 
@@ -100,6 +100,7 @@ def test_outline_stage_pending_api_returns_recommended_options(tmp_path) -> None
     payload = response.json()
     assert payload["items"][0]["question"] == "主角是否保留灰色动机？"
     assert payload["items"][0]["options"][0]["label"] == "采纳推荐方案"
+    assert payload["items"][0]["options"][0]["answer"] == "保留灰色动机，但仅作为秘密揭露的驱动力。"
     assert [option["id"] for option in payload["items"][0]["options"]] == ["accept", "defer", "custom"]
 
 

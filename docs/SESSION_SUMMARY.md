@@ -36,6 +36,14 @@
 - `AGENTS.md` 增加分层验证策略：局部修改默认跑直接相关测试与核心 Web 冒烟/构建，只有共享契约或跨流程风险才扩大到全量回归。
 - 本次按分层验证执行：`.venv/bin/python -m pytest -q tests/test_web_service.py tests/test_web_app.py tests/test_frontend_review_tabs_structure.py tests/test_prompt_loader.py tests/test_story_flow_structure.py tests/test_characters_framework.py` 通过，96 passed；`npm --prefix web/frontend run build` 通过。未重复执行全量 `pytest`，因为此次修改限定在 pending 选项展示/提交与相邻 prompt 合同，相关路径已由上述测试和前端构建覆盖。
 
+### Web 待确认推荐文本去重：已完成
+
+- 根因：服务层用同一条含 `——推荐方案：...` 的原始待确认文本同时构造 `item.question` 与 `accept.answer`，前端按契约分别展示后造成推荐答案重复出现。
+- 修复：服务层新增展示问题提取逻辑，payload 中 `item.question` 只返回问题主体，推荐或可执行旧后缀只进入 `采纳推荐方案` 的答案；原始文本继续用于推荐解析和稳定条目 ID。
+- 边界：按确认保持 `我的建议` 已有选择后展开输入框的交互，本次不修改前端控件。
+- TDD 记录：新增/收紧服务与 HTTP API 回归断言后，目标测试在修复前因 `question` 仍含推荐后缀而 `3 failed`；实现服务层拆分后同一组测试为 `3 passed`。
+- 验证：`.venv/bin/python -m pytest -q tests/test_web_service.py tests/test_web_app.py tests/test_frontend_review_tabs_structure.py tests/test_prompt_loader.py` 通过，84 passed；`npm --prefix web/frontend run build` 通过；`git diff --check` 通过。
+
 ### 阶段 1：已完成
 
 能力：`init`、最小 outline 图、`show`、mock/真实模式、本地文件存储。

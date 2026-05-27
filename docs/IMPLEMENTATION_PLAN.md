@@ -75,6 +75,8 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
 
 待确认选项进一步收敛为 `采纳推荐方案`、`暂不确定`、`我的建议` 三类：新阶段输出要求每个待确认问题附带可直接展示和提交的推荐方案，历史问题缺少推荐文本时由服务层提供不扩写未确认细节的明确兜底；选择 `我的建议` 时前端要求输入自定义答案。验证策略同步改为分层执行，局部 Web 变更优先验证直接相关测试与前端核心构建，不默认扩大到全量回归。
 
+待确认 payload 的展示边界由 Web service 统一处理：阶段产物仍可保存 `问题？——推荐方案：答案。` 形式的原始文本以支持推荐解析和稳定 ID，但 GET 响应中的 `item.question` 只返回问题部分，`accept.answer` 只返回答案部分。前端因此无需截断文本，也不会在问题标题和推荐选项中重复显示同一推荐内容；`我的建议` 交互不受影响。
+
 章节页 API 复用 `build_volume_write_graph()`，`POST /api/projects/{project_id}/chapters/generate-batch` 会把 `{ volume, chapters, max_workers }` 写入 `director_task_args`，并设置并发环境变量。Web 前端不传 `mock` 字段，真实/mock 模式只由后端启动参数决定；不带 `--mock` 启动时与 `ai-novelist chat --project ...` 一样走真实模型配置。重复生成已存在章节时，批量写作图追加新的 `draft_vN.md`，不覆盖旧 draft，旧路径 `chapter_###.md` 作为最新正文副本同步更新。
 
 全章节审查是文件安全流程：`review-all` 先对最新 final/draft 做本地完整性扫描，再在存在章节正文时调用 `global_consistency_reviewer` 模型审查跨章连续性、设定一致性、人物状态和时间线问题；模型失败时保留本地扫描并记录 `model_review_error`。审查只写 `chapters/global_consistency/<run_id>/report.json` 与 `.md`，不改正文；报告会直接包含 `repair_suggestions`，前端按章节展示默认全选的修改建议；用户按章点击“提交修改”时，`apply-repair` 只使用该章当前勾选的建议生成新的 `draft_vN.md`，同时保留原 draft。`repair-proposals` 保留为兼容接口，主流程不再需要先生成 proposed repair 文件。

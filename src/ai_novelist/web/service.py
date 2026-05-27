@@ -435,6 +435,17 @@ def pending_recommendation_answer(question: str, stage: str) -> str:
     return f"推荐按“是”处理“{question_text}”，将该结论纳入{label}；未确认细节不额外扩写。"
 
 
+def pending_display_question(question: str, stage: str) -> str:
+    text = str(question or "").strip()
+    answer = pending_recommendation_answer(text, stage)
+    for marker in ("——推荐方案：", "——建议：", "推荐方案：", "建议："):
+        if marker in text and text.split(marker, 1)[1].strip() == answer:
+            return text.split(marker, 1)[0].strip()
+    if "——" in text and text.split("——", 1)[1].strip() == answer:
+        return text.split("——", 1)[0].strip()
+    return text
+
+
 def default_pending_options(question: str, stage: str) -> list[dict[str, Any]]:
     return [
         {"id": "accept", "label": "采纳推荐方案", "answer": pending_recommendation_answer(question, stage)},
@@ -566,7 +577,7 @@ def outline_stage_pending_payload(store: LocalStore, project_id: str, stage: str
         "items": [
             {
                 "id": pending_item_id(stage, question),
-                "question": question,
+                "question": pending_display_question(question, stage),
                 "options": default_pending_options(question, stage),
             }
             for question in questions

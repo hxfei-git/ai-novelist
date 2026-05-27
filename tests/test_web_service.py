@@ -482,6 +482,22 @@ def test_pending_options_use_recommendation_embedded_in_question() -> None:
     assert options[0]["answer"] == "保留灰色动机，但仅作为秘密揭露的驱动力。"
 
 
+def test_outline_stage_pending_payload_separates_embedded_recommendation(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+    state.outline_stage_artifacts["direction"] = {
+        "stage": "direction",
+        "status": "options_ready",
+        "pending_questions": ["主角是否保留灰色动机？——推荐方案：保留灰色动机，但仅作为秘密揭露的驱动力。"],
+    }
+    store.save_state(state)
+
+    payload = service.outline_stage_pending_payload(store, "web-demo", "direction")
+
+    assert payload["items"][0]["question"] == "主角是否保留灰色动机？"
+    assert payload["items"][0]["options"][0]["answer"] == "保留灰色动机，但仅作为秘密揭露的驱动力。"
+
+
 def test_pending_options_use_actionable_legacy_question_suffix() -> None:
     options = service.default_pending_options(
         "最终战隐藏据点势力是否有具体来源？——若不归渊遗民已覆盖，则无需额外设定。",
@@ -506,10 +522,9 @@ def test_outline_stage_pending_payload_falls_back_to_markdown(tmp_path: Path) ->
 
     payload = service.outline_stage_pending_payload(store, "web-demo", "characters")
 
-    assert [item["question"] for item in payload["items"]] == [
-        "最终战隐藏据点势力是否有具体来源？——若不归渊遗民已覆盖，则无需额外设定。"
-    ]
+    assert [item["question"] for item in payload["items"]] == ["最终战隐藏据点势力是否有具体来源？"]
     assert payload["items"][0]["id"]
+    assert payload["items"][0]["options"][0]["answer"] == "若不归渊遗民已覆盖，则无需额外设定。"
     assert any(option["label"] == "采纳推荐方案" for option in payload["items"][0]["options"])
 
 
