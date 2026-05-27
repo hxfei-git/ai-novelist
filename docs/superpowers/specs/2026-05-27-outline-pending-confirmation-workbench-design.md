@@ -38,7 +38,7 @@ current stage state/artifact
 
 The frontend renders the payload as a "待确认" workbench above the stage editor. Each item has radio-style default options and a custom text input. The user handles all items, then clicks one submit button. The backend converts selections into a clear revision instruction and calls the existing stage generation/revision service for the same stage.
 
-This keeps the feature isolated: the backend owns extraction and instruction building, while the frontend owns selection state and validation.
+This keeps the feature isolated: the backend owns extraction and instruction building, while the frontend owns selection state and validation. The backend also separates a generated line shaped as `问题？——推荐方案：答案。` into a display-only question and the recommended answer; the frontend must never render that recommendation twice.
 
 ## Backend Design
 
@@ -90,6 +90,8 @@ Default options should be deterministic in v1. They do not need an additional mo
 - `暂不确定`: Explicitly retain the item as unresolved instead of locking a decision.
 - `我的建议`: Reveal a required free-text input and submit the user's replacement answer.
 
+Payload display rule: when a pending source contains an embedded recommendation, `question` contains only the question portion and the `accept` option's `answer` contains only the recommendation portion. The follow-up correction does not change the existing `我的建议` selection/input interaction.
+
 `保持现状` is removed because it overlaps operationally with deferring the decision unless an actual existing direction is written as the displayed recommended answer.
 
 Submission API behavior:
@@ -125,7 +127,7 @@ Behavior:
 - Load pending payload whenever `projectId` or `activeStage` changes, and after stage generate/save/lock/pending-submit completes.
 - Show nothing noisy when there are no pending items: a compact "暂无待确认项" status is enough.
 - For each pending item, render:
-  - question text
+  - concise question text without an embedded recommendation suffix
   - default option radio buttons or selectable rows
   - a custom option with an input field
   - local validation state
