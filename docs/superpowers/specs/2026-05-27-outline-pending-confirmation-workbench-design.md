@@ -9,7 +9,7 @@ The desired behavior is a current-stage confirmation workbench: each pending ite
 ## Goals
 
 - Surface pending confirmation items for the currently opened outline stage without requiring the user to inspect Markdown manually.
-- Provide 2-3 default choices per item plus a custom answer path.
+- Provide a concrete recommended decision, a defer path, and a custom answer path per item.
 - Require every visible item to be handled before batch submission.
 - Submit all answers in one action and re-run the existing current-stage revision path.
 - Refresh stage content and pending items after submission.
@@ -61,9 +61,9 @@ The payload shape:
       "id": "sha1-short",
       "question": "沈灵儿决裂的3-5章小纲是否需要在章节规划阶段提前完成？",
       "options": [
-        {"id": "accept", "label": "采纳建议", "answer": "采纳当前建议，并在后续章节规划阶段展开。"},
-        {"id": "defer", "label": "延后处理", "answer": "暂不锁定细节，延后到章节规划阶段决定。"},
-        {"id": "keep", "label": "保持现状", "answer": "保持当前阶段设定，不新增细节。"}
+        {"id": "accept", "label": "采纳推荐方案", "answer": "提前规划林霄的 1-2 个专属视角章，但不新增世界规则。"},
+        {"id": "defer", "label": "暂不确定", "answer": "本项暂不确定，保留为待确认事项，不进入本阶段锁定结论。"},
+        {"id": "custom", "label": "我的建议", "answer": "", "requires_input": true}
       ]
     }
   ]
@@ -84,13 +84,13 @@ Filtering rules:
 - De-duplicate normalized question text.
 - Keep the current stage only.
 
-Default options should be deterministic in v1. They do not need model calls. The initial default set can be:
+Default options should be deterministic in v1. They do not need an additional model call. New stage output must format each pending item as `问题？——推荐方案：可直接提交的具体处理结论。`, allowing the service to display that recommendation directly. Legacy items without an embedded recommendation receive an explicit conservative fallback that states the decision and avoids expanding unconfirmed details. The option set is:
 
-- `采纳建议`: Use the recommendation implied by the question or current draft.
-- `延后处理`: Explicitly defer the decision to a later planning stage.
-- `保持现状`: Keep the current stage content without adding new canon.
+- `采纳推荐方案`: Display and submit the concrete recommendation, rather than referring to an invisible suggestion.
+- `暂不确定`: Explicitly retain the item as unresolved instead of locking a decision.
+- `我的建议`: Reveal a required free-text input and submit the user's replacement answer.
 
-For questions containing clear timing phrases such as `章节规划`, the accept answer should mention that later stage explicitly. For naming questions, the accept answer can say to decide names during chapter planning. These should be short, transparent defaults rather than invented canon.
+`保持现状` is removed because it overlaps operationally with deferring the decision unless an actual existing direction is written as the displayed recommended answer.
 
 Submission API behavior:
 
@@ -186,4 +186,3 @@ When implementing this spec, update:
 
 - `docs/IMPLEMENTATION_PLAN.md` with the Web pending confirmation workbench architecture and API behavior.
 - `docs/SESSION_SUMMARY.md` with implementation notes, verification commands, and remaining limitations.
-

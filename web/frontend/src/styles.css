@@ -106,6 +106,7 @@ nav small { color: #5c6f7c; font-size: 11px; }
 .pending-option { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; min-height: 70px; }
 .pending-option.active { border-color: #2f6f73; background: #e8f3f1; }
 .pending-option small { color: #647582; font-size: 12px; line-height: 1.4; }
+.pending-custom-answer { width: 100%; padding: 10px; }
 .editor { width: 100%; flex: 1; min-height: 560px; padding: 14px; line-height: 1.55; resize: none; }
 .loading { padding: 18px; border: 1px solid #d9e0e7; border-radius: 6px; background: #ffffff; color: #516170; }
 .issues-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }

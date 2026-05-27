@@ -419,18 +419,27 @@ def normalize_pending_source(value: Any) -> list[str]:
     return dedupe_pending_questions(raw)
 
 
-def default_pending_options(question: str, stage: str) -> list[dict[str, str]]:
-    accept = "采纳当前建议，并写入当前阶段修订。"
-    if "章节规划" in question or stage in {"chapter_outline", "volume_outline"}:
-        accept = "采纳当前建议，并在后续章节规划阶段展开。"
-    elif "命名" in question or "预先命名" in question:
-        accept = "采纳当前建议，具体命名延后到章节规划或正文写作时决定。"
-    elif "已有世界观" in question or "具体来源" in question:
-        accept = "采纳当前建议，优先复用已有世界观来源，不新增独立设定。"
+def pending_recommendation_answer(question: str, stage: str) -> str:
+    text = str(question or "").strip()
+    for marker in ("——推荐方案：", "——建议：", "推荐方案：", "建议："):
+        if marker in text:
+            recommendation = text.split(marker, 1)[1].strip()
+            if recommendation:
+                return recommendation
+    if "——" in text:
+        suffix = text.split("——", 1)[1].strip()
+        if any(marker in suffix for marker in ("若", "则", "无需", "优先", "保留", "延后")):
+            return suffix
+    question_text = text.split("——", 1)[0].rstrip("？?。 ")
+    label = STAGE_LABELS.get(stage, stage)
+    return f"推荐按“是”处理“{question_text}”，将该结论纳入{label}；未确认细节不额外扩写。"
+
+
+def default_pending_options(question: str, stage: str) -> list[dict[str, Any]]:
     return [
-        {"id": "accept", "label": "采纳建议", "answer": accept},
-        {"id": "defer", "label": "延后处理", "answer": "暂不锁定细节，延后到后续规划阶段决定。"},
-        {"id": "keep", "label": "保持现状", "answer": "保持当前阶段设定，不新增稳定设定。"},
+        {"id": "accept", "label": "采纳推荐方案", "answer": pending_recommendation_answer(question, stage)},
+        {"id": "defer", "label": "暂不确定", "answer": "本项暂不确定，保留为待确认事项，不进入本阶段锁定结论。"},
+        {"id": "custom", "label": "我的建议", "answer": "", "requires_input": True},
     ]
 
 
@@ -1563,4 +1572,3 @@ def next_draft_version(store: LocalStore, project_id: str, chapter: int) -> int:
 def fallback_repair_text(chapter: int, draft: str, issue: str) -> str:
     base = draft.strip() or f"# 第 {chapter} 章\n\n"
     return f"{base}\n\n<!-- global consistency repair: {issue} -->\n"
-

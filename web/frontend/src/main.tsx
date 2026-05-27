@@ -35,6 +35,7 @@ type PendingOption = {
   id: string;
   label: string;
   answer: string;
+  requires_input?: boolean;
 };
 type PendingQuestion = {
   id: string;
@@ -271,6 +272,7 @@ function App() {
   const [selectedOutlineRepairIds, setSelectedOutlineRepairIds] = useState<Record<string, boolean>>({});
   const [pendingQuestions, setPendingQuestions] = useState<PendingQuestionPayload | null>(null);
   const [pendingAnswerSelection, setPendingAnswerSelection] = useState<Record<string, string>>({});
+  const [pendingCustomAnswers, setPendingCustomAnswers] = useState<Record<string, string>>({});
   const [pendingSubmitting, setPendingSubmitting] = useState(false);
 
   const stageRequestRef = useRef(0);
@@ -305,6 +307,7 @@ function App() {
     setInstruction('');
     setPendingQuestions(null);
     setPendingAnswerSelection({});
+    setPendingCustomAnswers({});
     setChapterOutlineWorkspace(null);
     setChapters([]);
     setChapterDetail(null);
@@ -393,6 +396,7 @@ function App() {
     setContent('');
     setPendingQuestions(null);
     setPendingAnswerSelection({});
+    setPendingCustomAnswers({});
     try {
       const [item, pending] = await Promise.all([
         api<Stage>(`/api/projects/${projectId}/outline/stages/${stage}`),
@@ -571,6 +575,11 @@ function App() {
       const selectedId = pendingAnswerSelection[item.id] || item.options[0]?.id || '';
       const selected = item.options.find((option) => option.id === selectedId) || item.options[0];
       if (!selected) throw new Error(`待确认问题没有可用选项：${item.question}`);
+      if (selected.requires_input) {
+        const customAnswer = (pendingCustomAnswers[item.id] || '').trim();
+        if (!customAnswer) throw new Error(`请填写你的建议：${item.question}`);
+        return { question: item.question, custom_answer: customAnswer, selected_option_id: selected.id };
+      }
       return { question: item.question, answer: selected.answer, selected_option_id: selected.id };
     });
     stageRunningRef.current = true;
@@ -722,8 +731,10 @@ function App() {
                 <PendingQuestionPanel
                   payload={pendingQuestions}
                   selectedAnswers={pendingAnswerSelection}
+                  customAnswers={pendingCustomAnswers}
                   submitting={pendingSubmitting || stageRunning || loadingStage}
                   onSelectAnswer={(questionId, optionId) => setPendingAnswerSelection((values) => ({ ...values, [questionId]: optionId }))}
+                  onCustomAnswerChange={(questionId, answer) => setPendingCustomAnswers((values) => ({ ...values, [questionId]: answer }))}
                   onSubmit={submitPendingQuestions}
                 />
               )}
@@ -916,16 +927,24 @@ function StageActionBar({
 function PendingQuestionPanel({
   payload,
   selectedAnswers,
+  customAnswers,
   submitting,
   onSelectAnswer,
+  onCustomAnswerChange,
   onSubmit,
 }: {
   payload: PendingQuestionPayload;
   selectedAnswers: Record<string, string>;
+  customAnswers: Record<string, string>;
   submitting: boolean;
   onSelectAnswer: (questionId: string, optionId: string) => void;
+  onCustomAnswerChange: (questionId: string, answer: string) => void;
   onSubmit: () => void;
 }) {
+  const customIncomplete = payload.items.some((item) => {
+    const selectedId = selectedAnswers[item.id] || item.options[0]?.id || '';
+    return selectedId === 'custom' && !(customAnswers[item.id] || '').trim();
+  });
   return (
     <section className="pending-panel">
       <header className="pending-panel-head">
@@ -933,7 +952,7 @@ function PendingQuestionPanel({
           <strong>待确认问题</strong>
           <small>{payload.items.length} 条，已预选推荐建议</small>
         </div>
-        <button onClick={onSubmit} disabled={submitting}>
+        <button onClick={onSubmit} disabled={submitting || customIncomplete}>
           <Check size={16} />{submitting ? '提交中' : '提交确认'}
         </button>
       </header>
@@ -950,10 +969,18 @@ function PendingQuestionPanel({
                   onClick={() => onSelectAnswer(item.id, option.id)}
                 >
                   <span>{option.label}</span>
-                  <small>{option.answer}</small>
+                  {option.answer && <small>{option.answer}</small>}
                 </button>
               ))}
             </div>
+            {(selectedAnswers[item.id] || item.options[0]?.id) === 'custom' && (
+              <input
+                className="pending-custom-answer"
+                value={customAnswers[item.id] || ''}
+                onChange={(event) => onCustomAnswerChange(item.id, event.target.value)}
+                placeholder="请输入你的建议"
+              />
+            )}
           </section>
         ))}
       </div>

@@ -1,6 +1,7 @@
 import pytest
 
 from ai_novelist.prompts import PromptNotFoundError, load_prompt
+from ai_novelist.outline.renderers import build_stage_output_rule
 
 
 def test_load_prompt_from_package():
@@ -60,6 +61,16 @@ def test_outline_reviser_prompt_defaults_to_minimal_revision():
     assert "保留约束" in prompt
     for forbidden in ("无依据大改", "重写锁定约束", "改动未被要求的世界观/人物关系", "扩写正文"):
         assert forbidden in prompt
+
+
+def test_outline_stage_pending_prompts_require_concrete_recommendations():
+    reviser = load_prompt("outline_stage_reviser")
+    stage_rule = build_stage_output_rule("direction")
+
+    assert "推荐方案" in reviser
+    assert "不得只写“按当前建议处理”" in reviser
+    assert "推荐方案" in stage_rule
+    assert "可直接提交的具体处理结论" in stage_rule
 
 
 def test_chapter_planner_prompt_separates_current_chapter_and_global_modes():

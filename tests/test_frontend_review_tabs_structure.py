@@ -189,6 +189,9 @@ def test_outline_stage_pending_questions_render_recommended_options() -> None:
     assert "function PendingQuestionPanel" in source
     assert "提交确认" in source
     assert "pending/submit" in source
+    assert "pendingCustomAnswers" in source
+    assert "custom_answer" in source
+    assert "请输入你的建议" in source
     submit_pending = re.search(r"async function submitPendingQuestions\(\).*?\n  }", source, re.DOTALL)
     assert submit_pending is not None
     assert "stageRunningRef.current" in submit_pending.group(0)

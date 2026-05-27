@@ -22,7 +22,7 @@ Target Python 3.11+ and keep code compatible with the existing Python 3.12 virtu
 
 ## Testing Guidelines
 
-Use `pytest` for unit coverage. Add tests beside related behavior in `tests/test_*.py`; reserve `smoke_*.py` for end-to-end CLI or workflow checks. Prefer mock mode in tests so Codex CLI is not required. When changing graph routing, persistence, or prompt loading, add or update focused tests and run both `pytest` and the relevant smoke script.
+Use `pytest` for unit coverage. Add tests beside related behavior in `tests/test_*.py`; reserve `smoke_*.py` for end-to-end CLI or workflow checks. Prefer mock mode in tests so Codex CLI is not required. Keep verification proportional to the change: during implementation, run the smallest directly related test selection; before delivery, run the affected Web workflow's focused tests plus the relevant mock smoke check or frontend build that proves the core path still works. Run the full `pytest` suite only when a change affects shared state/persistence contracts, cross-workflow routing, dependency/release configuration, or when explicitly requested. Do not add or rerun unrelated regression suites solely for a local UI/API/prompt change; record the verification scope and remaining risk in `docs/SESSION_SUMMARY.md`.
 
 ## Documentation Requirements
 

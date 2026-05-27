@@ -99,7 +99,8 @@ def test_outline_stage_pending_api_returns_recommended_options(tmp_path) -> None
     assert response.status_code == 200
     payload = response.json()
     assert payload["items"][0]["question"] == "主角是否保留灰色动机？"
-    assert payload["items"][0]["options"][0]["label"] == "采纳建议"
+    assert payload["items"][0]["options"][0]["label"] == "采纳推荐方案"
+    assert [option["id"] for option in payload["items"][0]["options"]] == ["accept", "defer", "custom"]
 
 
 def test_run_web_command_passes_generation_defaults(monkeypatch, tmp_path) -> None:

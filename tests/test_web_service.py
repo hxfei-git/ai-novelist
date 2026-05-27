@@ -459,7 +459,36 @@ def test_outline_stage_pending_payload_prefers_artifact_questions(tmp_path: Path
     assert payload["stage"] == "characters"
     assert [item["question"] for item in payload["items"]] == ["artifact question?"]
     assert payload["items"][0]["options"][0]["id"] == "accept"
-    assert payload["items"][0]["options"][-1]["id"] == "keep"
+    assert [option["id"] for option in payload["items"][0]["options"]] == ["accept", "defer", "custom"]
+
+
+def test_pending_options_show_concrete_recommendation_and_custom_path() -> None:
+    options = service.default_pending_options("主角是否保留灰色动机？", "direction")
+
+    assert options[0]["label"] == "采纳推荐方案"
+    assert "主角是否保留灰色动机" in options[0]["answer"]
+    assert "采纳当前建议" not in options[0]["answer"]
+    assert options[1]["label"] == "暂不确定"
+    assert options[2]["label"] == "我的建议"
+    assert options[2]["requires_input"] is True
+
+
+def test_pending_options_use_recommendation_embedded_in_question() -> None:
+    options = service.default_pending_options(
+        "主角是否保留灰色动机？——推荐方案：保留灰色动机，但仅作为秘密揭露的驱动力。",
+        "direction",
+    )
+
+    assert options[0]["answer"] == "保留灰色动机，但仅作为秘密揭露的驱动力。"
+
+
+def test_pending_options_use_actionable_legacy_question_suffix() -> None:
+    options = service.default_pending_options(
+        "最终战隐藏据点势力是否有具体来源？——若不归渊遗民已覆盖，则无需额外设定。",
+        "characters",
+    )
+
+    assert options[0]["answer"] == "若不归渊遗民已覆盖，则无需额外设定。"
 
 
 def test_outline_stage_pending_payload_falls_back_to_markdown(tmp_path: Path) -> None:
@@ -481,7 +510,7 @@ def test_outline_stage_pending_payload_falls_back_to_markdown(tmp_path: Path) ->
         "最终战隐藏据点势力是否有具体来源？——若不归渊遗民已覆盖，则无需额外设定。"
     ]
     assert payload["items"][0]["id"]
-    assert any(option["label"] == "采纳建议" for option in payload["items"][0]["options"])
+    assert any(option["label"] == "采纳推荐方案" for option in payload["items"][0]["options"])
 
 
 def test_outline_review_roundtrip_and_apply_updates_outline(tmp_path: Path) -> None:
@@ -991,4 +1020,3 @@ def test_global_review_falls_back_to_local_scan_on_model_error(tmp_path: Path) -
     assert report["review_source"] == "local"
     assert any(item["category"] == "placeholder" for item in report["issues"])
     assert any(item["category"] == "model_review_error" for item in report["issues"])
-

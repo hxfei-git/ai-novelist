@@ -28,6 +28,14 @@
 - 补通普通大纲阶段的待确认问题 API 与前端面板：锁定提示出现时，会同时显示后端提供的推荐选项，并允许提交确认后进入既有轻修订流程。
 - 验证结果：`.venv/bin/python -m pytest -q tests/test_web_app.py tests/test_frontend_review_tabs_structure.py tests/test_web_service.py` 通过，72 passed；`.venv/bin/python -m pytest -q` 通过，196 passed；`npm --prefix web/frontend run build` 通过。
 
+### Web 待确认建议交互收敛：已完成
+
+- 将待确认项从 `采纳建议 / 延后处理 / 保持现状` 改为 `采纳推荐方案 / 暂不确定 / 我的建议`，删除语义重叠的“保持现状”。
+- 新生成的待确认问题要求包含具体推荐方案；历史问题缺少推荐文本时显示明确的保守兜底结论，避免按钮引用不存在的“当前建议”。
+- `我的建议` 会展开必填输入并通过既有 pending submit 路径提交自定义答案。
+- `AGENTS.md` 增加分层验证策略：局部修改默认跑直接相关测试与核心 Web 冒烟/构建，只有共享契约或跨流程风险才扩大到全量回归。
+- 本次按分层验证执行：`.venv/bin/python -m pytest -q tests/test_web_service.py tests/test_web_app.py tests/test_frontend_review_tabs_structure.py tests/test_prompt_loader.py tests/test_story_flow_structure.py tests/test_characters_framework.py` 通过，96 passed；`npm --prefix web/frontend run build` 通过。未重复执行全量 `pytest`，因为此次修改限定在 pending 选项展示/提交与相邻 prompt 合同，相关路径已由上述测试和前端构建覆盖。
+
 ### 阶段 1：已完成
 
 能力：`init`、最小 outline 图、`show`、mock/真实模式、本地文件存储。

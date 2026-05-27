@@ -124,6 +124,7 @@ def build_stage_output_rule(stage: str, state: NovelState | None = None) -> str:
     base = [
         "请只输出当前阶段产物，不要给 A/B/C 候选菜单。",
         "所有具体设定都必须有来源；来源不足时写“待确认”，不要写成已锁定事实。",
+        "待确认问题若存在，每条使用“问题？——推荐方案：可直接提交的具体处理结论。”格式；推荐方案必须明确选择且不得新增无来源 canon。",
         "不要使用产品规则、游戏机制、编剧理论语言。",
         f"本阶段目的：{contract.purpose}",
         f"确认策略：{contract.confirmation_policy}",
