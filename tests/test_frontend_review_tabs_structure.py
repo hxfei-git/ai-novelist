@@ -120,6 +120,22 @@ def test_chapter_workspace_uses_volume_navigation_and_secondary_tabs() -> None:
     assert "setChapterView('review')" in sidebar
     assert "volume === item.index" in sidebar
 
+
+def test_chapter_batch_panel_uses_volume_summary_and_single_quantity_input() -> None:
+    source = read_main()
+    start = source.index("{chapterView === 'batch' &&")
+    end = source.index("{chapterView === 'list' &&", start)
+    batch_block = source[start:end]
+
+    assert "总章数" in batch_block
+    assert "已生成章数" in batch_block
+    assert "剩余章数" in batch_block
+    assert "生成数量" in batch_block
+    assert "卷号" not in batch_block
+    assert "章节范围" not in batch_block
+    assert "并发数" not in batch_block
+    assert "Math.min(requestedCount, remainingChapters)" in source
+
 def test_outline_review_uses_selectable_suggestion_board() -> None:
     source = read_main()
 

@@ -78,6 +78,18 @@ type Chapter = {
   summary: string;
   content?: string;
 };
+type ChapterBatchWorkspace = {
+  volume_index: number;
+  volume_label: string;
+  volume_name: string;
+  total_chapters: number;
+  generated_chapters: number;
+  remaining_chapters: number;
+  next_chapter_number: number | null;
+  planned_chapter_numbers: number[];
+  remaining_chapter_numbers: number[];
+  chapters: Chapter[];
+};
 type ReviewIssue = {
   severity: string;
   chapter: number | null;
@@ -265,9 +277,9 @@ function App() {
   const [chapterOutlineRunning, setChapterOutlineRunning] = useState(false);
   const [chapterOutlineView, setChapterOutlineView] = useState<'volume' | 'review'>('volume');
   const [log, setLog] = useState<ProgressItem[]>([]);
-  const [chapterSelector, setChapterSelector] = useState('1-3');
   const [volume, setVolume] = useState(1);
-  const [maxWorkers, setMaxWorkers] = useState(3);
+  const [requestedChapterCount, setRequestedChapterCount] = useState(3);
+  const [chapterBatchWorkspace, setChapterBatchWorkspace] = useState<ChapterBatchWorkspace | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [selectedChapter, setSelectedChapter] = useState<number | null>(null);
   const [chapterDetail, setChapterDetail] = useState<Chapter | null>(null);
@@ -323,6 +335,7 @@ function App() {
     setPendingAnswerSelection({});
     setPendingCustomAnswers({});
     setChapterOutlineWorkspace(null);
+    setChapterBatchWorkspace(null);
     setChapters([]);
     setChapterDetail(null);
     setReview(null);
@@ -337,7 +350,7 @@ function App() {
     loadProjectState().catch(showError);
     loadProjectProgressLog().catch(showError);
     refreshStages().catch(showError);
-    refreshChapters().catch(showError);
+    refreshChapters(false, 1).catch(showError);
     loadLatestReview().catch(() => setReview(null));
     loadLatestOutlineReview().catch(() => setOutlineReview(null));
     loadLatestChapterOutlineReview().catch(() => setChapterOutlineReview(null));
@@ -501,8 +514,14 @@ function App() {
   }
 
   async function refreshChapters(selectLatest = false, volumeIndex?: number) {
-    const query = volumeIndex ? `?volume=${volumeIndex}` : '';
-    const items = await api<Chapter[]>(`/api/projects/${projectId}/chapters${query}`);
+    let items: Chapter[] = [];
+    if (volumeIndex) {
+      const payload = await api<ChapterBatchWorkspace>(`/api/projects/${projectId}/chapters/workspace?volume=${volumeIndex}`);
+      setChapterBatchWorkspace(payload);
+      items = payload.chapters || [];
+    } else {
+      items = await api<Chapter[]>(`/api/projects/${projectId}/chapters`);
+    }
     setChapters(items);
     if (selectLatest && items.length > 0) {
       setSelectedChapter(items[items.length - 1].chapter);
@@ -526,10 +545,14 @@ function App() {
   }
 
   async function generateBatch() {
+    const remainingChapters = chapterBatchWorkspace?.remaining_chapters ?? 0;
+    const requestedCount = Math.max(1, Number(requestedChapterCount) || 1);
+    const actualCount = Math.min(requestedCount, remainingChapters);
+    if (actualCount < 1) return;
     pushLog({ label: '章节批量生成', elapsed: '', tokens: '', context: '', status: 'started' });
     await streamAction(
       `/api/projects/${projectId}/chapters/generate-batch`,
-      { volume, chapters: chapterSelector, max_workers: maxWorkers },
+      { volume, requested_count: actualCount },
       (line) => pushLog(line),
     );
     await refreshChapters(true, volume);
@@ -967,18 +990,28 @@ function App() {
           </div>
           {chapterView === 'batch' && (
             <>
-              <header className="toolbar"><div><h1>章节批量生成</h1><p>按卷号、章节范围和并发数生成章节正文</p></div></header>
-              <div className="form-grid">
-                <label>卷号<input type="number" min={1} value={volume} onChange={(e) => setVolume(Number(e.target.value))} /></label>
-                <label>章节范围<input value={chapterSelector} onChange={(e) => setChapterSelector(e.target.value)} /></label>
-                <label>并发数<input type="number" min={1} max={8} value={maxWorkers} onChange={(e) => setMaxWorkers(Number(e.target.value))} /></label>
-                <button onClick={generateBatch}><Play size={16} />生成章节</button>
+              <header className="toolbar">
+                <div>
+                  <h1>章节批量生成</h1>
+                  <p>{chapterBatchWorkspace?.volume_label || `第 ${volume} 卷`} · 从第一个未生成章节开始连续生成</p>
+                </div>
+                <button onClick={() => refreshChapters(false, volume)}><RefreshCw size={16} />刷新</button>
+              </header>
+              <div className="batch-summary" aria-label="章节批量生成统计">
+                <div><span>总章数</span><strong>{chapterBatchWorkspace?.total_chapters ?? 0}</strong></div>
+                <div><span>已生成章数</span><strong>{chapterBatchWorkspace?.generated_chapters ?? 0}</strong></div>
+                <div><span>剩余章数</span><strong>{chapterBatchWorkspace?.remaining_chapters ?? 0}</strong></div>
               </div>
+              <div className="form-grid batch-form">
+                <label>生成数量<input type="number" min={1} max={Math.max(1, chapterBatchWorkspace?.remaining_chapters ?? 1)} value={requestedChapterCount} onChange={(e) => setRequestedChapterCount(Number(e.target.value))} /></label>
+                <button onClick={generateBatch} disabled={(chapterBatchWorkspace?.remaining_chapters ?? 0) < 1}><Play size={16} />生成章节</button>
+              </div>
+              {chapterBatchWorkspace?.next_chapter_number ? <p className="empty">下一章：第 {chapterBatchWorkspace.next_chapter_number} 章</p> : <p className="empty">当前卷没有剩余章节可生成。</p>}
             </>
           )}
           {chapterView === 'list' && (
             <>
-              <header className="toolbar"><div><h1>已生成章节</h1><p>读取最新正文：final.md 优先，其次最高 draft_vN.md，再回退旧路径</p></div><button onClick={() => refreshChapters()}><RefreshCw size={16} />刷新</button></header>
+              <header className="toolbar"><div><h1>已生成章节</h1><p>读取最新正文：final.md 优先，其次最高 draft_vN.md，再回退旧路径</p></div><button onClick={() => refreshChapters(false, volume)}><RefreshCw size={16} />刷新</button></header>
               <div className="chapter-layout">
                 <div className="chapter-list">
                   {chapters.map((item) => (
