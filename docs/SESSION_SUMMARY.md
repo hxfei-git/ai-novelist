@@ -2448,3 +2448,13 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - 右侧进度日志不再写浏览器 `localStorage`，改为读写项目目录中的 `web_progress_log.json`，因此不同项目的进度不会串台。
 - 切换项目时会同步加载项目状态、进度日志和已有阶段/审查数据，避免延续上一个项目的前端残留。
 - 验证：`PYTHONPATH=src .venv/bin/python -m pytest tests/test_web_service.py tests/test_web_app.py tests/test_frontend_review_tabs_structure.py -q` 69 passed；`npm --prefix web/frontend run build` 通过。
+
+## 2026-05-28 章节正文卷内定量批量生成
+
+- 后端新增章节正文卷内 workspace payload，用当前卷章节大纲解析总章数，用卷内已生成章节统计已生成/剩余，并暴露下一章号。
+- 批量生成请求新增 `requested_count`，后端自动截断到剩余章数，从当前卷第一个未生成章节开始连续生成；新路径不再依赖用户手填章节范围或并发数。
+- 前端章节批量生成面板改为统计 + 单个 `生成数量` 输入，隐藏卷号、章节范围、并发数字段；生成后刷新当前卷统计和章节列表。
+- 变更文件：`src/ai_novelist/web/service.py`、`src/ai_novelist/web/app.py`、`web/frontend/src/main.tsx`、`tests/test_web_service.py`、`tests/test_web_app.py`、`tests/test_frontend_review_tabs_structure.py`。
+- 已验证：`PYTHONPATH=src .venv/bin/python -m pytest tests/test_web_service.py tests/test_web_app.py -q` 69 passed；`PYTHONPATH=src .venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py -q` 17 passed；`npm --prefix web/frontend run build` 通过。
+- 剩余风险：总章数依赖章节大纲中可解析的 `第 N 章` 条目；非标准章节大纲格式会导致剩余章数为 0，需要先修正章节大纲。
+

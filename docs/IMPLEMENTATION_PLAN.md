@@ -2668,3 +2668,19 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 验证：
 - `PYTHONPATH=src .venv/bin/python -m pytest tests/test_web_service.py tests/test_web_app.py tests/test_frontend_review_tabs_structure.py -q`：83 passed。
 - `npm --prefix web/frontend run build`：通过。
+
+## 2026-05-28 章节正文卷内定量批量生成
+
+目标：章节正文批量生成不再让用户手填卷号、章节范围和并发数，而是基于左侧已选卷显示生成统计，只输入本次生成数量。
+
+已完成：
+- 后端新增 `GET /api/projects/{project_id}/chapters/workspace?volume=`，返回当前卷 `total_chapters / generated_chapters / remaining_chapters / next_chapter_number` 以及卷内已生成章节列表。
+- `generate_chapter_batch()` 新增 `requested_count` 语义：按当前卷剩余未生成章节截断请求数量，从第一个未生成章节开始连续生成，并把实际生成数量作为并发上限。
+- 前端章节正文批量生成页去掉卷号、章节范围和并发数输入，只显示总章数、已生成章数、剩余章数与 `生成数量` 输入。
+- 已生成章节刷新继续按当前卷过滤，切卷时同步刷新批量生成统计和章节列表。
+
+验证：
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_web_service.py tests/test_web_app.py -q`：69 passed。
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py -q`：17 passed。
+- `npm --prefix web/frontend run build`：通过。
+
