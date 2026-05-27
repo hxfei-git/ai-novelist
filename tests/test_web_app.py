@@ -50,6 +50,7 @@ def test_web_app_exposes_outline_action_and_workspace_routes(tmp_path) -> None:
     assert "/api/projects/{project_id}/outline/chapter-workspace/volumes/{volume_index}/lock" in routes
     assert "/api/projects/{project_id}/outline/chapter-review" in routes
     assert "/api/projects/{project_id}/outline/chapter-review/{run_id}/apply" in routes
+    assert "/api/projects/{project_id}/chapters/workspace" in routes
     assert not any("/action" in path for path in routes)
 
 

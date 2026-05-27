@@ -303,6 +303,15 @@ def make_app(
         except LocalStoreError as exc:
             raise as_http_error(exc)
 
+    @app.get("/api/projects/{project_id}/chapters/workspace")
+    def chapter_workspace(project_id: str, volume: int | None = None):
+        try:
+            selected_volume = int(volume or 1)
+            payload = service.chapter_batch_workspace_payload(store, project_id, selected_volume)
+            return payload
+        except LocalStoreError as exc:
+            raise as_http_error(exc)
+
     @app.get("/api/projects/{project_id}/chapters")
     def chapters(project_id: str, volume: int | None = None):
         try:
@@ -326,6 +335,7 @@ def make_app(
                     adapter(payload),
                     project_id,
                     volume=int(payload.get("volume") or 1),
+                    requested_count=int(payload.get("requested_count") or 0) if payload.get("requested_count") is not None else None,
                     chapters=payload.get("chapters"),
                     max_workers=int(payload.get("max_workers") or 3),
                     progress=progress,

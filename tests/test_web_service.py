@@ -476,6 +476,97 @@ def test_list_chapters_filters_latest_volume_manifest(tmp_path: Path) -> None:
     assert [item["chapter"] for item in volume_two] == [3]
 
 
+
+def test_chapter_batch_workspace_payload_reports_remaining_counts(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+    state.outline_stage_artifacts["chapter_outline"] = {
+        "stage": "chapter_outline",
+        "status": "locked",
+        "metadata": {
+            "total_volumes": 2,
+            "current_volume_index": 2,
+            "completed_volumes": [1],
+            "volume_statuses": {"2": "locked"},
+        },
+    }
+    store.save_outline_artifact(
+        state,
+        "volume_outline",
+        "## 第一卷：开局\n\n## 第二卷：推进\n",
+    )
+    store.save_outline_artifact(
+        state,
+        "chapter_outline",
+        "## 第二卷：推进\n\n"
+        + "\n".join(f"### 第 {chapter} 章：标题 {chapter}" for chapter in range(4, 24))
+        + "\n",
+    )
+    store.save_state(state)
+    for chapter in (4, 5, 6):
+        state.active_chapter = chapter
+        state.current_chapter = chapter
+        state.chapter_draft = f"# 第 {chapter} 章\n\n正文 {chapter}"
+        store.save_chapter_draft(state, version=1)
+
+    payload = service.chapter_batch_workspace_payload(store, "web-demo", volume=2)
+
+    assert payload["volume_index"] == 2
+    assert payload["volume_label"] == "第二卷"
+    assert payload["total_chapters"] == 20
+    assert payload["generated_chapters"] == 3
+    assert payload["remaining_chapters"] == 17
+    assert payload["next_chapter_number"] == 7
+    assert payload["planned_chapter_numbers"][0] == 4
+
+
+def test_generate_chapter_batch_uses_requested_count_and_first_missing_chapter(monkeypatch, tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+    state.outline_stage_artifacts["chapter_outline"] = {
+        "stage": "chapter_outline",
+        "status": "locked",
+        "metadata": {
+            "total_volumes": 2,
+            "current_volume_index": 2,
+            "completed_volumes": [1],
+            "volume_statuses": {"2": "locked"},
+        },
+    }
+    store.save_outline_artifact(
+        state,
+        "volume_outline",
+        "## 第一卷：开局\n\n## 第二卷：推进\n",
+    )
+    store.save_outline_artifact(
+        state,
+        "chapter_outline",
+        "## 第二卷：推进\n\n"
+        + "\n".join(f"### 第 {chapter} 章：标题 {chapter}" for chapter in range(4, 24))
+        + "\n",
+    )
+    store.save_state(state)
+    for chapter in (4, 5, 6):
+        state.active_chapter = chapter
+        state.current_chapter = chapter
+        state.chapter_draft = f"# 第 {chapter} 章\n\n正文 {chapter}"
+        store.save_chapter_draft(state, version=1)
+
+    captured: dict[str, object] = {}
+
+    class FakeGraph:
+        def invoke(self, data: dict) -> dict:
+            captured.update(data["director_task_args"])
+            return data
+
+    monkeypatch.setattr(service, "build_volume_write_graph", lambda adapter, store, progress=None: FakeGraph())
+
+    service.generate_chapter_batch(store, DummyAdapter(), "web-demo", volume=2, requested_count=50)
+
+    assert captured["volume"] == 2
+    assert captured["requested_count"] == 17
+    assert captured["chapters"] == ",".join(str(chapter) for chapter in range(7, 24))
+
 def test_latest_chapter_outline_review_report_reads_saved_report(tmp_path: Path) -> None:
     store = LocalStore(tmp_path)
     store.create_project("Web Demo", "web-demo")

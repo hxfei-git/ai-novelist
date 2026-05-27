@@ -26,11 +26,13 @@ from ai_novelist.graph_outline import (
     run_outline_stage_node,
     stage_full_text,
 )
-from ai_novelist.graph_volume_write import build_volume_write_graph
+from ai_novelist.graph_volume_write import build_volume_write_graph, parse_chapter_override
 from ai_novelist.outline.chapter_outline_structure import (
     chapter_outline_metadata_from_artifact,
+    chinese_number_to_int,
     current_volume_spec,
     extract_chapter_outline_volume,
+    volume_label,
 )
 from ai_novelist.outline.stage_contracts import OUTLINE_STAGES, STAGE_LABELS
 from ai_novelist.state import NovelState
@@ -1160,6 +1162,7 @@ def generate_chapter_batch(
     project_id: str,
     *,
     volume: int = 1,
+    requested_count: int | None = None,
     chapters: str | Iterable[int] | None = None,
     max_workers: int = 3,
     progress: ProgressFunc | None = None,
@@ -1168,15 +1171,28 @@ def generate_chapter_batch(
 
     if volume < 1:
         raise LocalStoreError("Volume must be greater than 0")
-    os.environ["AI_NOVELIST_PARALLEL_AGENTS"] = "1"
-    os.environ["AI_NOVELIST_MAX_PARALLEL_AGENTS"] = str(max(1, min(int(max_workers or 3), 8)))
     state = store.load_state(project_id)
     state.director_action = "write_volume"
     state.director_task_args = {"volume": volume}
-    chapter_text = normalize_chapter_selector(chapters)
-    if chapter_text:
-        state.director_task_args["chapters"] = chapter_text
-    state.user_request = f"批量生成第 {volume} 卷"
+    if requested_count is not None:
+        workspace = chapter_batch_workspace_payload(store, project_id, volume)
+        remaining_numbers = list(workspace.get("remaining_chapter_numbers") or [])
+        requested_total = max(1, min(int(requested_count or 1), len(remaining_numbers)))
+        selected_numbers = remaining_numbers[:requested_total]
+        if not selected_numbers:
+            raise LocalStoreError(f"第 {volume} 卷没有剩余章节可生成")
+        os.environ["AI_NOVELIST_PARALLEL_AGENTS"] = "1"
+        os.environ["AI_NOVELIST_MAX_PARALLEL_AGENTS"] = str(max(1, requested_total))
+        state.director_task_args["requested_count"] = requested_total
+        state.director_task_args["chapters"] = ",".join(str(item) for item in selected_numbers)
+        state.user_request = f"批量生成第 {volume} 卷 {requested_total} 章"
+    else:
+        os.environ["AI_NOVELIST_PARALLEL_AGENTS"] = "1"
+        os.environ["AI_NOVELIST_MAX_PARALLEL_AGENTS"] = str(max(1, min(int(max_workers or 3), 8)))
+        chapter_text = normalize_chapter_selector(chapters)
+        if chapter_text:
+            state.director_task_args["chapters"] = chapter_text
+        state.user_request = f"批量生成第 {volume} 卷"
     state.review_status = "draft"
     state.error = ""
     store.save_state(state)
@@ -1195,6 +1211,65 @@ def latest_volume_batch_manifest(store: LocalStore, project_id: str, volume: int
         except json.JSONDecodeError:
             continue
     return {}
+
+
+def extract_volume_chapter_numbers(volume_outline: str, spec: Any | None = None) -> list[int]:
+    content = str(volume_outline or "").strip()
+    if not content:
+        return []
+    numbers: list[int] = []
+    seen: set[int] = set()
+    for match in re.finditer(r"第\s*([一二两三四五六七八九十\d]+)\s*章", content):
+        number = chinese_number_to_int(match.group(1))
+        if number and number not in seen:
+            seen.add(number)
+            numbers.append(number)
+    if numbers:
+        return numbers
+    chapter_range = str(getattr(spec, "chapter_range", "") or "").strip()
+    if chapter_range:
+        return parse_chapter_override(chapter_range)
+    return []
+
+
+def chapter_batch_workspace_payload(store: LocalStore, project_id: str, volume: int) -> dict[str, Any]:
+    workspace = chapter_outline_workspace_payload(store, project_id, selected_volume_index=volume)
+    selected_volume = workspace["selected_volume"]
+    selected_index = int(selected_volume.get("index") or volume)
+    spec = current_volume_spec(
+        {
+            "current_volume_index": selected_index,
+            "volume_specs": list(workspace.get("volume_specs") or []),
+        }
+    )
+    volume_outline = str(selected_volume.get("content") or "")
+    planned_chapter_numbers = extract_volume_chapter_numbers(volume_outline, spec)
+    generated_items = list_chapters(store, project_id, volume=selected_index)
+    if planned_chapter_numbers and not generated_items:
+        planned_set = set(planned_chapter_numbers)
+        generated_items = [item for item in list_chapters(store, project_id) if int(item.get("chapter") or 0) in planned_set]
+    generated_set: set[int] = set()
+    normalized_generated_items: list[dict[str, Any]] = []
+    for item in generated_items:
+        chapter = int(item.get("chapter") or 0)
+        if chapter in generated_set:
+            continue
+        generated_set.add(chapter)
+        normalized_generated_items.append(item)
+    remaining_chapter_numbers = [chapter for chapter in planned_chapter_numbers if chapter not in generated_set]
+    selected_name = str(selected_volume.get("name") or "").strip()
+    return {
+        "volume_index": selected_index,
+        "volume_label": str(selected_volume.get("label") or spec.label or volume_label(selected_index)),
+        "volume_name": selected_name,
+        "total_chapters": len(planned_chapter_numbers),
+        "generated_chapters": len(normalized_generated_items),
+        "remaining_chapters": len(remaining_chapter_numbers),
+        "next_chapter_number": remaining_chapter_numbers[0] if remaining_chapter_numbers else None,
+        "planned_chapter_numbers": planned_chapter_numbers,
+        "remaining_chapter_numbers": remaining_chapter_numbers,
+        "chapters": normalized_generated_items,
+    }
 
 
 def list_chapters(store: LocalStore, project_id: str, volume: int | None = None) -> list[dict[str, Any]]:
