@@ -2652,3 +2652,19 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 右侧进度栏也从浏览器本地缓存改成项目目录文件 `web_progress_log.json`，通过 `/api/projects/{project_id}/progress-log` 读写，这样不同项目的日志不会串台，刷新和切换项目后也能恢复当前项目自己的进度。
 
 验证：`PYTHONPATH=src .venv/bin/python -m pytest tests/test_web_service.py tests/test_web_app.py tests/test_frontend_review_tabs_structure.py -q` 69 passed；`npm --prefix web/frontend run build` 通过。
+
+## 2026-05-27 Web 进度事件脱敏与卷级审查导航
+
+目标：让 Web 右侧进度日志只保留阶段名、耗时、token/context 指标；同时把 outline、章节大纲和章节正文的审查入口都放到各自导航层级里，并让章节正文按卷切换、按卷加载章节列表。
+
+已完成：
+- 后端进度日志现在同时兼容旧字符串和结构化事件；SSE 进度事件输出 `label / elapsed / tokens / context / status`，不再回传正文 `message`。
+- 前端右侧进度栏只渲染阶段名与指标，旧字符串日志仍保留兼容显示。
+- outline 左侧导航增加“总体审查”，不再依赖工作区内的二级审查 tab。
+- 章节大纲新增独立总体审查端点与报告存储，左侧卷导航旁可直接进入审查并按选中建议应用到章节大纲。
+- 章节正文侧新增卷号导航与总体审查入口；`/api/projects/{project_id}/chapters?volume=` 可按卷读取最新批次章节。
+- 章节列表测试、章节大纲审查测试、前端结构测试和 Web 构建已补齐。
+
+验证：
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_web_service.py tests/test_web_app.py tests/test_frontend_review_tabs_structure.py -q`：83 passed。
+- `npm --prefix web/frontend run build`：通过。

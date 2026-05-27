@@ -123,6 +123,14 @@ type OutlineReviewSuggestion = {
   recommendation: string;
   selected: boolean;
 };
+type ProgressEvent = {
+  label: string;
+  elapsed: string;
+  tokens: string;
+  context: string;
+  status: string;
+};
+type ProgressItem = string | ProgressEvent;
 type TopSection = 'outline' | 'chapter-outline' | 'chapters';
 type OutlineStageView = 'edit' | 'review';
 type ChapterView = 'batch' | 'list' | 'review';
@@ -199,7 +207,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 
-async function streamAction(path: string, body: unknown, onProgress: (line: string) => void): Promise<void> {
+async function streamAction(path: string, body: unknown, onProgress: (event: ProgressEvent) => void): Promise<void> {
   const res = await fetch(path, {
     method: 'POST',
     cache: 'no-store',
@@ -231,7 +239,8 @@ async function streamAction(path: string, body: unknown, onProgress: (line: stri
           throw new Error(data);
         }
       }
-      onProgress(data);
+      if (eventLine?.slice(7) !== 'progress') continue;
+      onProgress(JSON.parse(data) as ProgressEvent);
     }
   }
 }
@@ -254,7 +263,8 @@ function App() {
   const [chapterOutlineWorkspace, setChapterOutlineWorkspace] = useState<ChapterOutlineWorkspace | null>(null);
   const [loadingChapterOutline, setLoadingChapterOutline] = useState(false);
   const [chapterOutlineRunning, setChapterOutlineRunning] = useState(false);
-  const [log, setLog] = useState<string[]>([]);
+  const [chapterOutlineView, setChapterOutlineView] = useState<'volume' | 'review'>('volume');
+  const [log, setLog] = useState<ProgressItem[]>([]);
   const [chapterSelector, setChapterSelector] = useState('1-3');
   const [volume, setVolume] = useState(1);
   const [maxWorkers, setMaxWorkers] = useState(3);
@@ -270,6 +280,10 @@ function App() {
   const [outlineReviewRunning, setOutlineReviewRunning] = useState(false);
   const [outlineReviewApplying, setOutlineReviewApplying] = useState(false);
   const [selectedOutlineRepairIds, setSelectedOutlineRepairIds] = useState<Record<string, boolean>>({});
+  const [chapterOutlineReview, setChapterOutlineReview] = useState<OutlineReview | null>(null);
+  const [chapterOutlineReviewRunning, setChapterOutlineReviewRunning] = useState(false);
+  const [chapterOutlineReviewApplying, setChapterOutlineReviewApplying] = useState(false);
+  const [selectedChapterOutlineRepairIds, setSelectedChapterOutlineRepairIds] = useState<Record<string, boolean>>({});
   const [pendingQuestions, setPendingQuestions] = useState<PendingQuestionPayload | null>(null);
   const [pendingAnswerSelection, setPendingAnswerSelection] = useState<Record<string, string>>({});
   const [pendingCustomAnswers, setPendingCustomAnswers] = useState<Record<string, string>>({});
@@ -313,14 +327,20 @@ function App() {
     setChapterDetail(null);
     setReview(null);
     setOutlineReview(null);
+    setChapterOutlineReview(null);
     setSelectedRepairIds({});
     setSelectedOutlineRepairIds({});
+    setSelectedChapterOutlineRepairIds({});
+    setOutlineStageView('edit');
+    setChapterOutlineView('volume');
+    setChapterView('batch');
     loadProjectState().catch(showError);
     loadProjectProgressLog().catch(showError);
     refreshStages().catch(showError);
     refreshChapters().catch(showError);
     loadLatestReview().catch(() => setReview(null));
     loadLatestOutlineReview().catch(() => setOutlineReview(null));
+    loadLatestChapterOutlineReview().catch(() => setChapterOutlineReview(null));
     loadChapterOutlineWorkspace().catch(showError);
   }, [projectId]);
 
@@ -334,7 +354,7 @@ function App() {
     loadChapter(selectedChapter).catch(showError);
   }, [projectId, selectedChapter]);
 
-  function pushLog(message: string) {
+  function pushLog(message: ProgressItem) {
     setLog((items) => {
       const next = [message, ...items].slice(0, maxLogItems);
       void saveProjectProgressLog(next);
@@ -353,13 +373,13 @@ function App() {
   }
 
   async function loadProjectProgressLog() {
-    const payload = await api<{ items: string[] }>(`/api/projects/${projectId}/progress-log`);
+    const payload = await api<{ items: ProgressItem[] }>(`/api/projects/${projectId}/progress-log`);
     setLog(Array.isArray(payload.items) ? payload.items : []);
   }
 
-  async function saveProjectProgressLog(items: string[]) {
+  async function saveProjectProgressLog(items: ProgressItem[]) {
     if (!projectId) return;
-    await api<{ items: string[] }>(`/api/projects/${projectId}/progress-log`, {
+    await api<{ items: ProgressItem[] }>(`/api/projects/${projectId}/progress-log`, {
       method: 'PUT',
       body: JSON.stringify({ items }),
     });
@@ -480,14 +500,18 @@ function App() {
     }
   }
 
-  async function refreshChapters(selectLatest = false) {
-    const items = await api<Chapter[]>(`/api/projects/${projectId}/chapters`);
+  async function refreshChapters(selectLatest = false, volumeIndex?: number) {
+    const query = volumeIndex ? `?volume=${volumeIndex}` : '';
+    const items = await api<Chapter[]>(`/api/projects/${projectId}/chapters${query}`);
     setChapters(items);
     if (selectLatest && items.length > 0) {
       setSelectedChapter(items[items.length - 1].chapter);
       setChapterView('list');
-    } else if (!selectedChapter && items.length > 0) {
+    } else if (items.length > 0) {
       setSelectedChapter(items[0].chapter);
+    } else {
+      setSelectedChapter(null);
+      setChapterDetail(null);
     }
   }
 
@@ -502,14 +526,14 @@ function App() {
   }
 
   async function generateBatch() {
-    pushLog(`章节批量生成已开始：第 ${volume} 卷 ${chapterSelector}`);
+    pushLog({ label: '章节批量生成', elapsed: '', tokens: '', context: '', status: 'started' });
     await streamAction(
       `/api/projects/${projectId}/chapters/generate-batch`,
       { volume, chapters: chapterSelector, max_workers: maxWorkers },
       (line) => pushLog(line),
     );
-    await refreshChapters(true);
-    pushLog('章节批量生成完成，已刷新章节列表');
+    await refreshChapters(true, volume);
+    pushLog({ label: '章节批量生成', elapsed: '', tokens: '', context: '', status: 'completed' });
   }
 
   async function loadLatestReview() {
@@ -524,13 +548,19 @@ function App() {
     setSelectedOutlineRepairIds(buildOutlineRepairSelectionMap(latest.repair_suggestions || []));
   }
 
+  async function loadLatestChapterOutlineReview() {
+    const latest = await api<OutlineReview>(`/api/projects/${projectId}/outline/chapter-review/latest`);
+    setChapterOutlineReview(latest);
+    setSelectedChapterOutlineRepairIds(buildOutlineRepairSelectionMap(latest.repair_suggestions || []));
+  }
+
   async function runOutlineReview() {
     setOutlineReviewRunning(true);
-    pushLog('大纲总体审查已开始');
+    pushLog({ label: '大纲总体审查', elapsed: '', tokens: '', context: '', status: 'started' });
     try {
       await streamAction(`/api/projects/${projectId}/outline/review`, { instruction: instruction.trim() }, (line) => pushLog(line));
       await loadLatestOutlineReview();
-      pushLog('大纲总体审查完成');
+      pushLog({ label: '大纲总体审查', elapsed: '', tokens: '', context: '', status: 'completed' });
     } catch (error) {
       showError(error);
     } finally {
@@ -543,11 +573,11 @@ function App() {
     const suggestions = outlineReview.repair_suggestions || [];
     const selectedIssueIds = suggestions.filter((item) => selectedOutlineRepairIds[item.id] !== false).map((item) => item.id);
     if (suggestions.length > 0 && selectedIssueIds.length === 0) {
-      pushLog('大纲总体审查没有选中的修改建议');
+      pushLog({ label: '大纲总体审查', elapsed: '', tokens: '', context: '', status: 'no_selection' });
       return;
     }
     setOutlineReviewApplying(true);
-    pushLog(`大纲审查应用已开始：${outlineReview.run_id}`);
+    pushLog({ label: '大纲审查应用', elapsed: '', tokens: '', context: '', status: 'started' });
     try {
       await streamAction(
         `/api/projects/${projectId}/outline/review/${outlineReview.run_id}/apply`,
@@ -555,7 +585,7 @@ function App() {
         (line) => pushLog(line),
       );
       await loadLatestOutlineReview();
-      pushLog('大纲审查建议已应用');
+      pushLog({ label: '大纲审查应用', elapsed: '', tokens: '', context: '', status: 'completed' });
     } catch (error) {
       showError(error);
     } finally {
@@ -565,8 +595,54 @@ function App() {
 
   function dismissOutlineReview() {
     if (!outlineReview) return;
-    pushLog(`已拒绝采纳大纲审查建议：${outlineReview.run_id}`);
+    pushLog({ label: '大纲审查建议', elapsed: '', tokens: '', context: '', status: 'dismissed' });
     setOutlineReview((currentReview) => (currentReview ? { ...currentReview, status: 'dismissed' } : currentReview));
+  }
+
+  async function runChapterOutlineReview() {
+    setChapterOutlineReviewRunning(true);
+    pushLog({ label: '章节大纲总体审查', elapsed: '', tokens: '', context: '', status: 'started' });
+    try {
+      await streamAction(`/api/projects/${projectId}/outline/chapter-review`, { instruction: instruction.trim() }, (line) => pushLog(line));
+      await loadLatestChapterOutlineReview();
+      pushLog({ label: '章节大纲总体审查', elapsed: '', tokens: '', context: '', status: 'completed' });
+    } catch (error) {
+      showError(error);
+    } finally {
+      setChapterOutlineReviewRunning(false);
+    }
+  }
+
+  async function applyChapterOutlineReview() {
+    if (!chapterOutlineReview?.run_id) return;
+    const suggestions = chapterOutlineReview.repair_suggestions || [];
+    const selectedIssueIds = suggestions.filter((item) => selectedChapterOutlineRepairIds[item.id] !== false).map((item) => item.id);
+    if (suggestions.length > 0 && selectedIssueIds.length === 0) {
+      pushLog({ label: '章节大纲总体审查', elapsed: '', tokens: '', context: '', status: 'no_selection' });
+      return;
+    }
+    setChapterOutlineReviewApplying(true);
+    pushLog({ label: '章节大纲审查应用', elapsed: '', tokens: '', context: '', status: 'started' });
+    try {
+      await streamAction(
+        `/api/projects/${projectId}/outline/chapter-review/${chapterOutlineReview.run_id}/apply`,
+        { selected_issue_ids: selectedIssueIds },
+        (line) => pushLog(line),
+      );
+      await loadLatestChapterOutlineReview();
+      await loadChapterOutlineWorkspace(chapterOutlineWorkspace?.selected_volume.index);
+      pushLog({ label: '章节大纲审查应用', elapsed: '', tokens: '', context: '', status: 'completed' });
+    } catch (error) {
+      showError(error);
+    } finally {
+      setChapterOutlineReviewApplying(false);
+    }
+  }
+
+  function dismissChapterOutlineReview() {
+    if (!chapterOutlineReview) return;
+    pushLog({ label: '章节大纲审查建议', elapsed: '', tokens: '', context: '', status: 'dismissed' });
+    setChapterOutlineReview((currentReview) => (currentReview ? { ...currentReview, status: 'dismissed' } : currentReview));
   }
 
   async function submitPendingQuestions() {
@@ -607,13 +683,13 @@ function App() {
     setReviewRunning(true);
     setReview(null);
     setSelectedRepairIds({});
-    pushLog('章节总体审查已开始');
+    pushLog({ label: '章节总体审查', elapsed: '', tokens: '', context: '', status: 'started' });
     try {
       await streamAction(`/api/projects/${projectId}/chapters/review-all`, {}, (line) => pushLog(line));
       const latest = await api<ReviewReportData>(`/api/projects/${projectId}/chapters/review-all/latest`);
       setReview(latest);
       setSelectedRepairIds(buildRepairSelectionMap(latest.repair_suggestions || []));
-      pushLog(`章节总体审查完成：${latest.summary || '无摘要'}`);
+      pushLog({ label: '章节总体审查', elapsed: '', tokens: '', context: '', status: 'completed' });
     } finally {
       setReviewRunning(false);
     }
@@ -624,7 +700,7 @@ function App() {
     const suggestions = (review.repair_suggestions || []).filter((item) => item.chapter === chapter);
     const selectedIssueIds = suggestions.filter((item) => selectedRepairIds[item.id] !== false).map((item) => item.id);
     if (selectedIssueIds.length === 0) {
-      pushLog(`第 ${chapter} 章没有选中的修改建议`);
+      pushLog({ label: `第 ${chapter} 章修改`, elapsed: '', tokens: '', context: '', status: 'no_selection' });
       return;
     }
     setApplyingChapter(chapter);
@@ -633,7 +709,7 @@ function App() {
         method: 'POST',
         body: JSON.stringify({ run_id: review.run_id, selected_issue_ids: selectedIssueIds }),
       });
-      pushLog(`已提交第 ${chapter} 章修改：draft_v${result.version}`);
+      pushLog({ label: `第 ${chapter} 章修改`, elapsed: '', tokens: '', context: '', status: `draft_v${result.version}` });
       await refreshChapters();
       if (selectedChapter === chapter) await loadChapter(chapter);
     } catch (error) {
@@ -663,20 +739,55 @@ function App() {
         {topSection === 'outline' ? (
           <nav>
             {visibleStages.map((item) => (
-              <button className={item.stage === activeStage ? 'active' : ''} key={item.stage} onClick={() => setActiveStage(item.stage)}>
+              <button className={item.stage === activeStage && outlineStageView === 'edit' ? 'active' : ''} key={item.stage} onClick={() => { setActiveStage(item.stage); setOutlineStageView('edit'); }}>
                 <FileText size={16} />
                 <span>{stageLabel(item, item.stage)}</span>
                 <small>{item.status}</small>
               </button>
             ))}
+            <button className={outlineStageView === 'review' ? 'active' : ''} onClick={() => setOutlineStageView('review')}>
+              <ListChecks size={16} />
+              <span>总体审查</span>
+              <small>outline</small>
+            </button>
           </nav>
         ) : topSection === 'chapter-outline' ? (
-          <nav className="sidebar-note">
-            <p>章节大纲按卷管理。</p>
+          <nav>
+            {(chapterOutlineWorkspace?.volume_specs || []).map((item) => (
+              <button
+                className={chapterOutlineWorkspace?.selected_volume.index === item.index && chapterOutlineView === 'volume' ? 'active' : ''}
+                key={item.index}
+                onClick={() => { setChapterOutlineView('volume'); loadChapterOutlineWorkspace(item.index).catch(showError); }}
+              >
+                <FileText size={16} />
+                <span>{item.label || `第 ${item.index} 卷`}</span>
+                <small>{item.name || '未命名'}</small>
+              </button>
+            ))}
+            <button className={chapterOutlineView === 'review' ? 'active' : ''} onClick={() => setChapterOutlineView('review')}>
+              <ListChecks size={16} />
+              <span>总体审查</span>
+              <small>chapter-outline</small>
+            </button>
           </nav>
         ) : (
-          <nav className="sidebar-note">
-            <p>章节正文功能在右侧工作区切换。</p>
+          <nav>
+            {(chapterOutlineWorkspace?.volume_specs || []).map((item) => (
+              <button
+                className={chapterView !== 'review' && volume === item.index ? 'active' : ''}
+                key={item.index}
+                onClick={() => { setVolume(item.index); setChapterView('batch'); refreshChapters(false, item.index).catch(showError); }}
+              >
+                <FileText size={16} />
+                <span>{item.label || `第 ${item.index} 卷`}</span>
+                <small>{item.name || '未命名'}</small>
+              </button>
+            ))}
+            <button className={chapterView === 'review' ? 'active' : ''} onClick={() => setChapterView('review')}>
+              <ListChecks size={16} />
+              <span>总体审查</span>
+              <small>chapters</small>
+            </button>
           </nav>
         )}
       </aside>
@@ -702,14 +813,6 @@ function App() {
         </section>
       ) : topSection === 'outline' && (
         <section className="workspace">
-          <div className="workspace-tabs" aria-label="大纲视图">
-            <button className={outlineStageView === 'edit' ? 'active' : ''} onClick={() => setOutlineStageView('edit')}>
-              <FileText size={16} />阶段编辑
-            </button>
-            <button className={outlineStageView === 'review' ? 'active' : ''} onClick={() => setOutlineStageView('review')}>
-              <ListChecks size={16} />总体审查
-            </button>
-          </div>
           {outlineStageView === 'edit' && (
             <>
               <header className="toolbar">
@@ -785,23 +888,66 @@ function App() {
                   );
                 })}
               </div>
-              <article className="chapter-detail">
-                <header className="toolbar">
-                  <div>
-                    <h1>{chapterOutlineWorkspace.selected_volume.label}</h1>
-                    <p>{chapterOutlineWorkspace.selected_volume.name || chapterOutlineWorkspace.selected_volume.status}</p>
-                  </div>
-                </header>
-                <StageActionBar
-                  actionState={chapterOutlineWorkspace.selected_volume}
-                  loadingStage={loadingChapterOutline}
-                  running={chapterOutlineRunning}
-                  status={chapterOutlineWorkspace.selected_volume.status}
-                  onRun={runChapterOutlineVolume}
-                />
-                <input className="instruction" value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder="当前卷章节大纲生成、修订或锁定说明" />
-                <pre className="chapter-body">{chapterOutlineWorkspace.selected_volume.content || chapterOutlineWorkspace.selected_volume.summary || '暂无章节大纲内容。'}</pre>
-              </article>
+              {chapterOutlineView === 'review' ? (
+                <section className="review-workspace outline-review-panel">
+                  <header className="toolbar">
+                    <div>
+                      <h1>章节大纲总体审查</h1>
+                      <p>审查当前章节大纲并按卷修订</p>
+                    </div>
+                    <button onClick={runChapterOutlineReview} disabled={chapterOutlineReviewRunning || chapterOutlineReviewApplying}><ListChecks size={16} />{chapterOutlineReviewRunning ? '审查中' : '开始审查'}</button>
+                  </header>
+                  <input className="instruction" value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder="可选：本次审查关注点" />
+                  {chapterOutlineReviewRunning && <div className="loading">章节大纲总体审查正在运行...</div>}
+                  {chapterOutlineReview ? (
+                    <div className="review-report outline-review-report">
+                      <div className="review-header">
+                        <div>
+                          <span>run_id: {chapterOutlineReview.run_id}</span>
+                          <strong>{chapterOutlineReview.summary}</strong>
+                          <small>{chapterOutlineReview.status || 'reviewed'} · {chapterOutlineReview.decision || 'revise'} · {chapterOutlineReview.score ?? 0}</small>
+                        </div>
+                        <div className="review-buttons">
+                          <button onClick={dismissChapterOutlineReview} disabled={chapterOutlineReviewRunning || chapterOutlineReviewApplying}><X size={16} />不采纳</button>
+                          <button onClick={applyChapterOutlineReview} disabled={chapterOutlineReviewRunning || chapterOutlineReviewApplying || chapterOutlineReview.decision === 'stop'}><Check size={16} />采纳选中项</button>
+                        </div>
+                      </div>
+                      <p>{chapterOutlineReview.notes}</p>
+                      <small>参考大纲：{chapterOutlineReview.source_outline_summary}</small>
+                      {(chapterOutlineReview.repair_suggestions || []).length > 0 && (
+                        <OutlineRepairSuggestionBoard
+                          suggestions={chapterOutlineReview.repair_suggestions || []}
+                          selectedOutlineRepairIds={selectedChapterOutlineRepairIds}
+                          onToggle={(id, checked) => setSelectedChapterOutlineRepairIds((currentState) => ({ ...currentState, [id]: checked }))}
+                        />
+                      )}
+                    </div>
+                  ) : (
+                    <div className="review-report outline-review-report empty-review">
+                      <p>点击“开始审查”生成章节大纲审查意见。</p>
+                    </div>
+                  )}
+                  {chapterOutlineReviewApplying && <div className="loading">章节大纲审查建议正在应用...</div>}
+                </section>
+              ) : (
+                <article className="chapter-detail">
+                  <header className="toolbar">
+                    <div>
+                      <h1>{chapterOutlineWorkspace.selected_volume.label}</h1>
+                      <p>{chapterOutlineWorkspace.selected_volume.name || chapterOutlineWorkspace.selected_volume.status}</p>
+                    </div>
+                  </header>
+                  <StageActionBar
+                    actionState={chapterOutlineWorkspace.selected_volume}
+                    loadingStage={loadingChapterOutline}
+                    running={chapterOutlineRunning}
+                    status={chapterOutlineWorkspace.selected_volume.status}
+                    onRun={runChapterOutlineVolume}
+                  />
+                  <input className="instruction" value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder="当前卷章节大纲生成、修订或锁定说明" />
+                  <pre className="chapter-body">{chapterOutlineWorkspace.selected_volume.content || chapterOutlineWorkspace.selected_volume.summary || '暂无章节大纲内容。'}</pre>
+                </article>
+              )}
             </div>
           )}
           {!loadingChapterOutline && !chapterOutlineWorkspace && <p className="empty">暂无章节大纲工作区。</p>}
@@ -817,9 +963,6 @@ function App() {
             <button className={chapterView === 'list' ? 'active' : ''} onClick={() => setChapterView('list')}>
               <FileText size={16} />已生成章节
               <small>{chapters.length}</small>
-            </button>
-            <button className={chapterView === 'review' ? 'active' : ''} onClick={() => setChapterView('review')}>
-              <ListChecks size={16} />总体审查
             </button>
           </div>
           {chapterView === 'batch' && (
@@ -888,7 +1031,14 @@ function App() {
           <h2>进度</h2>
           <div className="progress-log">
             {log.length === 0 && <p className="empty">暂无进度。</p>}
-            {log.map((item, index) => <pre key={`${index}-${item}`}>{item}</pre>)}
+            {log.map((item, index) => typeof item === 'string' ? (
+              <pre key={`${index}-${item}`}>{item}</pre>
+            ) : (
+              <div className="progress-item" key={`${index}-${item.label}-${item.status}`}>
+                <strong>{item.label}</strong>
+                <span>{[item.elapsed, item.tokens, item.context].filter(Boolean).join(' · ') || item.status}</span>
+              </div>
+            ))}
           </div>
         </section>
       </aside>

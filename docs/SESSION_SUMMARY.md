@@ -22,6 +22,14 @@
 
 验证结果：`.venv/bin/python -m pytest -q` 通过，193 passed；`npm --prefix web/frontend run build` 通过。
 
+### Web 进度脱敏与卷级审查导航：已完成
+
+- 右侧进度日志现在只保留阶段名、耗时、token/context 指标；后端 SSE 进度事件改为结构化事件，旧字符串日志仍兼容读取。
+- outline 左侧导航新增“总体审查”，章节大纲新增独立审查端点与报告存储，章节正文新增卷号导航和总体审查入口。
+- 章节正文列表现在支持按卷读取最新批次章节；章节大纲审查可以直接应用选中建议到对应章纲内容。
+- 本轮更新同时补了服务层、HTTP 路由、前端结构和回归测试。
+- 验证结果：`PYTHONPATH=src .venv/bin/python -m pytest tests/test_web_service.py tests/test_web_app.py tests/test_frontend_review_tabs_structure.py -q` 通过，83 passed；`npm --prefix web/frontend run build` 通过。
+
 ### Web 方向定位交互修复：已完成
 
 - 大纲阶段的生成、修订或锁定成功后，前端会清空已消费的说明输入，不再把上一次指令残留到下一次操作。

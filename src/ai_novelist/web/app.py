@@ -72,7 +72,7 @@ def make_app(
         queue: Queue[tuple[str, dict[str, Any]]] = Queue()
 
         def progress(stage: str, message: str) -> None:
-            queue.put(("progress", {"stage": stage, "message": message}))
+            queue.put(("progress", service.build_progress_event(stage, message)))
 
         def worker() -> None:
             try:
@@ -266,10 +266,47 @@ def make_app(
             media_type="text/event-stream",
         )
 
-    @app.get("/api/projects/{project_id}/chapters")
-    def chapters(project_id: str):
+    @app.post("/api/projects/{project_id}/outline/chapter-review")
+    def review_chapter_outline(project_id: str, payload: dict[str, Any] | None = None):
+        payload = payload or {}
+        return StreamingResponse(
+            sse_events(lambda progress: service.review_chapter_outline(store, adapter(payload), project_id, str(payload.get("instruction") or ""), progress)),
+            media_type="text/event-stream",
+        )
+
+    @app.post("/api/projects/{project_id}/outline/chapter-review/{run_id}/apply")
+    def apply_chapter_outline_review(project_id: str, run_id: str, payload: dict[str, Any] | None = None):
+        payload = payload or {}
+        selected_issue_ids = payload.get("selected_issue_ids")
+        if isinstance(selected_issue_ids, list):
+            selected_issue_ids = [str(item) for item in selected_issue_ids if str(item).strip()]
+        else:
+            selected_issue_ids = None
+        return StreamingResponse(
+            sse_events(
+                lambda progress: service.apply_chapter_outline_review(
+                    store,
+                    adapter(payload),
+                    project_id,
+                    run_id,
+                    progress,
+                    selected_issue_ids=selected_issue_ids,
+                )
+            ),
+            media_type="text/event-stream",
+        )
+
+    @app.get("/api/projects/{project_id}/outline/chapter-review/latest")
+    def latest_chapter_outline_review(project_id: str):
         try:
-            return service.list_chapters(store, project_id)
+            return service.latest_chapter_outline_review_report(store, project_id)
+        except LocalStoreError as exc:
+            raise as_http_error(exc)
+
+    @app.get("/api/projects/{project_id}/chapters")
+    def chapters(project_id: str, volume: int | None = None):
+        try:
+            return service.list_chapters(store, project_id, volume=volume)
         except LocalStoreError as exc:
             raise as_http_error(exc)
 

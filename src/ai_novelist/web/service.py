@@ -37,6 +37,7 @@ from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore, LocalStoreError, summarize_text
 
 ProgressFunc = Callable[[str, str], None]
+ProgressItem = str | dict[str, str]
 MAX_WEB_PROGRESS_LOG_ITEMS = 10
 
 
@@ -119,18 +120,41 @@ def project_progress_log_path(store: LocalStore, project_id: str) -> Path:
     return store.project_dir(project_id) / "web_progress_log.json"
 
 
-def normalize_progress_log_items(items: Iterable[Any]) -> list[str]:
-    normalized: list[str] = []
+def normalize_progress_log_items(items: Iterable[Any]) -> list[ProgressItem]:
+    normalized: list[ProgressItem] = []
     for item in items:
-        text = str(item).strip()
-        if text:
-            normalized.append(text)
+        if isinstance(item, str):
+            text = item.strip()
+            if text:
+                normalized.append(text)
+        elif isinstance(item, dict):
+            event = {
+                key: str(item.get(key) or "").strip()
+                for key in ("label", "elapsed", "tokens", "context", "status")
+            }
+            if event["label"]:
+                normalized.append(event)
         if len(normalized) >= MAX_WEB_PROGRESS_LOG_ITEMS:
             break
     return normalized
 
 
-def load_project_progress_log(store: LocalStore, project_id: str) -> list[str]:
+def build_progress_event(stage: str, message: str) -> dict[str, str]:
+    body = str(message or "").strip()
+    label = body.split("（", 1)[0].strip() or str(stage or "").strip() or "Progress"
+    elapsed = re.search(r"(?:^|[/（])(\d+(?:\.\d+)?s)(?:[/）]|$)", body)
+    tokens = re.search(r"(tok≈[^/）\s]+)", body)
+    context = re.search(r"(ctx=[^/）\s]+(?:/[^/）\s]+)?)", body)
+    return {
+        "label": label,
+        "elapsed": elapsed.group(1) if elapsed else "",
+        "tokens": tokens.group(1) if tokens else "",
+        "context": context.group(1) if context else "",
+        "status": "failed" if "失败" in body else "running",
+    }
+
+
+def load_project_progress_log(store: LocalStore, project_id: str) -> list[ProgressItem]:
     store.load_state(project_id)
     path = project_progress_log_path(store, project_id)
     if not path.exists():
@@ -143,13 +167,12 @@ def load_project_progress_log(store: LocalStore, project_id: str) -> list[str]:
     return normalize_progress_log_items(items if isinstance(items, list) else [])
 
 
-def save_project_progress_log(store: LocalStore, project_id: str, items: Iterable[Any]) -> list[str]:
+def save_project_progress_log(store: LocalStore, project_id: str, items: Iterable[Any]) -> list[ProgressItem]:
     store.load_state(project_id)
     normalized = normalize_progress_log_items(items)
     path = project_progress_log_path(store, project_id)
     path.write_text(json.dumps({"items": normalized}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return normalized
-
 
 def outline_stage_list(store: LocalStore, project_id: str) -> list[dict[str, Any]]:
     state = store.load_state(project_id)
@@ -288,6 +311,58 @@ def latest_outline_review_report(store: LocalStore, project_id: str) -> dict[str
 def render_outline_review_markdown(report: dict[str, Any]) -> str:
     lines = [
         "# 大纲总体审查报告",
+        "",
+        f"- 项目：{report.get('project_id') or 'unknown'}",
+        f"- run_id：{report.get('run_id') or 'unknown'}",
+        f"- 状态：{report.get('status') or 'unknown'}",
+        f"- 评分：{report.get('score') or 0}",
+        "",
+        "## 总体判断",
+        str(report.get('summary') or '暂无').strip() or '暂无',
+        "",
+        "## 审查意见",
+        str(report.get('notes') or '暂无').strip() or '暂无',
+        "",
+        "## 参考大纲",
+        str(report.get('source_outline_summary') or '暂无').strip() or '暂无',
+    ]
+    return '\n'.join(lines).rstrip() + '\n'
+
+
+def chapter_outline_review_report_paths(store: LocalStore, project_id: str, run_id: str) -> tuple[Path, Path]:
+    root = store.project_dir(project_id) / "outline" / "chapter_reviews" / run_id
+    return root / "report.json", root / "report.md"
+
+
+def latest_chapter_outline_review_run(store: LocalStore, project_id: str) -> str:
+    root = store.project_dir(project_id) / "outline" / "chapter_reviews"
+    if not root.exists():
+        return ""
+    candidates = [path.name for path in root.iterdir() if path.is_dir()]
+    return sorted(candidates)[-1] if candidates else ""
+
+
+def load_chapter_outline_review_report(store: LocalStore, project_id: str, run_id: str) -> dict[str, Any]:
+    if not run_id:
+        run_id = latest_chapter_outline_review_run(store, project_id)
+    if not run_id:
+        raise LocalStoreError("No chapter outline review report found")
+    report_path, _markdown_path = chapter_outline_review_report_paths(store, project_id, run_id)
+    if not report_path.exists():
+        raise LocalStoreError(f"Chapter outline review report does not exist: {run_id}")
+    return json.loads(report_path.read_text(encoding="utf-8"))
+
+
+def latest_chapter_outline_review_report(store: LocalStore, project_id: str) -> dict[str, Any]:
+    run_id = latest_chapter_outline_review_run(store, project_id)
+    if not run_id:
+        raise LocalStoreError("No chapter outline review report found")
+    return load_chapter_outline_review_report(store, project_id, run_id)
+
+
+def render_chapter_outline_review_markdown(report: dict[str, Any]) -> str:
+    lines = [
+        "# 章节大纲总体审查报告",
         "",
         f"- 项目：{report.get('project_id') or 'unknown'}",
         f"- run_id：{report.get('run_id') or 'unknown'}",
@@ -738,6 +813,114 @@ def apply_outline_review(store: LocalStore, adapter: AgentAdapter, project_id: s
     }
 
 
+def chapter_outline_review_source_text(state: NovelState, store: LocalStore) -> str:
+    artifact = dict(state.outline_stage_artifacts.get('chapter_outline') or {})
+    text = load_stage_markdown(store, state, 'chapter_outline', artifact).strip()
+    return text
+
+
+def review_chapter_outline(store: LocalStore, adapter: AgentAdapter, project_id: str, instruction: str = '', progress: ProgressFunc | None = None) -> dict[str, Any]:
+    emit = progress or (lambda _stage, _message: None)
+    state = store.load_state(project_id)
+    source_outline = chapter_outline_review_source_text(state, store)
+    if not source_outline:
+        raise LocalStoreError('当前没有可审查的章节大纲')
+    emit('ChapterOutlineReview', '正在读取当前章节大纲...')
+    state.outline = source_outline
+    state.user_request = instruction.strip() or '审查章节大纲'
+    state.revision_instruction = instruction.strip()
+    state.director_action = 'review_outline'
+    state.director_intent = 'review'
+    state.review_status = 'draft'
+    store.save_state(state)
+    reviewed = NovelState.from_dict(review_outline_node(state.to_dict(), adapter, store))
+    run_id = f"{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}-{uuid4().hex[:8]}"
+    report = {
+        'project_id': project_id,
+        'run_id': run_id,
+        'created_at': datetime.now(UTC).isoformat(timespec='seconds'),
+        'status': reviewed.review_status,
+        'decision': reviewed.editor_decision,
+        'score': reviewed.quality_score,
+        'summary': summarize_text(reviewed.editor_notes or reviewed.director_message or reviewed.revision_instruction or '审查完成', max_chars=240),
+        'notes': reviewed.editor_notes,
+        'revision_instruction': reviewed.revision_instruction,
+        'source_outline': source_outline,
+        'source_outline_summary': summarize_text(strip_markdown_heading(source_outline), max_chars=360),
+    }
+    report['repair_suggestions'] = build_outline_repair_suggestions(
+        str(report.get('notes') or ''),
+        str(report.get('revision_instruction') or ''),
+        str(report.get('summary') or ''),
+    )
+    report_path, markdown_path = chapter_outline_review_report_paths(store, project_id, run_id)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    markdown_path.write_text(render_chapter_outline_review_markdown(report), encoding='utf-8')
+    reviewed.outline_review_run_id = run_id
+    reviewed.outline_review_status = str(report['status'])
+    reviewed.outline_review_score = int(report.get('score') or 0)
+    reviewed.outline_review_summary = str(report['summary'])
+    reviewed.outline_review_report_path = report_path.relative_to(store.project_dir(project_id)).as_posix()
+    store.save_state(reviewed)
+    emit('ChapterOutlineReview', '章节大纲总体审查报告已保存。')
+    return report
+
+
+def apply_chapter_outline_review(store: LocalStore, adapter: AgentAdapter, project_id: str, run_id: str, progress: ProgressFunc | None = None, selected_issue_ids: list[str] | None = None) -> dict[str, Any]:
+    emit = progress or (lambda _stage, _message: None)
+    report = load_chapter_outline_review_report(store, project_id, run_id)
+    state = store.load_state(project_id)
+    source_outline = str(report.get('source_outline') or '').strip() or chapter_outline_review_source_text(state, store)
+    if not source_outline:
+        raise LocalStoreError('当前没有可应用的章节大纲审查结果')
+    decision = str(report.get('decision') or '').strip().lower()
+    if decision == 'stop':
+        raise LocalStoreError('当前审查结果要求停止，不能直接应用')
+    state.outline = source_outline
+    state.outline_stage = 'chapter_outline'  # type: ignore[assignment]
+    state.current_stage = 'chapter_outline'
+    state.active_workflow = 'outline'
+    state.revision_instruction = selected_outline_revision_instruction(report, selected_issue_ids)
+    state.user_request = state.revision_instruction
+    state.editor_notes = state.revision_instruction if selected_issue_ids is not None else str(report.get('notes') or '')
+    state.review_status = 'draft'
+    artifact = dict(state.outline_stage_artifacts.get('chapter_outline') or {})
+    artifact.update({
+        'stage': 'chapter_outline',
+        'label': STAGE_LABELS.get('chapter_outline', 'chapter_outline'),
+        'status': artifact.get('status') or 'options_ready',
+        'path': 'outline/chapter_outline.md',
+        'summary': summarize_text(strip_markdown_heading(source_outline)),
+        'stage_memory': [summarize_text(strip_markdown_heading(source_outline), max_chars=500)],
+        'updated_at': datetime.now(UTC).isoformat(timespec='seconds'),
+    })
+    state.outline_stage_artifacts['chapter_outline'] = artifact
+    state.outline_stage_summaries['chapter_outline'] = str(artifact.get('summary') or '')
+    store.save_outline_artifact(state, 'chapter_outline', source_outline)
+    store.save_outline_stage(state, 'chapter_outline', source_outline)
+    store.save_state(state)
+    emit('ChapterOutlineReview', '正在应用章节大纲审查建议...')
+    revised = NovelState.from_dict(run_outline_stage_node(state.to_dict(), adapter, store, progress or (lambda _stage, _message: None)))
+    revised.outline_review_applied_run_id = run_id
+    revised.outline_review_run_id = run_id
+    revised.outline_review_status = str(report.get('status') or 'reviewed')
+    revised.outline_review_score = int(report.get('score') or 0)
+    revised.outline_review_summary = str(report.get('summary') or '')
+    revised.outline_review_report_path = report_path = chapter_outline_review_report_paths(store, project_id, run_id)[0].relative_to(store.project_dir(project_id)).as_posix()
+    revised.review_status = 'approved'
+    revised.director_message = f'已采纳章节大纲审查建议并保存：{store.outline_artifact_path(project_id, "chapter_outline")}'
+    store.save_state(revised)
+    emit('ChapterOutlineReview', '章节大纲审查建议已应用并保存。')
+    return {
+        'project_id': project_id,
+        'run_id': run_id,
+        'applied': True,
+        'path': store.outline_artifact_path(project_id, 'chapter_outline').relative_to(store.project_dir(project_id)).as_posix(),
+        'version_count': len(revised.outline_versions),
+    }
+
+
 def normalize_pending_answers(answers: Any) -> list[dict[str, str]]:
     if not isinstance(answers, list) or not answers:
         raise LocalStoreError("请至少提交一条待确认项答案")
@@ -1001,12 +1184,40 @@ def generate_chapter_batch(
     return NovelState.from_dict(result)
 
 
-def list_chapters(store: LocalStore, project_id: str) -> list[dict[str, Any]]:
+def latest_volume_batch_manifest(store: LocalStore, project_id: str, volume: int) -> dict[str, Any]:
+    root = store.project_dir(project_id) / "chapters" / "batches" / f"volume_{volume:03d}"
+    if not root.exists():
+        return {}
+    candidates = sorted((path for path in root.glob('*/manifest.json') if path.is_file()), key=lambda item: item.stat().st_mtime, reverse=True)
+    for path in candidates:
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+    return {}
+
+
+def list_chapters(store: LocalStore, project_id: str, volume: int | None = None) -> list[dict[str, Any]]:
     store.load_state(project_id)
-    return [
-        chapter_payload(store, project_id, chapter, path, content, include_content=False)
-        for chapter, path, content in collect_latest_chapters(store, project_id)
-    ]
+    if volume is None:
+        return [
+            chapter_payload(store, project_id, chapter, path, content, include_content=False)
+            for chapter, path, content in collect_latest_chapters(store, project_id)
+        ]
+    manifest = latest_volume_batch_manifest(store, project_id, volume)
+    latest = manifest.get('chapters') if isinstance(manifest.get('chapters'), dict) else {}
+    chapter_items: list[dict[str, Any]] = []
+    for raw_chapter, raw_item in sorted(latest.items(), key=lambda item: int(item[0])):
+        try:
+            chapter = int(raw_chapter)
+        except (TypeError, ValueError):
+            continue
+        path_value = str(raw_item.get('path') or '').strip() if isinstance(raw_item, dict) else ''
+        path = store.project_dir(project_id) / path_value if path_value else latest_chapter_path(store, project_id, chapter)
+        if not path or not path.exists():
+            continue
+        chapter_items.append(chapter_payload(store, project_id, chapter, path, path.read_text(encoding='utf-8'), include_content=False))
+    return chapter_items
 
 
 def load_chapter_payload(store: LocalStore, project_id: str, chapter: int) -> dict[str, Any]:

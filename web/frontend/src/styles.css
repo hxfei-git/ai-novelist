@@ -156,6 +156,8 @@ nav small { color: #5c6f7c; font-size: 11px; }
 .right section { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
 .progress-panel { flex: 1; }
 .progress-log { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow: auto; padding-right: 2px; }
+.progress-item { border: 1px solid #d9e0e7; border-radius: 6px; background: #ffffff; padding: 9px 10px; display: flex; flex-direction: column; gap: 4px; }
+.progress-item span { color: #647582; font-size: 12px; }
 .right h2 { margin: 0 0 4px; font-size: 15px; }
 .empty { margin: 0; color: #687987; font-size: 13px; }
 pre { white-space: pre-wrap; background: #eef3f7; border-radius: 6px; padding: 8px; margin: 0; font-size: 12px; }

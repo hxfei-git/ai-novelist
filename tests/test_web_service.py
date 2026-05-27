@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from pathlib import Path
@@ -116,6 +118,33 @@ def test_project_progress_log_is_project_scoped_and_file_backed(tmp_path: Path) 
     assert service.load_project_progress_log(store, "progress-a") == ["A2", "A1"]
     assert service.load_project_progress_log(store, "progress-b") == ["B1"]
     assert (store.project_dir("progress-a") / "web_progress_log.json").exists()
+
+
+def test_project_progress_log_accepts_legacy_strings_and_structured_events(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    service.create_project(store, "Progress A", "progress-a")
+    legacy = "旧日志中的原始内容不迁移"
+    event = {"label": "世界观汇总", "elapsed": "12.4s", "tokens": "tok≈8.1K", "context": "ctx=4K/258K", "status": "completed"}
+
+    service.save_project_progress_log(store, "progress-a", [event, legacy])
+
+    assert service.load_project_progress_log(store, "progress-a") == [event, legacy]
+
+
+def test_progress_event_drops_generated_message_body_but_retains_metrics() -> None:
+    event = service.build_progress_event(
+        "OutlineStage",
+        "正在汇总「世界观设定」阶段产物（deepseek/12.4s/ctx=4K/258K/tok≈8.1K）",
+    )
+
+    assert event == {
+        "label": "正在汇总「世界观设定」阶段产物",
+        "elapsed": "12.4s",
+        "tokens": "tok≈8.1K",
+        "context": "ctx=4K/258K",
+        "status": "running",
+    }
+    assert "产物正文" not in json.dumps(event, ensure_ascii=False)
 
 
 def test_generate_outline_stage_uses_explicit_full_generation_intent_with_existing_content(monkeypatch, tmp_path: Path) -> None:
@@ -418,6 +447,47 @@ def test_chapter_outline_workspace_extracts_non_current_volume_from_combined_con
 
     assert "第一卷" in payload["selected_volume"]["content"]
     assert "第二卷" not in payload["selected_volume"]["content"]
+
+
+def test_list_chapters_filters_latest_volume_manifest(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+
+    for chapter in (1, 2, 3):
+        state.active_chapter = chapter
+        state.current_chapter = chapter
+        state.chapter_draft = f"# 第 {chapter} 章\n\n正文 {chapter}"
+        store.save_chapter_draft(state, version=1)
+
+    for volume, chapters in ((1, [1, 2]), (2, [3])):
+        manifest_dir = store.project_dir("web-demo") / "chapters" / "batches" / f"volume_{volume:03d}" / "latest"
+        manifest_dir.mkdir(parents=True, exist_ok=True)
+        (manifest_dir / "manifest.json").write_text(
+            json.dumps({
+                "chapters": {str(chapter): {"path": f"chapters/chapter_{chapter:03d}/draft_v1.md"} for chapter in chapters},
+            }, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+    volume_one = service.list_chapters(store, "web-demo", volume=1)
+    volume_two = service.list_chapters(store, "web-demo", volume=2)
+
+    assert [item["chapter"] for item in volume_one] == [1, 2]
+    assert [item["chapter"] for item in volume_two] == [3]
+
+
+def test_latest_chapter_outline_review_report_reads_saved_report(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    store.create_project("Web Demo", "web-demo")
+    report_path, markdown_path = service.chapter_outline_review_report_paths(store, "web-demo", "run-1")
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report = {"project_id": "web-demo", "run_id": "run-1", "summary": "ok"}
+    report_path.write_text(json.dumps(report, ensure_ascii=False), encoding="utf-8")
+    markdown_path.write_text("# 章节大纲总体审查报告\n", encoding="utf-8")
+
+    latest = service.latest_chapter_outline_review_report(store, "web-demo")
+
+    assert latest["run_id"] == "run-1"
 
 
 def test_extract_stage_pending_questions_from_markdown_filters_status_lines() -> None:

@@ -48,6 +48,8 @@ def test_web_app_exposes_outline_action_and_workspace_routes(tmp_path) -> None:
     assert "/api/projects/{project_id}/outline/chapter-workspace/volumes/{volume_index}/generate" in routes
     assert "/api/projects/{project_id}/outline/chapter-workspace/volumes/{volume_index}/revise" in routes
     assert "/api/projects/{project_id}/outline/chapter-workspace/volumes/{volume_index}/lock" in routes
+    assert "/api/projects/{project_id}/outline/chapter-review" in routes
+    assert "/api/projects/{project_id}/outline/chapter-review/{run_id}/apply" in routes
     assert not any("/action" in path for path in routes)
 
 
@@ -62,6 +64,11 @@ def test_generic_chapter_outline_stage_get_returns_workspace_error(tmp_path) -> 
     assert "章节大纲工作区" in response.json()["detail"]
 
 
+def test_chapter_outline_review_latest_route_is_exposed(tmp_path) -> None:
+    app = web_app.make_app(Settings(projects_dir=tmp_path), mock=True)
+    routes = {route.path for route in app.routes if hasattr(route, "path")}
+
+    assert "/api/projects/{project_id}/outline/chapter-review/latest" in routes
 
 
 def test_project_idea_and_progress_log_endpoints_are_project_scoped(tmp_path) -> None:
@@ -80,6 +87,26 @@ def test_project_idea_and_progress_log_endpoints_are_project_scoped(tmp_path) ->
     loaded = client.get("/api/projects/idea-web/progress-log")
     assert loaded.status_code == 200
     assert loaded.json()["items"] == ["方向定位开始", "保存创意"]
+
+
+def test_sse_progress_returns_metric_event_not_raw_message(monkeypatch, tmp_path) -> None:
+    client = TestClient(web_app.make_app(Settings(projects_dir=tmp_path), mock=True))
+    created = client.post("/api/projects", json={"title": "Web Demo", "project_id": "web-demo"})
+    assert created.status_code == 200
+
+    def fake_generate(store, adapter, project_id, stage, instruction="", progress=None):
+        assert progress is not None
+        progress("OutlineStage", "世界观汇总（12.4s/ctx=4K/258K/tok≈8.1K）")
+        return store.load_state(project_id)
+
+    monkeypatch.setattr(web_app.service, "generate_outline_stage", fake_generate)
+
+    response = client.post("/api/projects/web-demo/outline/stages/worldbuilding/generate", json={})
+
+    assert response.status_code == 200
+    assert '"label": "世界观汇总"' in response.text
+    assert '"tokens": "tok≈8.1K"' in response.text
+    assert '"message"' not in response.text
 
 
 def test_outline_stage_pending_api_returns_recommended_options(tmp_path) -> None:

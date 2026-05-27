@@ -38,14 +38,15 @@ def read_styles() -> str:
     return STYLES_CSS.read_text(encoding="utf-8")
 
 
-def test_review_entries_are_not_sidebar_navigation() -> None:
+def test_review_entries_move_into_sidebar_navigation() -> None:
     sidebar = sidebar_source(read_main())
 
     assert "章节批量生成" not in sidebar
     assert "已生成章节" not in sidebar
-    assert "章节总体审查" not in sidebar
-    assert "大纲总体审查" not in sidebar
-    assert "总体审查" not in sidebar
+    assert "总体审查" in sidebar
+    assert "setOutlineStageView('review')" in sidebar
+    assert "setChapterOutlineView('review')" in sidebar
+    assert "setChapterView('review')" in sidebar
 
 
 def test_top_navigation_has_three_workspaces() -> None:
@@ -63,23 +64,19 @@ def test_top_navigation_has_three_workspaces() -> None:
     assert "章节正文" in source
 
 
-def test_outline_workspace_uses_secondary_stage_review_tab() -> None:
+def test_outline_workspace_uses_sidebar_review_navigation() -> None:
     source = read_main()
 
     assert_union_type_includes(source, "OutlineStageView", "edit", "review")
-    assert 'aria-label="大纲视图"' in source
     assert "outlineStageView === 'edit'" in source
     assert "outlineStageView === 'review'" in source
     assert "setOutlineStageView('edit')" in source
     assert "setOutlineStageView('review')" in source
-    assert "outlineView === 'review'" not in source
+    assert "OutlineReviewWorkspace" in source
+    assert "setOutlineStageView('review')" in source
 
-    edit_start = source.index("{outlineStageView === 'edit' &&")
-    review_start = source.index("{outlineStageView === 'review' &&")
-    edit_block = source[edit_start:review_start]
-
-    assert "runOutlineReview" not in edit_block
-    assert "大纲总体审查" not in edit_block
+    sidebar = sidebar_source(source)
+    assert "setOutlineStageView('review')" in sidebar
 
 
 def test_outline_workspace_no_longer_assumes_chapter_outline_is_ordinary_stage() -> None:
@@ -97,15 +94,17 @@ def test_chapter_outline_workspace_uses_dedicated_volume_routes() -> None:
     source = read_main()
 
     assert "ChapterOutlineWorkspace" in source
+    assert "chapterOutlineView" in source
     assert "volume_specs" in source
     assert "selected_volume" in source
     assert "outline/chapter-workspace${query}" in source
     assert "outline/chapter-workspace/volumes/${volumeIndex}/${action}" in source
     assert "runChapterOutlineVolume(action: 'generate' | 'revise' | 'lock')" in source
-    assert "章节大纲按卷管理" in source
+    assert "outline/chapter-review" in source
+    assert "setChapterOutlineView('review')" in source
 
 
-def test_chapter_workspace_uses_secondary_tabs() -> None:
+def test_chapter_workspace_uses_volume_navigation_and_secondary_tabs() -> None:
     source = read_main()
 
     assert 'aria-label="章节视图"' in source
@@ -117,9 +116,9 @@ def test_chapter_workspace_uses_secondary_tabs() -> None:
     assert "setChapterView('review')" in source
 
     sidebar = sidebar_source(source)
-    assert "setChapterView('batch')" not in sidebar
-    assert "setChapterView('list')" not in sidebar
-    assert "setChapterView('review')" not in sidebar
+    assert "setChapterView('batch')" in sidebar
+    assert "setChapterView('review')" in sidebar
+    assert "volume === item.index" in sidebar
 
 def test_outline_review_uses_selectable_suggestion_board() -> None:
     source = read_main()
@@ -214,6 +213,17 @@ def test_frontend_restores_new_project_onboarding_workspace() -> None:
     assert "onboarding-workspace" in source
     assert "你想写一个什么样的故事" in source
     assert "projects/${projectId}/idea" in source
+
+
+def test_progress_panel_renders_structured_metrics_and_keeps_legacy_branch() -> None:
+    source = read_main()
+
+    assert "type ProgressEvent" in source
+    assert "typeof item === 'string'" in source
+    assert "item.elapsed" in source
+    assert "item.tokens" in source
+    assert "item.context" in source
+    assert "latest.summary || '无摘要'" not in source
 
 
 def test_frontend_progress_log_uses_project_directory_api_not_local_storage() -> None:
