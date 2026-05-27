@@ -2369,3 +2369,10 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - 修复：大纲审查报告新增 `repair_suggestions`，前端按表格展示问题/建议与 checkbox，apply 传入 `selected_issue_ids` 并只让选中项进入 reviser prompt。
 - 修复：桌面 `.app` 固定为视口高，主工作区和右侧分别内部滚动，进度日志放入 `.progress-log` 固定框；移动端保持自然页面滚动。
 - 验证：`.venv/bin/python -m pytest tests/test_web_service.py tests/test_frontend_review_tabs_structure.py -q` 16 passed；`npm run build`（`web/frontend`）通过。
+
+### 2026-05-27 Web 脚本启动入口
+
+- 新增 `scripts/run_web.sh`，用 `start|stop|restart|status|logs` 管理 Web 进程，不再依赖 `ai-novelist-web.service`。
+- 脚本会 source `~/.bashrc`，因此可复用其中已有的 `DEEPSEEK_API_KEY`；默认用 DeepSeek 启动本地 `127.0.0.1:8000`，由 Nginx 继续代理 `https://www.snowbell.asia/`。
+- `run/` 存放 PID 和日志并已加入 `.gitignore`。
+- 验证：`scripts/run_web.sh start` 成功；`scripts/run_web.sh status` 显示运行中；`https://www.snowbell.asia/` 返回 200 OK。

@@ -2587,3 +2587,20 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 验证：
 - `.venv/bin/python -m pytest tests/test_web_service.py tests/test_frontend_review_tabs_structure.py -q`：16 passed。
 - `npm run build`（`web/frontend`）：通过。
+
+## 2026-05-27 Web 脚本启动入口
+
+目标：不再依赖 systemd 管理 Web 应用进程，改为仓库内脚本一键启动；Nginx/HTTPS 仍负责域名反向代理到本机 `127.0.0.1:8000`。
+
+已完成：
+- 新增 `scripts/run_web.sh`，支持 `start|stop|restart|status|logs`。
+- 脚本启动时会读取 `~/.bashrc` 中已有的 `DEEPSEEK_API_KEY`，默认以 `--provider deepseek --model deepseek-chat --timeout 180` 启动 Web 服务。
+- 运行时 PID 和日志写入 `run/ai-novelist-web.pid` 与 `run/ai-novelist-web.log`；`run/` 已加入 `.gitignore`。
+- 已停用原 `ai-novelist-web.service`，避免与脚本争用 8000 端口。
+
+验证：
+- `scripts/run_web.sh start`：启动成功，HTTP 自检通过。
+- `scripts/run_web.sh status`：显示进程运行中。
+- `curl --noproxy '*' -sS -I https://www.snowbell.asia/`：200 OK。
+
+说明：服务器重启后需要重新运行 `scripts/run_web.sh start`，除非后续另行接入 cron、rc.local 或进程管理器。
