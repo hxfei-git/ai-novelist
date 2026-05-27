@@ -60,20 +60,10 @@ PURPOSE_ARTIFACT_TYPES = {
     "bible_update": ["review_lock", "final_chapter", "chapter_summary"],
     "export": ["final_chapter", "chapter_summary", "novel_bible"],
     "outline_stage": ["reference_brief"],
-    "director": ["novel_bible"],
 }
 
 
 CONTEXT_PROFILES = {
-    "director": ContextProfile(
-        name="director",
-        purpose="director",
-        max_chars=4000,
-        sections=("user_request", "task", "locked_constraints", "project_brief", "recent_messages"),
-        include_reference="none",
-        include_bible="summary",
-        include_project_context=True,
-    ),
     "review_context": ContextProfile(
         name="review_context",
         purpose="review",
@@ -89,16 +79,6 @@ CONTEXT_PROFILES = {
         purpose="review",
         max_chars=10000,
         sections=("task", "locked_constraints", "author_craft", "chapter_artifacts", "previous_chapter_summaries", "style_or_bible_digest"),
-        artifact_types=("chapter_card", "scene_cards"),
-        include_full_draft=False,
-        include_reference="none",
-        include_bible="summary",
-    ),
-    "review_synthesizer": ContextProfile(
-        name="review_synthesizer",
-        purpose="review",
-        max_chars=8000,
-        sections=("task", "locked_constraints", "author_craft", "chapter_artifacts"),
         artifact_types=("chapter_card", "scene_cards"),
         include_full_draft=False,
         include_reference="none",
@@ -168,7 +148,6 @@ PURPOSE_PROFILE_ALIASES = {
     "drafting": "drafting",
     "outline_stage": "outline_role",
     "revision": "revision",
-    "director": "director",
 }
 
 

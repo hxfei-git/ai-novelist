@@ -16,9 +16,6 @@ dependencies = [
 dev = [
   "pytest>=8.0",
 ]
-feishu = [
-  "lark-oapi>=1.6.5",
-]
 web = [
   "fastapi>=0.136",
   "uvicorn[standard]>=0.47",

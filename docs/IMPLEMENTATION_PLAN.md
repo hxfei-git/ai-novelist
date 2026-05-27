@@ -2,6 +2,8 @@
 
 ## 1. 当前状态
 
+AI Novelist 已开始收敛为 web-only 项目：`ai-novelist` 入口仅保留 `web` 子命令，chat / feishu / research / compose / review / finalize 等非 web 入口与其测试正在移除中。web 侧保留的 outline / chapter / review 文件流继续工作。
+
 AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、LangGraph、Codex CLI，并支持 DeepSeek API 作为可选模型提供方。
 
 当前推荐使用方式已经收敛为一个主入口：`ai-novelist chat`。Director Agent 作为主脑管理项目上下文，并根据用户输入调度 research、outline collaboration、章节写作、编辑审稿和保存等子工作流。

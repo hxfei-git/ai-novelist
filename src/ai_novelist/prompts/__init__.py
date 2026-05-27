@@ -10,8 +10,6 @@ class PromptNotFoundError(RuntimeError):
 
 
 AUTHOR_CRAFT_POLICY_PROMPTS = {
-    "director",
-    "direction_proposer",
     "outline_planner",
     "outline_stage_reviser",
     "chapter_goal_agent",
@@ -36,10 +34,6 @@ AUTHOR_CRAFT_POLICY_PROMPTS = {
     "character_arc_editor",
     "style_editor",
     "simulated_reader",
-    "review_synthesizer",
-    "revision_planner",
-    "targeted_reviser",
-    "revision_self_check",
     "pacing_guard_editor",
     "restraint_polisher",
     "emotional_resonance_polisher",

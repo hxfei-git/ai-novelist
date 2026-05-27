@@ -4,28 +4,13 @@ from ai_novelist.prompts import PromptNotFoundError, load_prompt
 
 
 def test_load_prompt_from_package():
-    assert "AGENT: director" in load_prompt("director")
+    assert "AGENT: outline_planner" in load_prompt("outline_planner")
 
 
 def test_missing_world_builder_prompt_is_gone():
     with pytest.raises(PromptNotFoundError):
         load_prompt("world_builder")
 
-
-def test_direction_proposer_prompt_marks_directions_as_candidates():
-    prompt = load_prompt("direction_proposer")
-
-    assert prompt.count("## 方向 ") == 3
-    assert "仅供选择" in prompt
-    assert "不是小说圣经、稳定 canon 或锁定设定" in prompt
-    assert "未选方案不会进入稳定设定" in prompt
-    assert "不得违反 locked_constraints" in prompt
-    assert "每个方向固定 6 个字段" in prompt
-    assert "每字段不超过 60 中文字符" in prompt
-    assert "建议选择不超过 120 中文字符" in prompt
-    for forbidden in ("审批", "备案", "绩效", "申请表", "KPI", "章节剧情", "已锁定 canon 口吻"):
-        assert forbidden in prompt
-    assert "成人亲密/福利方向可以作为风格气质或关系张力出现" in prompt
 
 
 def test_outline_planner_prompt_requires_confirmed_inputs_and_pending_gaps():

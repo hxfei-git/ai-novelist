@@ -18,19 +18,14 @@ class DeepSeekAPIError(AgentAdapterError):
 
 THINKING_DISABLED_MEDIUM_AGENTS = frozenset(
     {
-        "director",
-        "research_intent",
         "outline_stage_role",
-        "direction_proposer",
         "version_comparator",
-        "chapter_summarizer",
         "dialogue_enhancer",
         "atmosphere_enhancer",
         "hook_enhancer",
         "restraint_polisher",
         "emotional_resonance_polisher",
         "style_normalizer",
-        "revision_self_check",
         "outline_editor",
         "chapter_pacing_agent",
         "chapter_goal_agent",
@@ -59,12 +54,8 @@ THINKING_ENABLED_MEDIUM_AGENTS = frozenset(
         "continuity_editor",
         "structure_editor",
         "character_arc_editor",
-        "review_synthesizer",
-        "revision_planner",
-        "targeted_reviser",
         "bible_conflict_checker",
         "bible_update_synthesizer",
-        "final_bible_update_extractor",
     }
 )
 

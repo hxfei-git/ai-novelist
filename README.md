@@ -1,6 +1,8 @@
 # AI Novelist
 
-AI Novelist 是一个本地 CLI 版“智能小说作家助手”，基于 Python、LangGraph，并支持 Codex CLI 或 DeepSeek API 作为模型入口。当前已完成阶段 1 和阶段 2：可以通过一次性 `compose` 工作流生成小说设定与章节，也可以通过 `chat` 进入 Director Agent 连续对话模式，由主编 Agent 判断用户意图并调度子 Agent。
+> This checkout is now being pruned to a web-only application. The active entrypoint is `ai-novelist web`; chat, feishu, research, and other CLI flows are being removed.
+
+AI Novelist 现在聚焦于本地 Web UI/API 小说创作流程，基于 Python、LangGraph，并支持 Codex CLI 或 DeepSeek API 作为模型入口。当前可通过 `ai-novelist web` 运行 Web 服务，使用文件系统作为项目存储。
 
 ## 环境
 

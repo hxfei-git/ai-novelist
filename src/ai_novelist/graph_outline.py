@@ -82,232 +82,6 @@ CHAPTER_OUTLINE_INTERNAL_REQUEST_KEY = "chapter_outline_internal_generation_requ
 MAX_STAGE_QUESTION_ROUNDS = 3
 
 
-def build_outline_collaboration_graph(adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc | None = None, search_backend=None) -> CompiledGraph:
-    """Build an outline workflow whose natural-language routing goes through DirectorService."""
-    return DirectorBackedOutlineGraph(adapter, store, progress or noop_progress, search_backend)
-
-
-class DirectorBackedOutlineGraph:
-    def __init__(self, adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc = noop_progress, search_backend=None) -> None:
-        self.adapter = adapter
-        self.store = store
-        self.progress = progress
-        self.search_backend = search_backend
-
-    def invoke(self, state: dict) -> dict:
-        current = NovelState.from_dict(state)
-        ensure_outline_stage(current)
-        current.active_workflow = "outline" if current.director_action != "stop" else current.active_workflow
-        current.current_stage = current.outline_stage
-        artifact = current.outline_stage_artifacts.get(current.outline_stage, {})
-        artifact_status = str(artifact.get("status", "")).strip()
-        if artifact_status and current.outline_stage_status in {"", "collecting"}:
-            current.outline_stage_status = artifact_status  # type: ignore[assignment]
-        self.store.save_state(current)
-        user_text = current.user_request.strip()
-        if not user_text:
-            return current.to_dict()
-
-        from ai_novelist.director_service import DirectorService
-        from ai_novelist.research import MockSearchBackend
-
-        service = DirectorService(
-            self.store,
-            self.adapter,
-            self.search_backend or MockSearchBackend(),
-            progress=self.progress,
-        )
-        turn = service.handle_turn(current.project_id, user_text, channel="outline")
-        return (turn.state or self.store.load_state(current.project_id)).to_dict()
-
-
-class OutlineSequentialGraph(DirectorBackedOutlineGraph):
-    pass
-
-
-def outline_director_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
-    state = NovelState.from_dict(data)
-    ensure_outline_stage(state)
-    user_text = state.user_request.strip()
-
-    if state.outline.strip() and is_final_outline_view_request(user_text):
-        state.director_action = "show_outline"
-        state.director_intent = "status"
-        state.director_message = "我会展示当前已生成的大纲。"
-    elif state.outline.strip() and is_final_outline_save_request(user_text):
-        state.director_action = "persist_outline"
-        state.director_intent = "save"
-        state.director_message = "我会保存当前已生成的大纲。"
-    elif is_lock_request(user_text):
-        constraint = user_text.split("：", 1)[-1].split(":", 1)[-1].strip() or user_text
-        add_unique_items(state.locked_constraints, [constraint])
-        state.director_action = "run_outline_stage" if state.active_workflow == "outline" else "show_status"
-        state.director_intent = "lock"
-        state.director_message = "已记录锁定约束，后续阶段产物会遵守。"
-    else:
-        explicit_stage = detect_stage_reference(user_text)
-        if explicit_stage and is_stage_switch_request(user_text):
-            state.outline_stage = explicit_stage  # type: ignore[assignment]
-            state.outline_stage_status = "collecting"
-            record_stage_history(state, "switch", explicit_stage, user_text)
-            state.director_action = "run_outline_stage"
-            state.director_intent = "revise" if is_revision_request(user_text) else "create"
-            state.director_message = f"已切换到第 {stage_number(explicit_stage)} 阶段：{STAGE_LABELS[explicit_stage]}。我会重新组织这一阶段的共创。"
-        elif explicit_stage and is_stage_view_request(user_text):
-            state.director_action = "show_outline_stage"
-            state.director_intent = "status"
-            state.director_task_args = {"stage": explicit_stage}
-            state.director_message = f"我会展示{STAGE_LABELS[explicit_stage]}阶段产物。"
-        elif is_stage_view_request(user_text) and any(marker in user_text for marker in ("当前阶段", "阶段内容", "阶段产物", "当前产物")):
-            state.director_action = "show_outline_stage"
-            state.director_intent = "status"
-            state.director_task_args = {"stage": state.outline_stage}
-            state.director_message = f"我会展示{STAGE_LABELS[state.outline_stage]}阶段产物。"
-        elif state.pending_questions and answers_stage_pending_questions(user_text):
-            instruction = build_stage_pending_answer_instruction(state, user_text)
-            state.revision_instruction = instruction
-            add_unique_items(state.locked_constraints, [instruction])
-            state.director_action = "run_outline_stage"
-            state.director_intent = "answer_pending_questions"
-            state.director_message = "我会吸收你的补充回答，并重跑当前大纲阶段。"
-        elif should_run_outline_stage(user_text, state) and not should_defer_stage_confirmation_to_director(user_text, state):
-            state.director_action = "run_outline_stage"
-            state.director_intent = "revise" if is_revision_request(user_text) else "create"
-            state.director_message = f"我会推进第 {stage_number(state.outline_stage)} 阶段：{STAGE_LABELS[state.outline_stage]}。"
-        else:
-            try:
-                output = adapter.complete(build_outline_director_prompt(state), store.project_dir(state.project_id))
-            except AgentAdapterError as exc:
-                state.error = str(exc)
-                state.review_status = "error"
-                store.save_state(state)
-                return state.to_dict()
-            decision = parse_outline_director_output(output)
-            action = stage_action_from_director(decision["action"], user_text, state)
-            state.director_action = action
-            state.director_intent = decision["intent"]
-            state.director_message = decision["message"]
-            state.revision_instruction = decision["instruction"] or infer_revision_instruction(state.user_request, state.director_intent)
-            state.active_artifact = decision["target"]
-            add_unique_items(state.locked_constraints, decision["locked_constraints"])
-            add_unique_items(state.style_preferences, decision["style_preferences"])
-            if decision["chapter"]:
-                state.current_chapter = decision["chapter"]
-
-    state.last_user_feedback = state.user_request
-    state.active_artifact = state.active_artifact or "outline_stage"
-    state.active_workflow = "outline" if state.director_action != "stop" else ""
-    state.current_stage = state.outline_stage
-    state.pending_question = state.director_message if state.director_action == "ask_user" else ""
-    if state.director_action == "stop":
-        state.review_status = "stopped"
-        state.next_action = "stop"
-    else:
-        state.next_action = state.director_action
-    append_message(state, "assistant", state.director_message)
-    store.save_state(state)
-    return state.to_dict()
-
-def ask_user_node(data: dict, store: LocalStore) -> dict:
-    state = NovelState.from_dict(data)
-    question = state.director_message or "请告诉我你想修改大纲、生成多个方向、审稿还是保存。"
-    add_unique_items(state.pending_questions, [question])
-    state.next_action = "stop"
-    store.save_state(state)
-    return state.to_dict()
-
-
-def propose_directions_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
-    state = NovelState.from_dict(data)
-    try:
-        directions = adapter.complete(build_outline_prompt(state, "direction_proposer"), store.project_dir(state.project_id))
-    except AgentAdapterError as exc:
-        state.error = str(exc)
-        state.review_status = "error"
-        store.save_state(state)
-        return state.to_dict()
-    add_outline_version(state, "directions", directions, "方向提案")
-    state.active_artifact = "outline"
-    state.director_message = "已生成 3 个创作方向。你可以选择一个方向，或继续提出修改。"
-    state.next_action = "wait_feedback"
-    store.save_state(state)
-    return state.to_dict()
-
-
-def generate_outline_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
-    state = NovelState.from_dict(data)
-    try:
-        state.outline = adapter.complete(build_outline_prompt(state, "outline_planner"), store.project_dir(state.project_id))
-    except AgentAdapterError as exc:
-        state.error = str(exc)
-        state.review_status = "error"
-        store.save_state(state)
-        return state.to_dict()
-    add_outline_version(state, "outline", state.outline, "生成大纲")
-    state.active_artifact = "outline"
-    state.review_status = "draft"
-    state.director_message = "已生成大纲草案，并准备进入审稿。"
-    store.save_state(state)
-    return state.to_dict()
-
-
-def review_outline_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
-    state = NovelState.from_dict(data)
-    try:
-        state.editor_notes = adapter.complete(build_outline_prompt(state, "outline_editor"), store.project_dir(state.project_id))
-    except AgentAdapterError as exc:
-        state.error = str(exc)
-        state.review_status = "error"
-        store.save_state(state)
-        return state.to_dict()
-    decision, score = parse_status_score(state.editor_notes)
-    state.editor_decision = decision
-    state.quality_score = score
-    if decision == "revise":
-        state.revision_instruction = state.revision_instruction or extract_outline_editor_advice(state.editor_notes)
-        state.review_status = "revision_requested"
-    elif decision == "pass":
-        state.review_status = "draft"
-    else:
-        state.review_status = "stopped"
-    state.director_message = f"大纲审稿完成：{decision}，质量分 {score}。"
-    store.save_state(state)
-    return state.to_dict()
-
-
-def revise_outline_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
-    state = NovelState.from_dict(data)
-    previous = state.outline
-    try:
-        revised = adapter.complete(build_outline_prompt(state, "outline_reviser"), store.project_dir(state.project_id))
-    except AgentAdapterError as exc:
-        state.error = str(exc)
-        state.review_status = "error"
-        store.save_state(state)
-        return state.to_dict()
-    if previous.strip():
-        add_outline_version(state, "outline_previous", previous, "修订前大纲")
-    state.outline = revised
-    state.revision_count += 1
-    add_outline_version(state, "outline", state.outline, f"修订版 {state.revision_count}")
-    state.review_status = "draft"
-    state.director_message = "已根据反馈修订大纲，并准备比较版本和再次审稿。"
-    store.save_state(state)
-    return state.to_dict()
-
-
-def compare_outline_versions_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
-    state = NovelState.from_dict(data)
-    try:
-        comparison = adapter.complete(build_outline_prompt(state, "version_comparator"), store.project_dir(state.project_id))
-    except AgentAdapterError:
-        comparison = simple_outline_comparison(state)
-    state.editor_notes = (state.editor_notes + "\n\n" if state.editor_notes else "") + comparison
-    state.director_message = "已比较新旧大纲版本，差异摘要已写入编辑意见。"
-    store.save_state(state)
-    return state.to_dict()
-
-
 def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore, progress: ProgressFunc = noop_progress) -> dict:
     state = NovelState.from_dict(data)
     ensure_outline_stage(state)
@@ -2772,6 +2546,69 @@ def persist_outline_node(data: dict, store: LocalStore) -> dict:
         state.director_message = f"当前大纲已保存：{store.outline_path(state.project_id)}"
     else:
         state.director_message = "当前没有可保存的大纲。"
+    store.save_state(state)
+    return state.to_dict()
+
+def review_outline_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
+    state = NovelState.from_dict(data)
+    prompt = build_outline_prompt(state, "outline_editor")
+    try:
+        output = adapter.complete(prompt, store.project_dir(state.project_id))
+    except AgentAdapterError as exc:
+        state.error = str(exc)
+        state.review_status = "error"
+        store.save_state(state)
+        return state.to_dict()
+    decision, score = parse_status_score(output)
+    state.editor_notes = output.strip()
+    state.editor_decision = decision  # type: ignore[assignment]
+    state.quality_score = score
+    state.revision_instruction = extract_outline_editor_advice(output)
+    state.review_status = {
+        "pass": "approved",
+        "revise": "revision_requested",
+        "stop": "stopped",
+    }[decision]
+    state.next_action = {
+        "pass": "human_review",
+        "revise": "rewrite_chapter",
+        "stop": "stop",
+    }[decision]
+    state.director_message = state.revision_instruction or state.editor_notes
+    store.save_state(state)
+    return state.to_dict()
+
+
+def revise_outline_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
+    state = NovelState.from_dict(data)
+    prompt = build_outline_prompt(state, "outline_reviser")
+    try:
+        output = adapter.complete(prompt, store.project_dir(state.project_id))
+    except AgentAdapterError as exc:
+        state.error = str(exc)
+        state.review_status = "error"
+        store.save_state(state)
+        return state.to_dict()
+    revised = output.strip()
+    if revised:
+        state.outline = revised
+    add_outline_version(state, "outline", state.outline, "修订后大纲")
+    state.editor_decision = "revise"
+    state.review_status = "draft"
+    state.next_action = "human_review"
+    state.director_message = "已生成大纲修订稿。"
+    store.save_state(state)
+    return state.to_dict()
+
+
+def compare_outline_versions_node(data: dict, adapter: AgentAdapter, store: LocalStore) -> dict:
+    del adapter
+    state = NovelState.from_dict(data)
+    if state.outline_versions:
+        latest = state.outline_versions[-1]
+        if isinstance(latest, dict) and str(latest.get("content") or "").strip():
+            state.outline = str(latest.get("content") or "")
+    state.director_message = simple_outline_comparison(state)
     store.save_state(state)
     return state.to_dict()
 

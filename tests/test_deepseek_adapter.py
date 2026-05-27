@@ -48,7 +48,7 @@ def test_deepseek_adapter_posts_chat_completion(monkeypatch, tmp_path):
     assert captured["payload"]["messages"] == [{"role": "user", "content": "写一个大纲"}]
 
 
-@pytest.mark.parametrize("agent", ["director", "chapter_goal_agent"])
+@pytest.mark.parametrize("agent", ["chapter_goal_agent"])
 def test_deepseek_disables_thinking_for_fast_agents(monkeypatch, tmp_path, agent):
     captured = capture_deepseek_payload(monkeypatch)
     adapter = DeepSeekAdapter(api_key="sk-test", temperature=0.4)
@@ -63,7 +63,7 @@ def test_deepseek_disables_thinking_for_fast_agents(monkeypatch, tmp_path, agent
 
 @pytest.mark.parametrize(
     "agent",
-    ["retrieval_context_synthesizer", "chapter_writer", "review_synthesizer"],
+    ["chapter_writer", "direct_chapter_writer", "volume_consistency_checker"],
 )
 def test_deepseek_enables_medium_thinking_for_synthesis_agents(monkeypatch, tmp_path, agent):
     captured = capture_deepseek_payload(monkeypatch)
@@ -95,7 +95,7 @@ def test_deepseek_options_agent_overrides_prompt_header(monkeypatch, tmp_path):
 
     assert (
         adapter.complete(
-            "AGENT: director\n写作任务",
+            "AGENT: outline_planner\n写作任务",
             tmp_path,
             options=AgentCallOptions(agent="chapter_writer", task="draft", stage="chapter"),
         )

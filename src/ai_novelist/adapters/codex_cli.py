@@ -126,8 +126,6 @@ class CodexCLIAdapter(AgentAdapter):
             return '{"conflicts": []}'
         if "AGENT: bible_update_synthesizer" in prompt:
             return "## 已写入\n- 小说圣经已吸收当前稳定设定。\n\n## 未写入\n- 暂无。\n\n## 待确认\n- open_questions 和冲突项仍需人工确认。"
-        if "AGENT: research_intent" in prompt:
-            return self._mock_research_intent(prompt)
         if "AGENT: director" in prompt:
             return self._mock_director(prompt)
         if "AGENT: retrieval_context_synthesizer" in prompt:
@@ -200,8 +198,6 @@ class CodexCLIAdapter(AgentAdapter):
             return self._mock_review_role("模拟读者", revised=self._is_revised_prompt(prompt))
         if "AGENT: pacing_guard_editor" in prompt:
             return self._mock_review_role("节奏守门", revised=self._is_revised_prompt(prompt))
-        if "AGENT: review_synthesizer" in prompt:
-            return self._mock_review_synthesizer(revised=self._is_revised_prompt(prompt))
         if "AGENT: revision_planner" in prompt:
             return self._mock_revision_plan()
         if "AGENT: targeted_reviser" in prompt:

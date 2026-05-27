@@ -5,6 +5,8 @@
 
 ## 1. 项目目标
 
+当前目标已收敛为 web-only 维护模式：仅保留 Web UI/API、outline、chapter batch generation 和 review/repair 流程，移除 chat / feishu / research / compose 等非 web 入口。
+
 构建一个 Linux 环境下的智能小说作家助手：
 
 - 使用 LangGraph 编排 research、outline、写作、审稿等多 Agent/多工作流。
@@ -13,6 +15,12 @@
 - 支持 mock 验证、本地文件存储和后续飞书接入。
 
 ## 2. 当前完成状态
+
+### Web-only 清理：进行中
+
+本轮开始把仓库收敛到 web-only：已删除 `chat` / `feishu` / `research` / `compose` / `review` / `finalize` / `export` 等非 web 入口及其测试，保留 `web`、outline、chapter batch generation、outline review、chapter review 和相关共享存储。
+
+验证结果：`.venv/bin/python -m pytest -q` 通过，193 passed；`npm --prefix web/frontend run build` 通过。
 
 ### 阶段 1：已完成
 
