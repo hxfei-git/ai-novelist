@@ -132,9 +132,63 @@ def current_volume_spec(metadata: dict[str, Any]) -> VolumeSpec:
     return VolumeSpec(index=current, label=volume_label(current))
 
 
+def completed_volume_briefs(metadata: dict[str, Any], max_chars: int = 1000) -> str:
+    completed = metadata.get("completed_volumes") if isinstance(metadata.get("completed_volumes"), list) else []
+    contents = metadata.get("volume_contents") if isinstance(metadata.get("volume_contents"), dict) else {}
+    specs = metadata.get("volume_specs") if isinstance(metadata.get("volume_specs"), list) else []
+    spec_map = {
+        int(raw.get("index") or 0): raw
+        for raw in specs
+        if isinstance(raw, dict) and str(raw.get("index") or "").isdigit()
+    }
+
+    def brief_text(content: str) -> str:
+        summary = chapter_outline_summary(content, max_chars=min(380, max_chars))
+        bullets: list[str] = []
+        capture = False
+        for raw_line in content.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith("## 卷内章节总体规划"):
+                capture = True
+                continue
+            if capture and line.startswith("-"):
+                cleaned = re.sub(r"^[-*+•\s]*", "", line).strip()
+                if cleaned:
+                    bullets.append(cleaned)
+                if len(bullets) >= 2:
+                    break
+        if bullets:
+            bullet_text = "；".join(bullets)
+            return f"{summary}；{bullet_text}" if summary else bullet_text
+        return summary
+
+    lines: list[str] = []
+    total = 0
+    for raw_index in completed:
+        if not str(raw_index).isdigit():
+            continue
+        index = int(raw_index)
+        content = str(contents.get(str(index)) or "").strip()
+        if not content:
+            continue
+        raw_spec = spec_map.get(index, {})
+        label = str(raw_spec.get("label") or volume_label(index))
+        name = str(raw_spec.get("name") or "").strip()
+        heading = f"{label}《{name}》" if name else label
+        brief = brief_text(content)
+        item = f"- {heading}摘要：{brief}" if brief else f"- {heading}摘要：暂无"
+        if total + len(item) > max_chars and lines:
+            break
+        lines.append(item)
+        total += len(item)
+    return "\n".join(lines) if lines else "暂无"
+
 def build_chapter_outline_target_context(metadata: dict[str, Any]) -> str:
     spec = current_volume_spec(metadata)
     completed = metadata.get("completed_volumes") if isinstance(metadata.get("completed_volumes"), list) else []
+    completed_briefs = completed_volume_briefs(metadata)
     lines = [
         f"- current_volume_index: {spec.index}",
         f"- total_volumes: {metadata.get('total_volumes') or 1}",
@@ -142,6 +196,7 @@ def build_chapter_outline_target_context(metadata: dict[str, Any]) -> str:
         f"- target_chapter_range: {spec.chapter_range or '优先从分卷大纲判断，缺失时由模型暂定并标注来源'}",
         f"- target_volume_function: {spec.function or '承接分卷大纲的卷级功能'}",
         f"- completed_volumes: {', '.join(str(item) for item in completed) if completed else '暂无'}",
+        f"- 已完成卷摘要：{completed_briefs}",
         "- rule: 本轮只生成 target_volume 的整卷章节大纲，不重写已完成卷。",
     ]
     return "\n".join(lines)

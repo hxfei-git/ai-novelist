@@ -8,6 +8,7 @@ from ai_novelist.artifacts import load_artifacts
 from ai_novelist.chapter_outline_framework import profile_required_points, profile_to_pacing_function
 from ai_novelist.graph_outline import OUTLINE_STAGES, STAGE_LABELS, build_outline_stage_role_prompt, build_outline_stage_synthesizer_prompt, ensure_worldbuilding_outline_structure, extract_stage_confirmation_questions, format_stage_markdown, sanitize_direction_stage_output, append_message, build_outline_collaboration_graph, build_outline_prompt, run_outline_stage_node, stage_question_fingerprint
 from ai_novelist.graph_writer import build_chat_graph
+from ai_novelist.outline.chapter_outline_structure import build_chapter_outline_target_context
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
 from ai_novelist.worldbuilding_framework import full_worldbuilding_headings, validate_worldbuilding_outline
@@ -498,6 +499,40 @@ def test_chapter_outline_prompt_limits_output_to_chapter_level_plan():
     assert "卷内章节总体规划" in synth_prompt
     assert "章节列表总表" in synth_prompt
     assert "详写 / 简写 / 本章不适用" in synth_prompt
+
+
+def test_chapter_outline_target_context_includes_completed_volume_brief():
+    metadata = {
+        "current_volume_index": 2,
+        "completed_volumes": [1],
+        "total_volumes": 3,
+        "volume_specs": [
+            {
+                "index": 1,
+                "label": "第一卷",
+                "name": "入局卷",
+                "chapter_range": "第1章-第9章",
+                "function": "开局承接",
+            },
+            {
+                "index": 2,
+                "label": "第二卷",
+                "name": "成长卷",
+                "chapter_range": "第10章-第18章",
+                "function": "成长推进",
+            },
+        ],
+        "volume_contents": {
+            "1": "### 第一卷《入局卷》章节大纲（修复版）\n\n## 卷内章节总体规划\n- 第一卷规划。\n",
+        },
+    }
+
+    context = build_chapter_outline_target_context(metadata)
+
+    assert "已完成卷摘要" in context
+    assert "第一卷《入局卷》章节大纲" in context
+    assert "第一卷规划" in context
+    assert "第二卷：成长卷" in context
 
 
 def test_chapter_profile_required_points_are_flexible_by_function():

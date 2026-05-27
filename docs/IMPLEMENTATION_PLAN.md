@@ -99,6 +99,7 @@ AI Novelist 当前是本地 CLI 版智能小说作家助手，基于 Python、La
 - 后端统一返回 `action_state.can_generate / can_revise / can_lock / lock_reason`，前端不再自行推断按钮可用性。
 
 章节大纲卷修订现在只替换当前卷内容，并保留已锁定卷；合并后的 `chapter_outline` artifact 会同步刷新，用于后续章节正文上下文。
+- `chapter_outline` 的目标卷上下文现在会附带已完成卷摘要（由 `volume_contents` 生成），让后续卷生成时能继续看到前卷的标题、规划与首要点，而不是只剩卷号和状态。
 
 验证命令：
 

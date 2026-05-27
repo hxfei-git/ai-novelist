@@ -123,6 +123,10 @@
 
 章节大纲新增专用工作区和卷级后端接口：`GET /outline/chapter-workspace` 返回卷列表、当前卷、已完成卷和选中卷内容；`POST /outline/chapter-workspace/volumes/{volume_index}/generate|revise|lock` 只允许当前卷执行动作。卷修订只替换当前卷内容，保留已锁定卷，并刷新合并后的 `chapter_outline` artifact，保证后续章节正文读取到完整章节大纲上下文。
 
+### 章节大纲上下文补强：已完成
+
+`chapter_outline` 的目标卷上下文现在会附带已完成卷摘要，摘要从 `volume_contents` 提取并保留卷标题与卷内首要点，避免后续卷生成只看到卷号、状态和空洞目标。验证：`PYTHONPATH=src .venv/bin/python -m pytest tests/test_outline_collaboration.py tests/test_graph_chapter_plan.py tests/test_context_builder.py -q`，65 passed。
+
 前端实现位于 `web/frontend/src/main.tsx` 和 `web/frontend/src/styles.css`，新增章节大纲卷列表、选中卷内容区、锁定原因提示和独立阶段动作条。章节大纲某卷锁定后会重新读取后端默认当前卷，便于继续推进下一卷。
 
 验证：
