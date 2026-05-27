@@ -2684,3 +2684,20 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - `PYTHONPATH=src .venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py -q`：17 passed。
 - `npm --prefix web/frontend run build`：通过。
 
+
+## 2026-05-28 大纲锁定手动推进
+
+目标：所有大纲阶段点击锁定后只确认当前产物，不再自动进入或生成下一阶段；章节大纲按卷手动生成，并去掉右侧重复卷导航。
+
+已完成：
+- `advance_outline_stage_node()` 的非最终锁定路径改为保存当前阶段并返回，不再设置下一阶段为 `collecting`，也不再调用 `run_outline_stage_node()` 自动生成下一阶段。
+- 章节大纲单卷锁定后只标记当前卷 locked；如果还有下一卷，阶段保持 `options_ready`，用户需在章节大纲左侧卷导航中选择下一卷并手动点击生成。
+- `confirm_current_chapter_outline_volume()` 不再推进 `current_volume_index` 或把下一卷标为 `collecting`。
+- 前端章节大纲工作区删除右侧重复的卷列表，左侧导航负责选卷，右侧只显示当前卷标题、动作、说明输入和内容。
+- 章节大纲内容区 CSS 改为单列，避免删除右侧卷列表后留下空列。
+
+验证：
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_web_service.py::test_lock_outline_stage_stays_on_current_stage_without_auto_generation tests/test_web_service.py::test_lock_chapter_outline_volume_does_not_auto_generate_next_volume -q`：2 passed。
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py::test_chapter_outline_workspace_uses_single_left_volume_navigation -q`：1 passed。
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_web_service.py tests/test_frontend_review_tabs_structure.py -q`：81 passed。
+- `npm --prefix web/frontend run build`：通过（Vite CJS Node API deprecation warning only）。

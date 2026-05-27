@@ -104,6 +104,19 @@ def test_chapter_outline_workspace_uses_dedicated_volume_routes() -> None:
     assert "setChapterOutlineView('review')" in source
 
 
+def test_chapter_outline_workspace_uses_single_left_volume_navigation() -> None:
+    source = read_main()
+    start = source.index("{topSection === 'chapter-outline' &&")
+    end = source.index("{topSection === 'chapters' &&", start)
+    workspace_block = source[start:end]
+    sidebar = sidebar_source(source)
+
+    assert "(chapterOutlineWorkspace?.volume_specs || []).map" in sidebar
+    assert "loadChapterOutlineWorkspace(item.index).catch(showError)" in sidebar
+    assert "chapterOutlineWorkspace.selected_volume.content" in workspace_block
+    assert 'className="chapter-list volume-list"' not in workspace_block
+
+
 def test_chapter_workspace_uses_volume_navigation_and_secondary_tabs() -> None:
     source = read_main()
 

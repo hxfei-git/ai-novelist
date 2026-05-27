@@ -896,21 +896,6 @@ function App() {
           {loadingChapterOutline && <div className="loading">正在读取章节大纲...</div>}
           {!loadingChapterOutline && chapterOutlineWorkspace && (
             <div className="chapter-outline-layout">
-              <div className="chapter-list volume-list">
-                {chapterOutlineWorkspace.volume_specs.map((item) => {
-                  const status = chapterOutlineWorkspace.volume_statuses[String(item.index)] || (chapterOutlineWorkspace.completed_volumes.includes(item.index) ? 'locked' : 'not_generated');
-                  return (
-                    <button
-                      className={item.index === chapterOutlineWorkspace.selected_volume.index ? 'active' : ''}
-                      key={item.index}
-                      onClick={() => loadChapterOutlineWorkspace(item.index)}
-                    >
-                      <span>{item.label || `第 ${item.index} 卷`}</span>
-                      <small>{item.name || '未命名'} · {status}</small>
-                    </button>
-                  );
-                })}
-              </div>
               {chapterOutlineView === 'review' ? (
                 <section className="review-workspace outline-review-panel">
                   <header className="toolbar">

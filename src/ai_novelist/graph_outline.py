@@ -941,16 +941,14 @@ def advance_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalSt
                 store.save_state(state)
                 return state.to_dict()
 
-        emit_progress(progress, "OutlineStage", f"正在进入第 {stage_number(next_stage)} 阶段「{STAGE_LABELS[next_stage]}」...")
-        state.outline_stage = next_stage  # type: ignore[assignment]
-        state.outline_stage_status = "collecting"
-        state.current_stage = next_stage
-        state.director_action = "run_outline_stage"
-        state.director_message = f"已锁定{STAGE_LABELS[stage]}，进入第 {stage_number(next_stage)} 阶段：{STAGE_LABELS[next_stage]}。"
-        state.pending_question = f"请确认是否锁定{STAGE_LABELS[next_stage]}并进入下一阶段，或继续提出修改。"
-        state.pending_questions = [state.pending_question]
+        state.outline_stage = stage  # type: ignore[assignment]
+        state.outline_stage_status = "locked"
+        state.current_stage = stage
+        state.director_action = "advance_outline_stage"
+        state.director_message = f"已锁定{STAGE_LABELS[stage]}。如需继续，请手动进入{STAGE_LABELS[next_stage]}并点击生成。"
         store.save_state(state)
-        return run_outline_stage_node(state.to_dict(), adapter, store, progress)
+        return state.to_dict()
+
     unresolved = stage_unresolved_questions(state, artifact)
     director_summary = str(state.director_task_args.get("default_discretion_summary") or "").strip()
     default_summary = ""
@@ -974,24 +972,27 @@ def advance_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalSt
     if default_summary:
         artifact["default_discretion_summary"] = default_summary
         append_artifact_memory(artifact, default_summary)
+
     if stage == "chapter_outline":
-        artifact, next_volume_index = confirm_current_chapter_outline_volume(artifact, state, store)
-        if next_volume_index is not None:
-            artifact["pending_questions"] = []
-            artifact["status"] = "options_ready"
-            state.outline_stage_artifacts[stage] = artifact
-            state.pending_question = ""
-            state.pending_questions = []
-            state.outline_stage = "chapter_outline"
-            state.outline_stage_status = "collecting"
-            state.current_stage = "chapter_outline"
-            state.director_action = "run_outline_stage"
-            set_next_chapter_outline_volume_generation_directive(state, next_volume_index)
-            state.director_message = f"已确认第 {next_volume_index - 1} 卷章节大纲，继续生成第 {next_volume_index} 卷章节大纲。"
-            record_stage_history(state, "lock_volume", stage, default_summary or state.user_request)
-            save_outline_stage_outputs(state, stage, format_stage_markdown(artifact), store)
-            store.save_state(state)
-            return run_outline_stage_node(state.to_dict(), adapter, store, progress)
+        artifact, _next_volume_index = confirm_current_chapter_outline_volume(artifact, state, store)
+        metadata = dict(artifact.get("metadata") or {})
+        total_volumes = int(metadata.get("total_volumes") or 1)
+        completed_volumes = {int(item) for item in metadata.get("completed_volumes", []) if str(item).isdigit()}
+        artifact["pending_questions"] = []
+        artifact["status"] = "locked" if len(completed_volumes) >= total_volumes else "options_ready"
+        state.outline_stage_artifacts[stage] = artifact
+        state.pending_question = ""
+        state.pending_questions = []
+        state.outline_stage = "chapter_outline"
+        state.outline_stage_status = str(artifact["status"])
+        state.current_stage = "chapter_outline"
+        state.director_action = "advance_outline_stage"
+        state.director_message = "已锁定当前卷章节大纲。如需继续，请在章节大纲导航中手动选择下一卷并点击生成。"
+        record_stage_history(state, "lock_volume", stage, default_summary or state.user_request)
+        save_outline_stage_outputs(state, stage, format_stage_markdown(artifact), store)
+        store.save_state(state)
+        return state.to_dict()
+
     artifact["pending_questions"] = []
     artifact["status"] = "locked"
     artifact["locked_at"] = datetime.now(UTC).isoformat(timespec="seconds")
@@ -1021,16 +1022,13 @@ def advance_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalSt
             store.save_state(state)
             return state.to_dict()
 
-    emit_progress(progress, "OutlineStage", f"正在进入第 {stage_number(next_stage)} 阶段「{STAGE_LABELS[next_stage]}」...")
-    state.outline_stage = next_stage  # type: ignore[assignment]
-    state.outline_stage_status = "collecting"
-    state.current_stage = next_stage
-    state.director_action = "run_outline_stage"
-    state.director_message = f"已锁定{STAGE_LABELS[stage]}，进入第 {stage_number(next_stage)} 阶段：{STAGE_LABELS[next_stage]}。"
-    state.pending_question = f"请确认是否锁定{STAGE_LABELS[next_stage]}并进入下一阶段，或继续提出修改。"
-    state.pending_questions = [state.pending_question]
+    state.outline_stage = stage  # type: ignore[assignment]
+    state.outline_stage_status = "locked"
+    state.current_stage = stage
+    state.director_action = "advance_outline_stage"
+    state.director_message = f"已锁定{STAGE_LABELS[stage]}。如需继续，请手动进入{STAGE_LABELS[next_stage]}并点击生成。"
     store.save_state(state)
-    return run_outline_stage_node(state.to_dict(), adapter, store, progress)
+    return state.to_dict()
 
 
 
@@ -1919,15 +1917,11 @@ def confirm_current_chapter_outline_volume(artifact: dict, state: NovelState, st
     metadata["completed_volumes"] = [item for item in completed if 1 <= item <= total]
     statuses = metadata.get("volume_statuses") if isinstance(metadata.get("volume_statuses"), dict) else {}
     statuses[str(current)] = "locked"
-    next_index = None
-    if current < total:
-        next_index = current + 1
-        metadata["current_volume_index"] = next_index
-        statuses[str(next_index)] = "collecting"
+    metadata["current_volume_index"] = current
     metadata["volume_statuses"] = statuses
     artifact = dict(artifact)
     artifact["metadata"] = metadata
-    return artifact, next_index
+    return artifact, None
 
 
 def summarize_worldbuilding_outline(text: str, max_chars: int = 1800) -> str:

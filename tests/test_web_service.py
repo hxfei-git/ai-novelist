@@ -904,6 +904,29 @@ def test_lock_outline_stage_rejects_already_locked_stage(tmp_path: Path) -> None
         service.lock_outline_stage(store, DummyAdapter(), "web-demo", "characters")
 
 
+def test_lock_outline_stage_stays_on_current_stage_without_auto_generation(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+    state.outline_stage = "direction"
+    state.current_stage = "direction"
+    state.outline_stage_artifacts["direction"] = {
+        "stage": "direction",
+        "status": "options_ready",
+        "summary": "方向定位已准备锁定。",
+    }
+    store.save_outline_artifact(state, "direction", "# 方向定位\n\n已完成方向定位。")
+    store.save_state(state)
+
+    result = service.lock_outline_stage(store, DummyAdapter(), "web-demo", "direction")
+
+    assert result.outline_stage == "direction"
+    assert result.current_stage == "direction"
+    assert result.outline_stage_status == "locked"
+    assert result.outline_stage_artifacts["direction"]["status"] == "locked"
+    assert "worldbuilding" not in result.outline_stage_artifacts
+    assert "进入第 2 阶段" not in result.director_message
+
+
 def make_selectable_chapter_workspace(store: LocalStore) -> None:
     state = store.create_project("Web Demo", "web-demo")
     state.outline_stage_artifacts["chapter_outline"] = {
@@ -971,6 +994,46 @@ def test_chapter_outline_locked_current_volume_cannot_be_regenerated(tmp_path: P
 
     with pytest.raises(LocalStoreError, match="已锁定"):
         service.generate_chapter_outline_volume(store, DummyAdapter(), "web-demo", 2)
+
+
+def test_lock_chapter_outline_volume_does_not_auto_generate_next_volume(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+    state.outline_stage = "chapter_outline"
+    state.current_stage = "chapter_outline"
+    state.outline_stage_artifacts["volume_outline"] = {
+        "stage": "volume_outline",
+        "status": "locked",
+        "summary": "两卷结构。",
+    }
+    state.outline_stage_artifacts["chapter_outline"] = {
+        "stage": "chapter_outline",
+        "status": "options_ready",
+        "summary": "第一卷章节大纲。",
+        "pending_questions": [],
+        "metadata": {
+            "total_volumes": 2,
+            "current_volume_index": 1,
+            "completed_volumes": [],
+            "volume_statuses": {"1": "options_ready"},
+            "volume_contents": {"1": "### 第一卷\n\n#### 第 1 章：开端\n- 起势。"},
+        },
+    }
+    store.save_outline_artifact(state, "volume_outline", "## 第一卷：开局\n\n## 第二卷：收束\n")
+    store.save_outline_artifact(state, "chapter_outline", "### 第一卷\n\n#### 第 1 章：开端\n- 起势。")
+    store.save_state(state)
+
+    result = service.lock_chapter_outline_volume(store, DummyAdapter(), "web-demo", 1)
+    metadata = result.outline_stage_artifacts["chapter_outline"]["metadata"]
+
+    assert result.outline_stage == "chapter_outline"
+    assert result.current_stage == "chapter_outline"
+    assert result.outline_stage_status == "options_ready"
+    assert metadata["current_volume_index"] == 1
+    assert metadata["completed_volumes"] == [1]
+    assert metadata["volume_statuses"]["1"] == "locked"
+    assert metadata["volume_statuses"].get("2") != "collecting"
+    assert "继续生成第 2 卷" not in result.director_message
 
 
 def test_generate_current_chapter_outline_volume_sets_default_current_index(monkeypatch, tmp_path: Path) -> None:

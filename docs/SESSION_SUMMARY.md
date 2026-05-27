@@ -2458,3 +2458,12 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - 已验证：`PYTHONPATH=src .venv/bin/python -m pytest tests/test_web_service.py tests/test_web_app.py -q` 69 passed；`PYTHONPATH=src .venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py -q` 17 passed；`npm --prefix web/frontend run build` 通过。
 - 剩余风险：总章数依赖章节大纲中可解析的 `第 N 章` 条目；非标准章节大纲格式会导致剩余章数为 0，需要先修正章节大纲。
 
+
+## 2026-05-28 大纲锁定手动推进
+
+- 根因：锁定路径把“确认当前阶段”和“进入下一阶段生成”绑在一起；章节大纲锁定当前卷时还会自动推进 `current_volume_index` 并生成下一卷。
+- 修复：普通大纲阶段锁定后停留在当前阶段；分卷大纲锁定后可先做总体审查，再由用户手动进入章节大纲。章节大纲单卷锁定后不自动生成下一卷。
+- UI：章节大纲只保留左侧卷导航，右侧不再重复显示第一卷、第二卷列表，只显示当前卷操作区和内容。
+- 变更文件：`src/ai_novelist/graph_outline.py`、`web/frontend/src/main.tsx`、`web/frontend/src/styles.css`、`tests/test_web_service.py`、`tests/test_frontend_review_tabs_structure.py`。
+- 已验证：`PYTHONPATH=src .venv/bin/python -m pytest tests/test_web_service.py tests/test_frontend_review_tabs_structure.py -q` 81 passed；`npm --prefix web/frontend run build` 通过（Vite CJS Node API deprecation warning only）。
+- 剩余风险：本次聚焦 Web outline/chapter-outline 锁定流程；如果 CLI 旧交互文案仍提示“锁定并进入下一阶段”，需要后续单独收紧 Director 文案。
