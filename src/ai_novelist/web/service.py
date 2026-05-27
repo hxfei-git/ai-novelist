@@ -37,6 +37,7 @@ from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore, LocalStoreError, summarize_text
 
 ProgressFunc = Callable[[str, str], None]
+MAX_WEB_PROGRESS_LOG_ITEMS = 10
 
 
 @dataclass(frozen=True)
@@ -78,6 +79,76 @@ def create_project(store: LocalStore, title: str, project_id: str | None = None,
         state.idea = idea.strip()
         store.save_state(state)
     return state
+
+
+def project_needs_onboarding(state: NovelState) -> bool:
+    if state.idea.strip():
+        return False
+    if state.outline.strip() or state.worldbuilding.strip() or state.chapter_plan.strip():
+        return False
+    if any(str(summary or "").strip() for summary in state.outline_stage_summaries.values()):
+        return False
+    for raw_artifact in state.outline_stage_artifacts.values():
+        if not isinstance(raw_artifact, dict):
+            continue
+        status = str(raw_artifact.get("status") or "")
+        if status in {"options_ready", "locked", "revision_requested", "done"}:
+            return False
+        for key in ("summary", "synthesis", "stage_memory", "path"):
+            value = raw_artifact.get(key)
+            if isinstance(value, list) and any(str(item).strip() for item in value):
+                return False
+            if isinstance(value, str) and value.strip():
+                return False
+    return True
+
+
+def save_project_idea(store: LocalStore, project_id: str, idea: str) -> NovelState:
+    text = idea.strip()
+    if not text:
+        raise LocalStoreError("Novel idea cannot be empty")
+    state = store.load_state(project_id)
+    state.idea = text
+    state.user_request = text
+    state.revision_instruction = text
+    store.save_state(state)
+    return state
+
+
+def project_progress_log_path(store: LocalStore, project_id: str) -> Path:
+    return store.project_dir(project_id) / "web_progress_log.json"
+
+
+def normalize_progress_log_items(items: Iterable[Any]) -> list[str]:
+    normalized: list[str] = []
+    for item in items:
+        text = str(item).strip()
+        if text:
+            normalized.append(text)
+        if len(normalized) >= MAX_WEB_PROGRESS_LOG_ITEMS:
+            break
+    return normalized
+
+
+def load_project_progress_log(store: LocalStore, project_id: str) -> list[str]:
+    store.load_state(project_id)
+    path = project_progress_log_path(store, project_id)
+    if not path.exists():
+        return []
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    items = raw.get("items") if isinstance(raw, dict) else raw
+    return normalize_progress_log_items(items if isinstance(items, list) else [])
+
+
+def save_project_progress_log(store: LocalStore, project_id: str, items: Iterable[Any]) -> list[str]:
+    store.load_state(project_id)
+    normalized = normalize_progress_log_items(items)
+    path = project_progress_log_path(store, project_id)
+    path.write_text(json.dumps({"items": normalized}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return normalized
 
 
 def outline_stage_list(store: LocalStore, project_id: str) -> list[dict[str, Any]]:

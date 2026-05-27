@@ -2402,3 +2402,11 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - 修复：前端新增 `stageRunningRef` 作为同步锁，重复点击在同一请求结束前被忽略；同时用 `stageRunning` 禁用阶段动作按钮并显示“运行中”。
 - 回归测试：新增 `test_outline_stage_actions_guard_against_double_submit`，覆盖防重入 ref、运行状态和按钮禁用。
 - 验证：`PYTHONPATH=src .venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py::test_outline_stage_actions_guard_against_double_submit tests/test_frontend_review_tabs_structure.py` 6 passed；`npm run build`（`web/frontend`）通过。
+
+## 2026-05-27 Web 新项目 onboarding 与项目进度持久化
+
+- 新建 Web 项目后，如果 `state.idea` 为空且没有已有大纲产物，主界面现在先显示 onboarding 页面，要求用户先写创意再进入大纲。
+- 新的创意通过 `POST /api/projects/{project_id}/idea` 保存到项目 `state.json`，并作为后续方向阶段的输入。
+- 右侧进度日志不再写浏览器 `localStorage`，改为读写项目目录中的 `web_progress_log.json`，因此不同项目的进度不会串台。
+- 切换项目时会同步加载项目状态、进度日志和已有阶段/审查数据，避免延续上一个项目的前端残留。
+- 验证：`PYTHONPATH=src .venv/bin/python -m pytest tests/test_web_service.py tests/test_web_app.py tests/test_frontend_review_tabs_structure.py -q` 69 passed；`npm --prefix web/frontend run build` 通过。

@@ -178,3 +178,22 @@ def test_stage_action_strip_and_lock_badge_have_distinct_styles() -> None:
     assert ".stage-action-bar" in styles
     assert ".stage-action-group" in styles
     assert ".lock-badge" in styles
+
+def test_frontend_restores_new_project_onboarding_workspace() -> None:
+    source = read_main()
+
+    assert "type ProjectState" in source
+    assert "const [projectState, setProjectState]" in source
+    assert "const [onboardingIdea, setOnboardingIdea]" in source
+    assert "needsOnboarding" in source
+    assert "onboarding-workspace" in source
+    assert "你想写一个什么样的故事" in source
+    assert "projects/${projectId}/idea" in source
+
+
+def test_frontend_progress_log_uses_project_directory_api_not_local_storage() -> None:
+    source = read_main()
+
+    assert "projects/${projectId}/progress-log" in source
+    assert "localStorage" not in source
+    assert "progressLogKey" not in source

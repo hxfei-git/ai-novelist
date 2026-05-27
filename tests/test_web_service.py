@@ -81,6 +81,43 @@ def test_project_and_outline_stage_file_roundtrip(tmp_path: Path) -> None:
     assert "规则清晰" in store.worldbuilding_path("web-demo").read_text(encoding="utf-8")
 
 
+
+
+def test_project_onboarding_requires_idea_or_existing_outline_context(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = service.create_project(store, "Onboarding Demo", "onboarding-demo")
+
+    assert service.project_needs_onboarding(state) is True
+
+    state.idea = "月球城市失忆工程师追查自己的小说手稿"
+    store.save_state(state)
+
+    assert service.project_needs_onboarding(store.load_state("onboarding-demo")) is False
+
+
+def test_save_project_idea_persists_onboarding_seed(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    service.create_project(store, "Idea Demo", "idea-demo")
+
+    state = service.save_project_idea(store, "idea-demo", "  赛博唐代女仵作悬疑故事  ")
+
+    assert state.idea == "赛博唐代女仵作悬疑故事"
+    assert store.load_state("idea-demo").idea == "赛博唐代女仵作悬疑故事"
+
+
+def test_project_progress_log_is_project_scoped_and_file_backed(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    service.create_project(store, "Progress A", "progress-a")
+    service.create_project(store, "Progress B", "progress-b")
+
+    service.save_project_progress_log(store, "progress-a", ["A2", "A1"])
+    service.save_project_progress_log(store, "progress-b", ["B1"])
+
+    assert service.load_project_progress_log(store, "progress-a") == ["A2", "A1"]
+    assert service.load_project_progress_log(store, "progress-b") == ["B1"]
+    assert (store.project_dir("progress-a") / "web_progress_log.json").exists()
+
+
 def test_generate_outline_stage_uses_explicit_full_generation_intent_with_existing_content(monkeypatch, tmp_path: Path) -> None:
     store = LocalStore(tmp_path)
     state = store.create_project("Web Demo", "web-demo")

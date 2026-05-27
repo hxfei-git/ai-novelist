@@ -60,6 +60,26 @@ def test_generic_chapter_outline_stage_get_returns_workspace_error(tmp_path) -> 
     assert "章节大纲工作区" in response.json()["detail"]
 
 
+
+
+def test_project_idea_and_progress_log_endpoints_are_project_scoped(tmp_path) -> None:
+    client = TestClient(web_app.make_app(Settings(projects_dir=tmp_path), mock=True))
+    created = client.post("/api/projects", json={"title": "Idea Web", "project_id": "idea-web"})
+    assert created.status_code == 200
+
+    idea_response = client.post("/api/projects/idea-web/idea", json={"idea": "月球城市失忆工程师"})
+    assert idea_response.status_code == 200
+    assert idea_response.json()["idea"] == "月球城市失忆工程师"
+
+    progress_response = client.put("/api/projects/idea-web/progress-log", json={"items": ["方向定位开始", "保存创意"]})
+    assert progress_response.status_code == 200
+    assert progress_response.json()["items"] == ["方向定位开始", "保存创意"]
+
+    loaded = client.get("/api/projects/idea-web/progress-log")
+    assert loaded.status_code == 200
+    assert loaded.json()["items"] == ["方向定位开始", "保存创意"]
+
+
 def test_run_web_command_passes_generation_defaults(monkeypatch, tmp_path) -> None:
     parser = build_parser()
     args = parser.parse_args(

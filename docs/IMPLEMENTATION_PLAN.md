@@ -2636,3 +2636,11 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 验证：
 - `PYTHONPATH=src .venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py::test_outline_stage_actions_guard_against_double_submit tests/test_frontend_review_tabs_structure.py`：6 passed。
 - `npm run build`（`web/frontend`）：通过。
+
+### Web 新项目 onboarding 与项目进度持久化
+
+本轮把 Web 新建项目流程拆成“项目创建 + 创意填写 + 进入大纲”三步。项目创建后，如果当前项目还没有 `idea` 也没有任何已生成的大纲产物，前端会先显示 onboarding 页面，要求用户填写创意并保存到 `state.json`。保存创意走独立的 `/api/projects/{project_id}/idea`，不会自动触发模型。
+
+右侧进度栏也从浏览器本地缓存改成项目目录文件 `web_progress_log.json`，通过 `/api/projects/{project_id}/progress-log` 读写，这样不同项目的日志不会串台，刷新和切换项目后也能恢复当前项目自己的进度。
+
+验证：`PYTHONPATH=src .venv/bin/python -m pytest tests/test_web_service.py tests/test_web_app.py tests/test_frontend_review_tabs_structure.py -q` 69 passed；`npm --prefix web/frontend run build` 通过。

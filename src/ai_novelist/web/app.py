@@ -99,6 +99,30 @@ def make_app(
         except LocalStoreError as exc:
             raise as_http_error(exc)
 
+    @app.post("/api/projects/{project_id}/idea")
+    def save_project_idea(project_id: str, payload: dict[str, Any]):
+        try:
+            return service.save_project_idea(store, project_id, str(payload.get("idea") or "")).to_dict()
+        except LocalStoreError as exc:
+            raise as_http_error(exc)
+
+    @app.get("/api/projects/{project_id}/progress-log")
+    def load_project_progress_log(project_id: str):
+        try:
+            return {"items": service.load_project_progress_log(store, project_id)}
+        except LocalStoreError as exc:
+            raise as_http_error(exc)
+
+    @app.put("/api/projects/{project_id}/progress-log")
+    def save_project_progress_log(project_id: str, payload: dict[str, Any]):
+        try:
+            items = payload.get("items")
+            if not isinstance(items, list):
+                items = []
+            return {"items": service.save_project_progress_log(store, project_id, items)}
+        except LocalStoreError as exc:
+            raise as_http_error(exc)
+
     @app.get("/api/projects/{project_id}/state")
     def project_state(project_id: str):
         try:

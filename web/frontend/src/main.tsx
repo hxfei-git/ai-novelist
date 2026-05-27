@@ -4,6 +4,16 @@ import { Check, FileText, Layers, ListChecks, Lock, Play, RefreshCw, Save, X } f
 import './styles.css';
 
 type Project = { project_id: string; title: string; path: string };
+type ProjectState = {
+  project_id: string;
+  title: string;
+  idea: string;
+  outline: string;
+  worldbuilding: string;
+  chapter_plan: string;
+  outline_stage_summaries: Record<string, string>;
+  outline_stage_artifacts: Record<string, { status?: string; summary?: string }>;
+};
 type ActionState = {
   can_generate: boolean;
   can_revise: boolean;
@@ -109,26 +119,6 @@ const disabledActionState: ActionState = {
   lock_reason: '',
 };
 
-function progressLogKey(projectId: string) {
-  return `ai-novelist:${projectId}:progress-log`;
-}
-
-function readProgressLog(projectId: string) {
-  if (!projectId) return [];
-  try {
-    const raw = window.localStorage.getItem(progressLogKey(projectId));
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string').slice(0, maxLogItems) : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeProgressLog(projectId: string, items: string[]) {
-  if (!projectId) return;
-  window.localStorage.setItem(progressLogKey(projectId), JSON.stringify(items.slice(0, maxLogItems)));
-}
-
 function stageLabel(stage: Stage | undefined, fallback: string) {
   if (!stage) return fallback;
   return stage.label || fallback;
@@ -230,6 +220,8 @@ function App() {
   const [outlineStageView, setOutlineStageView] = useState<OutlineStageView>('edit');
   const [chapterView, setChapterView] = useState<ChapterView>('batch');
   const [stages, setStages] = useState<Stage[]>([]);
+  const [projectState, setProjectState] = useState<ProjectState | null>(null);
+  const [onboardingIdea, setOnboardingIdea] = useState('');
   const [activeStage, setActiveStage] = useState('direction');
   const [content, setContent] = useState('');
   const [instruction, setInstruction] = useState('');
@@ -262,6 +254,16 @@ function App() {
   const currentActionState = current?.action_state || disabledActionState;
   const currentStageLocked = current?.status === 'locked';
   const visibleStages = useMemo(() => stages.filter((item) => item.stage !== 'review_lock' && item.stage !== 'chapter_outline'), [stages]);
+  const needsOnboarding = useMemo(() => {
+    if (!projectState) return false;
+    if (projectState.idea.trim() || projectState.outline.trim() || projectState.worldbuilding.trim() || projectState.chapter_plan.trim()) return false;
+    if (Object.values(projectState.outline_stage_summaries || {}).some((value) => value.trim())) return false;
+    return Object.values(projectState.outline_stage_artifacts || {}).every((artifact) => {
+      const status = (artifact?.status || '').trim();
+      const summary = (artifact?.summary || '').trim();
+      return !status && !summary;
+    });
+  }, [projectState]);
 
   useEffect(() => {
     refreshProjects().catch(showError);
@@ -269,7 +271,20 @@ function App() {
 
   useEffect(() => {
     if (!projectId) return;
-    setLog(readProgressLog(projectId));
+    setProjectState(null);
+    setOnboardingIdea('');
+    setLog([]);
+    setStages([]);
+    setContent('');
+    setChapterOutlineWorkspace(null);
+    setChapters([]);
+    setChapterDetail(null);
+    setReview(null);
+    setOutlineReview(null);
+    setSelectedRepairIds({});
+    setSelectedOutlineRepairIds({});
+    loadProjectState().catch(showError);
+    loadProjectProgressLog().catch(showError);
     refreshStages().catch(showError);
     refreshChapters().catch(showError);
     loadLatestReview().catch(() => setReview(null));
@@ -290,13 +305,32 @@ function App() {
   function pushLog(message: string) {
     setLog((items) => {
       const next = [message, ...items].slice(0, maxLogItems);
-      writeProgressLog(projectId, next);
+      void saveProjectProgressLog(next);
       return next;
     });
   }
 
   function showError(error: unknown) {
     pushLog(`error: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  async function loadProjectState() {
+    const state = await api<ProjectState>(`/api/projects/${projectId}/state`);
+    setProjectState(state);
+    setOnboardingIdea(state.idea || '');
+  }
+
+  async function loadProjectProgressLog() {
+    const payload = await api<{ items: string[] }>(`/api/projects/${projectId}/progress-log`);
+    setLog(Array.isArray(payload.items) ? payload.items : []);
+  }
+
+  async function saveProjectProgressLog(items: string[]) {
+    if (!projectId) return;
+    await api<{ items: string[] }>(`/api/projects/${projectId}/progress-log`, {
+      method: 'PUT',
+      body: JSON.stringify({ items }),
+    });
   }
 
   async function refreshProjects() {
@@ -306,8 +340,12 @@ function App() {
   }
 
   async function createProject() {
-    const state = await api<any>('/api/projects', { method: 'POST', body: JSON.stringify({ title, project_id: title }) });
+    const state = await api<ProjectState>('/api/projects', { method: 'POST', body: JSON.stringify({ title, project_id: title }) });
     setProjectId(state.project_id);
+    setProjectState(state);
+    setOnboardingIdea(state.idea || '');
+    setLog([]);
+    await saveProjectProgressLog([]);
     await refreshProjects();
   }
 
@@ -338,6 +376,18 @@ function App() {
     });
     setStages((items) => items.map((item) => (item.stage === activeStage ? saved : item)));
     pushLog(`saved ${activeStage}`);
+  }
+
+  async function submitOnboardingIdea() {
+    if (!projectId || !onboardingIdea.trim()) return;
+    const state = await api<ProjectState>(`/api/projects/${projectId}/idea`, {
+      method: 'POST',
+      body: JSON.stringify({ idea: onboardingIdea }),
+    });
+    setProjectState(state);
+    setOnboardingIdea(state.idea || onboardingIdea.trim());
+    setInstruction(onboardingIdea.trim());
+    pushLog('已保存小说创意');
   }
 
   async function runStage(action: 'generate' | 'revise' | 'lock') {
@@ -553,7 +603,26 @@ function App() {
         )}
       </aside>
 
-      {topSection === 'outline' && (
+      {needsOnboarding ? (
+        <section className="workspace onboarding-workspace">
+          <div className="onboarding-panel">
+            <header className="toolbar">
+              <div>
+                <h1>你想写一个什么样的故事？</h1>
+                <p>先保存小说创意，再进入大纲。</p>
+              </div>
+              <button onClick={submitOnboardingIdea} disabled={!onboardingIdea.trim()}><Save size={16} />保存创意</button>
+            </header>
+            <textarea
+              className="editor onboarding-input"
+              value={onboardingIdea}
+              onChange={(event) => setOnboardingIdea(event.target.value)}
+              placeholder="例如：月球城市失忆工程师追查自己的小说手稿"
+            />
+            <div className="onboarding-hint">创意会保存到当前项目目录，并作为后续大纲阶段的输入。</div>
+          </div>
+        </section>
+      ) : topSection === 'outline' && (
         <section className="workspace">
           <div className="workspace-tabs" aria-label="大纲视图">
             <button className={outlineStageView === 'edit' ? 'active' : ''} onClick={() => setOutlineStageView('edit')}>
