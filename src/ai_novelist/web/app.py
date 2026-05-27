@@ -144,6 +144,21 @@ def make_app(
         except LocalStoreError as exc:
             raise as_http_error(exc)
 
+    @app.get("/api/projects/{project_id}/outline/stages/{stage}/pending")
+    def outline_stage_pending(project_id: str, stage: str):
+        try:
+            return service.outline_stage_pending_payload(store, project_id, stage)
+        except LocalStoreError as exc:
+            raise as_http_error(exc)
+
+    @app.post("/api/projects/{project_id}/outline/stages/{stage}/pending/submit")
+    def submit_outline_stage_pending(project_id: str, stage: str, payload: dict[str, Any] | None = None):
+        payload = payload or {}
+        return StreamingResponse(
+            sse_events(lambda progress: service.submit_stage_pending_answers(store, adapter(payload), project_id, stage, payload.get("answers"), progress).to_dict()),
+            media_type="text/event-stream",
+        )
+
     @app.get("/api/projects/{project_id}/outline/chapter-workspace")
     def chapter_outline_workspace(project_id: str, selected_volume_index: int | None = None):
         try:
@@ -345,4 +360,3 @@ def run_web_command(args: argparse.Namespace, settings: Settings | None = None) 
     )
     uvicorn.run(app, host=args.host, port=args.port)
     return 0
-

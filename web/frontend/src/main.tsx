@@ -31,6 +31,21 @@ type Stage = {
   content?: string;
   action_state?: ActionState;
 };
+type PendingOption = {
+  id: string;
+  label: string;
+  answer: string;
+};
+type PendingQuestion = {
+  id: string;
+  question: string;
+  options: PendingOption[];
+};
+type PendingQuestionPayload = {
+  project_id: string;
+  stage: string;
+  items: PendingQuestion[];
+};
 type ChapterOutlineVolumeSpec = {
   index: number;
   label: string;
@@ -147,6 +162,14 @@ function buildOutlineRepairSelectionMap(suggestions: OutlineReviewSuggestion[]) 
   return next;
 }
 
+function buildPendingAnswerSelection(items: PendingQuestion[]) {
+  const next: Record<string, string> = {};
+  items.forEach((item) => {
+    next[item.id] = item.options[0]?.id || '';
+  });
+  return next;
+}
+
 function groupRepairSuggestions(suggestions: ReviewSuggestion[]) {
   const groups = new Map<number | null, ReviewSuggestion[]>();
   suggestions.forEach((item) => {
@@ -246,6 +269,9 @@ function App() {
   const [outlineReviewRunning, setOutlineReviewRunning] = useState(false);
   const [outlineReviewApplying, setOutlineReviewApplying] = useState(false);
   const [selectedOutlineRepairIds, setSelectedOutlineRepairIds] = useState<Record<string, boolean>>({});
+  const [pendingQuestions, setPendingQuestions] = useState<PendingQuestionPayload | null>(null);
+  const [pendingAnswerSelection, setPendingAnswerSelection] = useState<Record<string, string>>({});
+  const [pendingSubmitting, setPendingSubmitting] = useState(false);
 
   const stageRequestRef = useRef(0);
   const stageRunningRef = useRef(false);
@@ -276,6 +302,9 @@ function App() {
     setLog([]);
     setStages([]);
     setContent('');
+    setInstruction('');
+    setPendingQuestions(null);
+    setPendingAnswerSelection({});
     setChapterOutlineWorkspace(null);
     setChapters([]);
     setChapterDetail(null);
@@ -362,11 +391,21 @@ function App() {
     const token = ++stageRequestRef.current;
     setLoadingStage(true);
     setContent('');
-    const item = await api<Stage>(`/api/projects/${projectId}/outline/stages/${stage}`);
-    if (token !== stageRequestRef.current || stage !== activeStage) return;
-    setContent(item.content || '');
-    setStages((prev) => prev.map((old) => (old.stage === stage ? item : old)));
-    setLoadingStage(false);
+    setPendingQuestions(null);
+    setPendingAnswerSelection({});
+    try {
+      const [item, pending] = await Promise.all([
+        api<Stage>(`/api/projects/${projectId}/outline/stages/${stage}`),
+        api<PendingQuestionPayload>(`/api/projects/${projectId}/outline/stages/${stage}/pending`),
+      ]);
+      if (token !== stageRequestRef.current || stage !== activeStage) return;
+      setContent(item.content || '');
+      setStages((prev) => prev.map((old) => (old.stage === stage ? item : old)));
+      setPendingQuestions(pending);
+      setPendingAnswerSelection(buildPendingAnswerSelection(pending.items || []));
+    } finally {
+      if (token === stageRequestRef.current && stage === activeStage) setLoadingStage(false);
+    }
   }
 
   async function saveStage() {
@@ -400,6 +439,7 @@ function App() {
         { instruction },
         (line) => pushLog(line),
       );
+      setInstruction('');
       await refreshStages();
       await loadStage(activeStage);
     } finally {
@@ -523,6 +563,35 @@ function App() {
     if (!outlineReview) return;
     pushLog(`已拒绝采纳大纲审查建议：${outlineReview.run_id}`);
     setOutlineReview((currentReview) => (currentReview ? { ...currentReview, status: 'dismissed' } : currentReview));
+  }
+
+  async function submitPendingQuestions() {
+    if (!pendingQuestions || pendingQuestions.items.length === 0 || pendingSubmitting || stageRunningRef.current) return;
+    const answers = pendingQuestions.items.map((item) => {
+      const selectedId = pendingAnswerSelection[item.id] || item.options[0]?.id || '';
+      const selected = item.options.find((option) => option.id === selectedId) || item.options[0];
+      if (!selected) throw new Error(`待确认问题没有可用选项：${item.question}`);
+      return { question: item.question, answer: selected.answer, selected_option_id: selected.id };
+    });
+    stageRunningRef.current = true;
+    setStageRunning(true);
+    setPendingSubmitting(true);
+    try {
+      await streamAction(
+        `/api/projects/${projectId}/outline/stages/${pendingQuestions.stage}/pending/submit`,
+        { answers },
+        (line) => pushLog(line),
+      );
+      setInstruction('');
+      await refreshStages();
+      await loadStage(activeStage);
+    } catch (error) {
+      showError(error);
+    } finally {
+      stageRunningRef.current = false;
+      setStageRunning(false);
+      setPendingSubmitting(false);
+    }
   }
 
   async function reviewAll() {
@@ -649,6 +718,15 @@ function App() {
                 onRun={runStage}
               />
               <input className="instruction" value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder="当前大纲阶段生成、修订或锁定说明" />
+              {pendingQuestions && pendingQuestions.items.length > 0 && (
+                <PendingQuestionPanel
+                  payload={pendingQuestions}
+                  selectedAnswers={pendingAnswerSelection}
+                  submitting={pendingSubmitting || stageRunning || loadingStage}
+                  onSelectAnswer={(questionId, optionId) => setPendingAnswerSelection((values) => ({ ...values, [questionId]: optionId }))}
+                  onSubmit={submitPendingQuestions}
+                />
+              )}
               {loadingStage ? <div className="loading">正在读取 {stageLabel(current, activeStage)}...</div> : <textarea className="editor" value={content} onChange={(event) => setContent(event.target.value)} disabled={currentStageLocked} />}
             </>
           )}
@@ -831,6 +909,55 @@ function StageActionBar({
       </div>
       {actionState.lock_reason && <span className="lock-badge"><Lock size={14} />{actionState.lock_reason}</span>}
     </div>
+  );
+}
+
+
+function PendingQuestionPanel({
+  payload,
+  selectedAnswers,
+  submitting,
+  onSelectAnswer,
+  onSubmit,
+}: {
+  payload: PendingQuestionPayload;
+  selectedAnswers: Record<string, string>;
+  submitting: boolean;
+  onSelectAnswer: (questionId: string, optionId: string) => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <section className="pending-panel">
+      <header className="pending-panel-head">
+        <div>
+          <strong>待确认问题</strong>
+          <small>{payload.items.length} 条，已预选推荐建议</small>
+        </div>
+        <button onClick={onSubmit} disabled={submitting}>
+          <Check size={16} />{submitting ? '提交中' : '提交确认'}
+        </button>
+      </header>
+      <div className="pending-question-list">
+        {payload.items.map((item) => (
+          <section className="pending-question" key={item.id}>
+            <strong>{item.question}</strong>
+            <div className="pending-option-group" role="group" aria-label={item.question}>
+              {item.options.map((option) => (
+                <button
+                  type="button"
+                  key={option.id}
+                  className={(selectedAnswers[item.id] || item.options[0]?.id) === option.id ? 'pending-option active' : 'pending-option'}
+                  onClick={() => onSelectAnswer(item.id, option.id)}
+                >
+                  <span>{option.label}</span>
+                  <small>{option.answer}</small>
+                </button>
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+    </section>
   );
 }
 

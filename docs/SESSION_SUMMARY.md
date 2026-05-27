@@ -1,6 +1,6 @@
 # 会话摘要与上下文压缩记录
 
-更新时间：2026-05-26
+更新时间：2026-05-27
 项目路径：`/home/ubuntu/1.project/ai-novelist`
 
 ## 1. 项目目标
@@ -21,6 +21,12 @@
 本轮开始把仓库收敛到 web-only：已删除 `chat` / `feishu` / `research` / `compose` / `review` / `finalize` / `export` 等非 web 入口及其测试，保留 `web`、outline、chapter batch generation、outline review、chapter review 和相关共享存储。
 
 验证结果：`.venv/bin/python -m pytest -q` 通过，193 passed；`npm --prefix web/frontend run build` 通过。
+
+### Web 方向定位交互修复：已完成
+
+- 大纲阶段的生成、修订或锁定成功后，前端会清空已消费的说明输入，不再把上一次指令残留到下一次操作。
+- 补通普通大纲阶段的待确认问题 API 与前端面板：锁定提示出现时，会同时显示后端提供的推荐选项，并允许提交确认后进入既有轻修订流程。
+- 验证结果：`.venv/bin/python -m pytest -q tests/test_web_app.py tests/test_frontend_review_tabs_structure.py tests/test_web_service.py` 通过，72 passed；`.venv/bin/python -m pytest -q` 通过，196 passed；`npm --prefix web/frontend run build` 通过。
 
 ### 阶段 1：已完成
 

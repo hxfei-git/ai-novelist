@@ -172,6 +172,28 @@ def test_outline_stage_actions_are_separate_and_backend_driven() -> None:
     assert "生成/修订" not in source
 
 
+def test_outline_stage_actions_clear_instruction_after_completion() -> None:
+    source = read_main()
+
+    run_stage = re.search(r"async function runStage\(.*?\n  }", source, re.DOTALL)
+    assert run_stage is not None
+    assert "setInstruction('');" in run_stage.group(0)
+    assert run_stage.group(0).index("setInstruction('');") < run_stage.group(0).index("await refreshStages()")
+
+
+def test_outline_stage_pending_questions_render_recommended_options() -> None:
+    source = read_main()
+
+    assert "type PendingQuestionPayload" in source
+    assert "outline/stages/${stage}/pending" in source
+    assert "function PendingQuestionPanel" in source
+    assert "提交确认" in source
+    assert "pending/submit" in source
+    submit_pending = re.search(r"async function submitPendingQuestions\(\).*?\n  }", source, re.DOTALL)
+    assert submit_pending is not None
+    assert "stageRunningRef.current" in submit_pending.group(0)
+
+
 def test_stage_action_strip_and_lock_badge_have_distinct_styles() -> None:
     styles = read_styles()
 

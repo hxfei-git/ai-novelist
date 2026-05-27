@@ -42,6 +42,8 @@ def test_web_app_exposes_outline_action_and_workspace_routes(tmp_path) -> None:
     assert "/api/projects/{project_id}/outline/stages/{stage}/generate" in routes
     assert "/api/projects/{project_id}/outline/stages/{stage}/revise" in routes
     assert "/api/projects/{project_id}/outline/stages/{stage}/lock" in routes
+    assert "/api/projects/{project_id}/outline/stages/{stage}/pending" in routes
+    assert "/api/projects/{project_id}/outline/stages/{stage}/pending/submit" in routes
     assert "/api/projects/{project_id}/outline/chapter-workspace" in routes
     assert "/api/projects/{project_id}/outline/chapter-workspace/volumes/{volume_index}/generate" in routes
     assert "/api/projects/{project_id}/outline/chapter-workspace/volumes/{volume_index}/revise" in routes
@@ -78,6 +80,26 @@ def test_project_idea_and_progress_log_endpoints_are_project_scoped(tmp_path) ->
     loaded = client.get("/api/projects/idea-web/progress-log")
     assert loaded.status_code == 200
     assert loaded.json()["items"] == ["方向定位开始", "保存创意"]
+
+
+def test_outline_stage_pending_api_returns_recommended_options(tmp_path) -> None:
+    client = TestClient(web_app.make_app(Settings(projects_dir=tmp_path), mock=True))
+    created = client.post("/api/projects", json={"title": "Web Demo", "project_id": "web-demo"})
+    assert created.status_code == 200
+    state = client.get("/api/projects/web-demo/state").json()
+    state["outline_stage_artifacts"]["direction"] = {
+        "stage": "direction",
+        "status": "options_ready",
+        "pending_questions": ["主角是否保留灰色动机？"],
+    }
+    (tmp_path / "web-demo" / "state.json").write_text(__import__("json").dumps(state, ensure_ascii=False), encoding="utf-8")
+
+    response = client.get("/api/projects/web-demo/outline/stages/direction/pending")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["items"][0]["question"] == "主角是否保留灰色动机？"
+    assert payload["items"][0]["options"][0]["label"] == "采纳建议"
 
 
 def test_run_web_command_passes_generation_defaults(monkeypatch, tmp_path) -> None:

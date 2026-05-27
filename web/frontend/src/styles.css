@@ -95,6 +95,17 @@ nav small { color: #5c6f7c; font-size: 11px; }
 .chapter-outline-layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 14px; min-height: 560px; }
 .volume-list button { grid-template-columns: 1fr; }
 .instruction { width: 100%; padding: 10px; }
+.pending-panel { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid #d9e0e7; border-radius: 6px; background: #ffffff; }
+.pending-panel-head { display: flex; gap: 12px; align-items: start; justify-content: space-between; flex-wrap: wrap; }
+.pending-panel-head div { display: flex; flex-direction: column; gap: 3px; }
+.pending-panel-head small { color: #647582; font-size: 12px; }
+.pending-question-list { display: flex; flex-direction: column; gap: 10px; }
+.pending-question { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid #e5ebf0; }
+.pending-question:first-child { padding-top: 0; border-top: 0; }
+.pending-option-group { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.pending-option { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; min-height: 70px; }
+.pending-option.active { border-color: #2f6f73; background: #e8f3f1; }
+.pending-option small { color: #647582; font-size: 12px; line-height: 1.4; }
 .editor { width: 100%; flex: 1; min-height: 560px; padding: 14px; line-height: 1.55; resize: none; }
 .loading { padding: 18px; border: 1px solid #d9e0e7; border-radius: 6px; background: #ffffff; color: #516170; }
 .issues-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
@@ -152,5 +163,5 @@ pre { white-space: pre-wrap; background: #eef3f7; border-radius: 6px; padding: 8
   .app { height: auto; overflow: visible; }
   .sidebar, .right { border: 0; overflow: visible; }
   .editor { min-height: 420px; }
-  .issues-grid, .chapter-layout, .chapter-outline-layout, .form-grid, .outline-repair-row { grid-template-columns: 1fr; }
+  .issues-grid, .chapter-layout, .chapter-outline-layout, .form-grid, .outline-repair-row, .pending-option-group { grid-template-columns: 1fr; }
 }
