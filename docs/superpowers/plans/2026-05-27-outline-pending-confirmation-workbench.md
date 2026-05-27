@@ -23,6 +23,80 @@
 
 Note: the current worktree may contain user edits in `web/frontend/src/main.tsx` and `tests/test_frontend_review_tabs_structure.py`. Before editing, inspect those files and preserve unrelated changes.
 
+## Follow-Up: Separate Display Question From Recommendation
+
+**Goal:** Correct the shipped pending-confirmation payload so a line such as `问题？——推荐方案：答案。` displays the question once and places only the answer inside `采纳推荐方案`; keep the existing `我的建议` interaction unchanged.
+
+**Files:**
+- Modify: `src/ai_novelist/web/service.py`
+- Test: `tests/test_web_service.py`
+- Test: `tests/test_web_app.py`
+- Modify: `docs/IMPLEMENTATION_PLAN.md`
+- Modify: `docs/SESSION_SUMMARY.md`
+
+- [ ] **Step 1: Write failing service and API regression tests**
+
+Update the embedded-recommendation payload tests to assert the response boundary explicitly:
+
+```python
+assert payload["items"][0]["question"] == "主角是否保留灰色动机？"
+assert payload["items"][0]["options"][0]["answer"] == "保留灰色动机，但仅作为秘密揭露的驱动力。"
+```
+
+For the actionable legacy suffix fallback, assert the same separation:
+
+```python
+assert payload["items"][0]["question"] == "最终战隐藏据点势力是否有具体来源？"
+assert payload["items"][0]["options"][0]["answer"] == "若不归渊遗民已覆盖，则无需额外设定。"
+```
+
+- [ ] **Step 2: Run regression tests and confirm RED**
+
+Run:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_web_service.py::test_outline_stage_pending_payload_separates_embedded_recommendation tests/test_web_service.py::test_outline_stage_pending_payload_falls_back_to_markdown tests/test_web_app.py::test_outline_stage_pending_api_returns_recommended_options
+```
+
+Expected: failures show the current API still returns `question` with the recommendation suffix included.
+
+- [ ] **Step 3: Implement display-question separation at the service boundary**
+
+Add a focused helper in `src/ai_novelist/web/service.py` and use it only when constructing the payload item:
+
+```python
+def pending_display_question(question: str, stage: str) -> str:
+    text = str(question or "").strip()
+    answer = pending_recommendation_answer(text, stage)
+    for marker in ("——推荐方案：", "——建议：", "推荐方案：", "建议："):
+        if marker in text and text.split(marker, 1)[1].strip() == answer:
+            return text.split(marker, 1)[0].strip()
+    if "——" in text and text.split("——", 1)[1].strip() == answer:
+        return text.split("——", 1)[0].strip()
+    return text
+```
+
+Construct each payload item with `"question": pending_display_question(question, stage)` while preserving `pending_item_id(stage, question)` and `default_pending_options(question, stage)` from the original text, so recommendation extraction and stable identity retain their existing inputs.
+
+- [ ] **Step 4: Verify GREEN and document the behavior**
+
+Run:
+
+```bash
+.venv/bin/python -m pytest -q tests/test_web_service.py tests/test_web_app.py tests/test_frontend_review_tabs_structure.py tests/test_prompt_loader.py
+npm --prefix web/frontend run build
+git diff --check
+```
+
+Expected: all selected tests pass, frontend production build exits successfully, and no whitespace errors are reported. Record the exact verification scope in `docs/SESSION_SUMMARY.md` and the payload boundary in `docs/IMPLEMENTATION_PLAN.md`.
+
+- [ ] **Step 5: Commit implementation**
+
+```bash
+git add src/ai_novelist/web/service.py tests/test_web_service.py tests/test_web_app.py docs/IMPLEMENTATION_PLAN.md docs/SESSION_SUMMARY.md
+git commit -m "fix: separate pending question recommendations"
+```
+
 ---
 
 ### Task 1: Backend Pending Payload Extraction
@@ -1010,4 +1084,3 @@ git commit -m "docs: document outline pending workbench"
 - Existing stage save/generate/lock flows still work.
 - Focused pytest tests and frontend build pass.
 - `docs/IMPLEMENTATION_PLAN.md` and `docs/SESSION_SUMMARY.md` are updated in the implementation change set.
-
