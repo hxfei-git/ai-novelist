@@ -4,6 +4,12 @@ import { Check, FileText, Layers, ListChecks, Lock, Play, RefreshCw, Save, X } f
 import './styles.css';
 
 type Project = { project_id: string; title: string; path: string };
+type ActionState = {
+  can_generate: boolean;
+  can_revise: boolean;
+  can_lock: boolean;
+  lock_reason: string;
+};
 type Stage = {
   stage: string;
   label: string;
@@ -13,6 +19,28 @@ type Stage = {
   pending_questions: string[];
   review_lock_issues?: { blocking: string[]; detail: string[]; revision_targets: string[] };
   content?: string;
+  action_state?: ActionState;
+};
+type ChapterOutlineVolumeSpec = {
+  index: number;
+  label: string;
+  name: string;
+  summary?: string;
+};
+type ChapterOutlineSelectedVolume = {
+  index: number;
+  label: string;
+  name: string;
+  status: string;
+  summary: string;
+  content: string;
+} & ActionState;
+type ChapterOutlineWorkspace = {
+  volume_specs: ChapterOutlineVolumeSpec[];
+  current_volume_index: number;
+  completed_volumes: number[];
+  volume_statuses: Record<string, string>;
+  selected_volume: ChapterOutlineSelectedVolume;
 };
 type Chapter = {
   chapter: number;
@@ -69,11 +97,17 @@ type OutlineReviewSuggestion = {
   recommendation: string;
   selected: boolean;
 };
-type TopSection = 'outline' | 'chapters';
-type OutlineView = 'edit' | 'review';
+type TopSection = 'outline' | 'chapter-outline' | 'chapters';
+type OutlineStageView = 'edit' | 'review';
 type ChapterView = 'batch' | 'list' | 'review';
 
 const maxLogItems = 10;
+const disabledActionState: ActionState = {
+  can_generate: false,
+  can_revise: false,
+  can_lock: false,
+  lock_reason: '',
+};
 
 function progressLogKey(projectId: string) {
   return `ai-novelist:${projectId}:progress-log`;
@@ -193,7 +227,7 @@ function App() {
   const [projectId, setProjectId] = useState('');
   const [title, setTitle] = useState('demo-web');
   const [topSection, setTopSection] = useState<TopSection>('outline');
-  const [outlineView, setOutlineView] = useState<OutlineView>('edit');
+  const [outlineStageView, setOutlineStageView] = useState<OutlineStageView>('edit');
   const [chapterView, setChapterView] = useState<ChapterView>('batch');
   const [stages, setStages] = useState<Stage[]>([]);
   const [activeStage, setActiveStage] = useState('direction');
@@ -201,6 +235,9 @@ function App() {
   const [instruction, setInstruction] = useState('');
   const [loadingStage, setLoadingStage] = useState(false);
   const [stageRunning, setStageRunning] = useState(false);
+  const [chapterOutlineWorkspace, setChapterOutlineWorkspace] = useState<ChapterOutlineWorkspace | null>(null);
+  const [loadingChapterOutline, setLoadingChapterOutline] = useState(false);
+  const [chapterOutlineRunning, setChapterOutlineRunning] = useState(false);
   const [log, setLog] = useState<string[]>([]);
   const [chapterSelector, setChapterSelector] = useState('1-3');
   const [volume, setVolume] = useState(1);
@@ -222,7 +259,9 @@ function App() {
   const stageRunningRef = useRef(false);
   const chapterRequestRef = useRef(0);
   const current = useMemo(() => stages.find((item) => item.stage === activeStage), [stages, activeStage]);
-  const visibleStages = useMemo(() => stages.filter((item) => item.stage !== 'review_lock'), [stages]);
+  const currentActionState = current?.action_state || disabledActionState;
+  const currentStageLocked = current?.status === 'locked';
+  const visibleStages = useMemo(() => stages.filter((item) => item.stage !== 'review_lock' && item.stage !== 'chapter_outline'), [stages]);
 
   useEffect(() => {
     refreshProjects().catch(showError);
@@ -235,6 +274,7 @@ function App() {
     refreshChapters().catch(showError);
     loadLatestReview().catch(() => setReview(null));
     loadLatestOutlineReview().catch(() => setOutlineReview(null));
+    loadChapterOutlineWorkspace().catch(showError);
   }, [projectId]);
 
   useEffect(() => {
@@ -275,7 +315,7 @@ function App() {
     const items = await api<Stage[]>(`/api/projects/${projectId}/outline/stages`);
     setStages(items);
     if (items.length > 0 && !items.find((item) => item.stage === activeStage)) {
-      const firstVisible = items.find((item) => item.stage !== 'review_lock');
+      const firstVisible = items.find((item) => item.stage !== 'review_lock' && item.stage !== 'chapter_outline');
       if (firstVisible) setActiveStage(firstVisible.stage);
     }
   }
@@ -300,7 +340,7 @@ function App() {
     pushLog(`saved ${activeStage}`);
   }
 
-  async function runStage(action: 'generate' | 'lock') {
+  async function runStage(action: 'generate' | 'revise' | 'lock') {
     if (stageRunningRef.current) return;
     stageRunningRef.current = true;
     setStageRunning(true);
@@ -315,6 +355,34 @@ function App() {
     } finally {
       stageRunningRef.current = false;
       setStageRunning(false);
+    }
+  }
+
+  async function loadChapterOutlineWorkspace(selectedVolumeIndex?: number) {
+    if (!projectId) return;
+    setLoadingChapterOutline(true);
+    const query = selectedVolumeIndex ? `?selected_volume_index=${selectedVolumeIndex}` : '';
+    try {
+      const payload = await api<ChapterOutlineWorkspace>(`/api/projects/${projectId}/outline/chapter-workspace${query}`);
+      setChapterOutlineWorkspace(payload);
+    } finally {
+      setLoadingChapterOutline(false);
+    }
+  }
+
+  async function runChapterOutlineVolume(action: 'generate' | 'revise' | 'lock') {
+    if (!chapterOutlineWorkspace || chapterOutlineRunning) return;
+    const volumeIndex = chapterOutlineWorkspace.selected_volume.index;
+    setChapterOutlineRunning(true);
+    try {
+      await streamAction(
+        `/api/projects/${projectId}/outline/chapter-workspace/volumes/${volumeIndex}/${action}`,
+        { instruction },
+        (line) => pushLog(line),
+      );
+      await loadChapterOutlineWorkspace(action === 'lock' ? undefined : volumeIndex);
+    } finally {
+      setChapterOutlineRunning(false);
     }
   }
 
@@ -461,7 +529,8 @@ function App() {
         </select>
         <div className="top-tabs">
           <button className={topSection === 'outline' ? 'active' : ''} onClick={() => setTopSection('outline')}><Layers size={16} />大纲</button>
-          <button className={topSection === 'chapters' ? 'active' : ''} onClick={() => setTopSection('chapters')}><FileText size={16} />章节</button>
+          <button className={topSection === 'chapter-outline' ? 'active' : ''} onClick={() => setTopSection('chapter-outline')}><ListChecks size={16} />章节大纲</button>
+          <button className={topSection === 'chapters' ? 'active' : ''} onClick={() => setTopSection('chapters')}><FileText size={16} />章节正文</button>
         </div>
         {topSection === 'outline' ? (
           <nav>
@@ -473,39 +542,48 @@ function App() {
               </button>
             ))}
           </nav>
+        ) : topSection === 'chapter-outline' ? (
+          <nav className="sidebar-note">
+            <p>章节大纲按卷管理。</p>
+          </nav>
         ) : (
           <nav className="sidebar-note">
-            <p>章节功能在右侧工作区切换。</p>
+            <p>章节正文功能在右侧工作区切换。</p>
           </nav>
         )}
       </aside>
 
-      {topSection === 'outline' ? (
+      {topSection === 'outline' && (
         <section className="workspace">
           <div className="workspace-tabs" aria-label="大纲视图">
-            <button className={outlineView === 'edit' ? 'active' : ''} onClick={() => setOutlineView('edit')}>
+            <button className={outlineStageView === 'edit' ? 'active' : ''} onClick={() => setOutlineStageView('edit')}>
               <FileText size={16} />阶段编辑
             </button>
-            <button className={outlineView === 'review' ? 'active' : ''} onClick={() => setOutlineView('review')}>
+            <button className={outlineStageView === 'review' ? 'active' : ''} onClick={() => setOutlineStageView('review')}>
               <ListChecks size={16} />总体审查
             </button>
           </div>
-          {outlineView === 'edit' && (
+          {outlineStageView === 'edit' && (
             <>
               <header className="toolbar">
                 <div>
                   <h1>{stageLabel(current, activeStage)}</h1>
                   <p>{current?.status || 'not_generated'}</p>
                 </div>
-                <button onClick={saveStage} disabled={loadingStage || stageRunning}><Save size={16} />保存</button>
-                <button onClick={() => runStage('generate')} disabled={loadingStage || stageRunning}><RefreshCw size={16} />{stageRunning ? '运行中' : '生成/修订'}</button>
-                <button onClick={() => runStage('lock')} disabled={loadingStage || stageRunning}><Lock size={16} />锁定</button>
+                <button onClick={saveStage} disabled={loadingStage || stageRunning || currentStageLocked}><Save size={16} />保存</button>
               </header>
-              <input className="instruction" value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder="当前大纲阶段生成/修订说明" />
-              {loadingStage ? <div className="loading">正在读取 {stageLabel(current, activeStage)}...</div> : <textarea className="editor" value={content} onChange={(event) => setContent(event.target.value)} />}
+              <StageActionBar
+                actionState={currentActionState}
+                loadingStage={loadingStage}
+                running={stageRunning}
+                status={current?.status || 'not_generated'}
+                onRun={runStage}
+              />
+              <input className="instruction" value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder="当前大纲阶段生成、修订或锁定说明" />
+              {loadingStage ? <div className="loading">正在读取 {stageLabel(current, activeStage)}...</div> : <textarea className="editor" value={content} onChange={(event) => setContent(event.target.value)} disabled={currentStageLocked} />}
             </>
           )}
-          {outlineView === 'review' && (
+          {outlineStageView === 'review' && (
             <OutlineReviewWorkspace
               review={outlineReview}
               instruction={instruction}
@@ -520,7 +598,59 @@ function App() {
             />
           )}
         </section>
-      ) : (
+      )}
+
+      {topSection === 'chapter-outline' && (
+        <section className="workspace chapter-outline-workspace">
+          <header className="toolbar">
+            <div>
+              <h1>章节大纲</h1>
+              <p>按卷生成、修订和锁定章节大纲</p>
+            </div>
+            <button onClick={() => loadChapterOutlineWorkspace()} disabled={loadingChapterOutline || chapterOutlineRunning}><RefreshCw size={16} />刷新</button>
+          </header>
+          {loadingChapterOutline && <div className="loading">正在读取章节大纲...</div>}
+          {!loadingChapterOutline && chapterOutlineWorkspace && (
+            <div className="chapter-outline-layout">
+              <div className="chapter-list volume-list">
+                {chapterOutlineWorkspace.volume_specs.map((item) => {
+                  const status = chapterOutlineWorkspace.volume_statuses[String(item.index)] || (chapterOutlineWorkspace.completed_volumes.includes(item.index) ? 'locked' : 'not_generated');
+                  return (
+                    <button
+                      className={item.index === chapterOutlineWorkspace.selected_volume.index ? 'active' : ''}
+                      key={item.index}
+                      onClick={() => loadChapterOutlineWorkspace(item.index)}
+                    >
+                      <span>{item.label || `第 ${item.index} 卷`}</span>
+                      <small>{item.name || '未命名'} · {status}</small>
+                    </button>
+                  );
+                })}
+              </div>
+              <article className="chapter-detail">
+                <header className="toolbar">
+                  <div>
+                    <h1>{chapterOutlineWorkspace.selected_volume.label}</h1>
+                    <p>{chapterOutlineWorkspace.selected_volume.name || chapterOutlineWorkspace.selected_volume.status}</p>
+                  </div>
+                </header>
+                <StageActionBar
+                  actionState={chapterOutlineWorkspace.selected_volume}
+                  loadingStage={loadingChapterOutline}
+                  running={chapterOutlineRunning}
+                  status={chapterOutlineWorkspace.selected_volume.status}
+                  onRun={runChapterOutlineVolume}
+                />
+                <input className="instruction" value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder="当前卷章节大纲生成、修订或锁定说明" />
+                <pre className="chapter-body">{chapterOutlineWorkspace.selected_volume.content || chapterOutlineWorkspace.selected_volume.summary || '暂无章节大纲内容。'}</pre>
+              </article>
+            </div>
+          )}
+          {!loadingChapterOutline && !chapterOutlineWorkspace && <p className="empty">暂无章节大纲工作区。</p>}
+        </section>
+      )}
+
+      {topSection === 'chapters' && (
         <section className="workspace chapter-workspace">
           <div className="workspace-tabs" aria-label="章节视图">
             <button className={chapterView === 'batch' ? 'active' : ''} onClick={() => setChapterView('batch')}>
@@ -605,6 +735,33 @@ function App() {
         </section>
       </aside>
     </main>
+  );
+}
+
+
+function StageActionBar({
+  actionState,
+  loadingStage,
+  running,
+  status,
+  onRun,
+}: {
+  actionState: ActionState;
+  loadingStage: boolean;
+  running: boolean;
+  status: string;
+  onRun: (action: 'generate' | 'revise' | 'lock') => void;
+}) {
+  return (
+    <div className="stage-action-bar">
+      <div className="stage-action-group">
+        <span className="stage-status">{status}</span>
+        <button onClick={() => onRun('generate')} disabled={loadingStage || running || !actionState.can_generate}>生成</button>
+        <button onClick={() => onRun('revise')} disabled={loadingStage || running || !actionState.can_revise}>修订</button>
+        <button onClick={() => onRun('lock')} disabled={loadingStage || running || !actionState.can_lock}>锁定</button>
+      </div>
+      {actionState.lock_reason && <span className="lock-badge"><Lock size={14} />{actionState.lock_reason}</span>}
+    </div>
   );
 }
 

@@ -2,6 +2,7 @@ from ai_novelist.adapters.codex_cli import CodexCLIAdapter
 from ai_novelist.artifacts import load_artifacts
 from ai_novelist.director_service import DirectorDecision, DirectorService
 from ai_novelist.graph_chapter_plan import CHAPTER_CARD_SECTIONS, build_chapter_plan_graph, collect_chapter_outline
+from ai_novelist.outline.chapter_outline_structure import extract_chapter_outline_volume
 from ai_novelist.research import MockSearchBackend
 from ai_novelist.storage.local_store import LocalStore
 
@@ -36,6 +37,25 @@ def test_chapter_plan_graph_generates_chapter_card(tmp_path):
     assert result["current_chapter_card"] == content.strip()
     artifacts = load_artifacts(store.project_dir("demo"))
     assert any(item.type == "chapter_card" and item.chapter == 1 and item.graph == "chapter_plan" for item in artifacts)
+
+
+def test_extract_chapter_outline_volume_accepts_subtitled_headings():
+    outline = """## 章节大纲稿
+
+### 第一卷《白骨试炼》
+
+第一卷内容。
+
+### 第二卷 - 魔门暗潮
+
+第二卷内容。
+"""
+
+    selected = extract_chapter_outline_volume(outline, 2)
+
+    assert "第二卷 - 魔门暗潮" in selected
+    assert "第二卷内容" in selected
+    assert "第一卷内容" not in selected
 
 
 def test_collect_chapter_outline_returns_target_chapter_slice(tmp_path):

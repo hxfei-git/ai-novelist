@@ -48,22 +48,61 @@ def test_review_entries_are_not_sidebar_navigation() -> None:
     assert "总体审查" not in sidebar
 
 
-def test_outline_workspace_uses_secondary_review_tab() -> None:
+def test_top_navigation_has_three_workspaces() -> None:
     source = read_main()
 
-    assert_union_type_includes(source, "OutlineView", "edit", "review")
-    assert 'aria-label="大纲视图"' in source
-    assert "outlineView === 'edit'" in source
-    assert "outlineView === 'review'" in source
-    assert "setOutlineView('edit')" in source
-    assert "setOutlineView('review')" in source
+    assert_union_type_includes(source, "TopSection", "outline", "chapter-outline", "chapters")
+    assert "topSection === 'outline'" in source
+    assert "topSection === 'chapter-outline'" in source
+    assert "topSection === 'chapters'" in source
+    assert "setTopSection('outline')" in source
+    assert "setTopSection('chapter-outline')" in source
+    assert "setTopSection('chapters')" in source
+    assert "大纲" in source
+    assert "章节大纲" in source
+    assert "章节正文" in source
 
-    edit_start = source.index("{outlineView === 'edit' &&")
-    review_start = source.index("{outlineView === 'review' &&")
+
+def test_outline_workspace_uses_secondary_stage_review_tab() -> None:
+    source = read_main()
+
+    assert_union_type_includes(source, "OutlineStageView", "edit", "review")
+    assert 'aria-label="大纲视图"' in source
+    assert "outlineStageView === 'edit'" in source
+    assert "outlineStageView === 'review'" in source
+    assert "setOutlineStageView('edit')" in source
+    assert "setOutlineStageView('review')" in source
+    assert "outlineView === 'review'" not in source
+
+    edit_start = source.index("{outlineStageView === 'edit' &&")
+    review_start = source.index("{outlineStageView === 'review' &&")
     edit_block = source[edit_start:review_start]
 
     assert "runOutlineReview" not in edit_block
     assert "大纲总体审查" not in edit_block
+
+
+def test_outline_workspace_no_longer_assumes_chapter_outline_is_ordinary_stage() -> None:
+    source = read_main()
+
+    assert "item.stage !== 'chapter_outline'" in source
+    assert "loadChapterOutlineWorkspace" in source
+    assert "outline/stages/${stage}" in source
+    load_stage_block = source[source.index("async function loadStage") : source.index("async function saveStage")]
+    assert "outline/stages/${stage}" in load_stage_block
+    assert "chapter_outline" not in load_stage_block
+
+
+def test_chapter_outline_workspace_uses_dedicated_volume_routes() -> None:
+    source = read_main()
+
+    assert "ChapterOutlineWorkspace" in source
+    assert "volume_specs" in source
+    assert "selected_volume" in source
+    assert "outline/chapter-workspace${query}" in source
+    assert "outline/chapter-workspace/volumes/${volumeIndex}/${action}" in source
+    assert "runChapterOutlineVolume(action: 'generate' | 'revise' | 'lock')" in source
+    assert "章节大纲按卷管理" in source
 
 
 def test_chapter_workspace_uses_secondary_tabs() -> None:
@@ -110,4 +149,32 @@ def test_outline_stage_actions_guard_against_double_submit() -> None:
     assert "stageRunningRef.current = false" in source
     assert "setStageRunning(true)" in source
     assert "setStageRunning(false)" in source
-    assert "disabled={loadingStage || stageRunning}" in source
+    assert "disabled={loadingStage || running || !actionState.can_generate}" in source
+    assert "disabled={loadingStage || running || !actionState.can_revise}" in source
+    assert "disabled={loadingStage || running || !actionState.can_lock}" in source
+
+
+def test_outline_stage_actions_are_separate_and_backend_driven() -> None:
+    source = read_main()
+
+    assert "action_state" in source
+    assert "actionState.can_generate" in source
+    assert "actionState.can_revise" in source
+    assert "actionState.can_lock" in source
+    assert "actionState.lock_reason" in source
+    assert "onRun('generate')" in source
+    assert "onRun('revise')" in source
+    assert "onRun('lock')" in source
+    assert "async function runStage(action: 'generate' | 'revise' | 'lock')" in source
+    assert ">生成</button>" in source
+    assert ">修订</button>" in source
+    assert ">锁定</button>" in source
+    assert "生成/修订" not in source
+
+
+def test_stage_action_strip_and_lock_badge_have_distinct_styles() -> None:
+    styles = read_styles()
+
+    assert ".stage-action-bar" in styles
+    assert ".stage-action-group" in styles
+    assert ".lock-badge" in styles

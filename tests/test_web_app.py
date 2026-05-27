@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import types
 
+from fastapi.testclient import TestClient
+
 from ai_novelist.cli import build_parser
 from ai_novelist.config import Settings
 from ai_novelist.web import app as web_app
@@ -29,6 +31,33 @@ def test_web_parser_accepts_provider_model_and_timeout() -> None:
     assert args.provider == "deepseek"
     assert args.model == "deepseek-chat"
     assert args.timeout == 180
+
+
+
+
+def test_web_app_exposes_outline_action_and_workspace_routes(tmp_path) -> None:
+    app = web_app.make_app(Settings(projects_dir=tmp_path), mock=True)
+    routes = {route.path for route in app.routes if hasattr(route, "path")}
+
+    assert "/api/projects/{project_id}/outline/stages/{stage}/generate" in routes
+    assert "/api/projects/{project_id}/outline/stages/{stage}/revise" in routes
+    assert "/api/projects/{project_id}/outline/stages/{stage}/lock" in routes
+    assert "/api/projects/{project_id}/outline/chapter-workspace" in routes
+    assert "/api/projects/{project_id}/outline/chapter-workspace/volumes/{volume_index}/generate" in routes
+    assert "/api/projects/{project_id}/outline/chapter-workspace/volumes/{volume_index}/revise" in routes
+    assert "/api/projects/{project_id}/outline/chapter-workspace/volumes/{volume_index}/lock" in routes
+    assert not any("/action" in path for path in routes)
+
+
+def test_generic_chapter_outline_stage_get_returns_workspace_error(tmp_path) -> None:
+    client = TestClient(web_app.make_app(Settings(projects_dir=tmp_path), mock=True))
+    created = client.post("/api/projects", json={"title": "Web Demo", "project_id": "web-demo"})
+    assert created.status_code == 200
+
+    response = client.get("/api/projects/web-demo/outline/stages/chapter_outline")
+
+    assert response.status_code == 400
+    assert "章节大纲工作区" in response.json()["detail"]
 
 
 def test_run_web_command_passes_generation_defaults(monkeypatch, tmp_path) -> None:

@@ -120,6 +120,37 @@ def make_app(
         except LocalStoreError as exc:
             raise as_http_error(exc)
 
+    @app.get("/api/projects/{project_id}/outline/chapter-workspace")
+    def chapter_outline_workspace(project_id: str, selected_volume_index: int | None = None):
+        try:
+            return service.chapter_outline_workspace_payload(store, project_id, selected_volume_index)
+        except LocalStoreError as exc:
+            raise as_http_error(exc)
+
+    @app.post("/api/projects/{project_id}/outline/chapter-workspace/volumes/{volume_index}/generate")
+    def generate_chapter_outline_volume(project_id: str, volume_index: int, payload: dict[str, Any] | None = None):
+        payload = payload or {}
+        return StreamingResponse(
+            sse_events(lambda progress: service.generate_chapter_outline_volume(store, adapter(payload), project_id, volume_index, str(payload.get("instruction") or ""), progress).to_dict()),
+            media_type="text/event-stream",
+        )
+
+    @app.post("/api/projects/{project_id}/outline/chapter-workspace/volumes/{volume_index}/revise")
+    def revise_chapter_outline_volume(project_id: str, volume_index: int, payload: dict[str, Any] | None = None):
+        payload = payload or {}
+        return StreamingResponse(
+            sse_events(lambda progress: service.revise_chapter_outline_volume(store, adapter(payload), project_id, volume_index, str(payload.get("instruction") or ""), progress).to_dict()),
+            media_type="text/event-stream",
+        )
+
+    @app.post("/api/projects/{project_id}/outline/chapter-workspace/volumes/{volume_index}/lock")
+    def lock_chapter_outline_volume(project_id: str, volume_index: int, payload: dict[str, Any] | None = None):
+        payload = payload or {}
+        return StreamingResponse(
+            sse_events(lambda progress: service.lock_chapter_outline_volume(store, adapter(payload), project_id, volume_index, str(payload.get("instruction") or ""), progress).to_dict()),
+            media_type="text/event-stream",
+        )
+
     @app.put("/api/projects/{project_id}/outline/stages/{stage}")
     def save_outline_stage(project_id: str, stage: str, payload: dict[str, Any]):
         try:
@@ -132,6 +163,14 @@ def make_app(
         payload = payload or {}
         return StreamingResponse(
             sse_events(lambda progress: service.generate_outline_stage(store, adapter(payload), project_id, stage, str(payload.get("instruction") or ""), progress).to_dict()),
+            media_type="text/event-stream",
+        )
+
+    @app.post("/api/projects/{project_id}/outline/stages/{stage}/revise")
+    def revise_outline_stage(project_id: str, stage: str, payload: dict[str, Any] | None = None):
+        payload = payload or {}
+        return StreamingResponse(
+            sse_events(lambda progress: service.revise_outline_stage(store, adapter(payload), project_id, stage, str(payload.get("instruction") or ""), progress).to_dict()),
             media_type="text/event-stream",
         )
 

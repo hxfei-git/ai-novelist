@@ -937,6 +937,97 @@ def test_light_revision_filters_seen_questions_without_full_stage_rerun(tmp_path
         assert new_question in artifact["review_lock_issues"]["blocking"]
 
 
+class FullGenerationPathAdapter:
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    def complete(self, prompt, workspace, options=None):
+        self.prompts.append(prompt)
+        if "AGENT: outline_stage_reviser" in prompt:
+            raise AssertionError("generation must not use the light revision agent")
+        if "AGENT: outline_stage_role" in prompt:
+            return '{"role": "定位", "opportunities": [], "risks": [], "suggestions": []}'
+        if "AGENT: outline_stage_synthesizer" in prompt:
+            return "## 方向定位稿\n\n- 全量重建后的方向定位。"
+        raise AssertionError(f"unexpected prompt: {prompt[:60]}")
+
+
+def test_generate_with_existing_artifact_uses_full_stage_branch(tmp_path):
+    from ai_novelist.web import service as web_service
+
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.outline_stage_artifacts["direction"] = {
+        "stage": "direction",
+        "status": "options_ready",
+        "synthesis": "## 方向定位稿\n\n- 旧方向。",
+    }
+    store.save_outline_artifact(state, "direction", "## 方向定位稿\n\n- 旧方向。")
+    store.save_state(state)
+    adapter = FullGenerationPathAdapter()
+
+    result = web_service.generate_outline_stage(store, adapter, "demo", "direction", "重建方向定位")
+
+    assert any("AGENT: outline_stage_role" in prompt for prompt in adapter.prompts)
+    assert any("AGENT: outline_stage_synthesizer" in prompt for prompt in adapter.prompts)
+    assert all("AGENT: outline_stage_reviser" not in prompt for prompt in adapter.prompts)
+    assert result.outline_stage_artifacts["direction"]["revision_meta"]["last_revision_mode"] == "full"
+
+
+class ChapterCurrentVolumeRevisionAdapter:
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    def complete(self, prompt, workspace, options=None):
+        self.prompts.append(prompt)
+        if "AGENT: outline_stage_reviser" not in prompt:
+            raise AssertionError("chapter volume revision must stay on the light revision path")
+        assert "第一卷锁定原文" not in prompt
+        return "### 第二卷：收束\n\n第二卷修订后内容。"
+
+
+def test_chapter_volume_revision_preserves_locked_volume_and_refreshes_workspace_content(tmp_path):
+    from ai_novelist.web import service as web_service
+
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.active_workflow = "outline"
+    state.outline_stage = "chapter_outline"
+    state.outline_stage_status = "options_ready"
+    state.director_action = "run_outline_stage"
+    state.director_intent = "revise"
+    state.revision_instruction = "细化第二卷"
+    state.user_request = "细化第二卷"
+    locked_content = "### 第一卷：开局\n\n第一卷锁定原文。"
+    old_current = "### 第二卷：收束\n\n第二卷旧内容。"
+    state.outline_stage_artifacts["chapter_outline"] = {
+        "stage": "chapter_outline",
+        "label": "章节大纲",
+        "status": "options_ready",
+        "synthesis": f"{locked_content}\n\n{old_current}",
+        "metadata": {
+            "total_volumes": 2,
+            "current_volume_index": 2,
+            "completed_volumes": [1],
+            "volume_statuses": {"1": "locked", "2": "options_ready"},
+            "volume_contents": {"1": locked_content, "2": old_current},
+        },
+    }
+    store.save_outline_artifact(state, "volume_outline", "## 第一卷：开局\n\n## 第二卷：收束\n")
+    store.save_state(state)
+
+    result = NovelState.from_dict(run_outline_stage_node(state.to_dict(), ChapterCurrentVolumeRevisionAdapter(), store))
+    metadata = result.outline_stage_artifacts["chapter_outline"]["metadata"]
+    payload = web_service.chapter_outline_workspace_payload(store, "demo", selected_volume_index=2)
+
+    assert metadata["volume_contents"]["1"] == locked_content
+    assert "第二卷修订后内容" in metadata["volume_contents"]["2"]
+    assert "第二卷旧内容" not in metadata["volume_contents"]["2"]
+    assert "第二卷修订后内容" in payload["selected_volume"]["content"]
+    assert "第二卷旧内容" not in payload["selected_volume"]["content"]
+    assert "第一卷锁定原文" not in payload["selected_volume"]["content"]
+
+
 def test_outline_stage_question_round_limit_autoclosed_after_three_rounds(tmp_path):
     store = LocalStore(tmp_path)
     state = store.create_project("Demo", "demo")

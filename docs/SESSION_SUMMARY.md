@@ -116,6 +116,21 @@
 - `.venv/bin/python -m pytest tests/test_web_service.py tests/test_outline_collaboration.py tests/test_director_service.py tests/test_outline_stage_controls.py`：109 passed。
 - `npm --prefix web/frontend run build`：通过。
 
+
+### Web 导航重构与章节大纲卷工作区：已完成
+
+本轮把 Web 一级导航调整为 `大纲 / 章节大纲 / 章节正文`。普通大纲阶段不再包含 `chapter_outline`，左侧阶段列表继续隐藏 `review_lock`；大纲阶段动作拆为独立 `生成`、`修订`、`锁定`，前端按钮状态由后端 `action_state` 控制，锁定阶段在 UI 中只读，后端也会拒绝写入类操作。
+
+章节大纲新增专用工作区和卷级后端接口：`GET /outline/chapter-workspace` 返回卷列表、当前卷、已完成卷和选中卷内容；`POST /outline/chapter-workspace/volumes/{volume_index}/generate|revise|lock` 只允许当前卷执行动作。卷修订只替换当前卷内容，保留已锁定卷，并刷新合并后的 `chapter_outline` artifact，保证后续章节正文读取到完整章节大纲上下文。
+
+前端实现位于 `web/frontend/src/main.tsx` 和 `web/frontend/src/styles.css`，新增章节大纲卷列表、选中卷内容区、锁定原因提示和独立阶段动作条。章节大纲某卷锁定后会重新读取后端默认当前卷，便于继续推进下一卷。
+
+验证：
+
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_graph_chapter_plan.py tests/test_web_service.py tests/test_web_app.py tests/test_outline_collaboration.py -q`：116 passed。
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py -q`：11 passed。
+- `npm --prefix web/frontend run build`：通过，Vite 仅提示 CJS Node API deprecation warning。
+
 ## 3. 最新架构摘要
 
 ```text

@@ -23,6 +23,7 @@ from ai_novelist.outline.chapter_outline_structure import (
     chapter_outline_metadata_from_artifact,
     chapter_outline_summary,
     extract_chapter_outline_memory,
+    extract_chapter_outline_volume,
     merge_chapter_outline_volumes,
     normalize_generated_volume_outline,
     validate_chapter_outline_volume,
@@ -603,6 +604,20 @@ def revise_outline_stage_from_existing(
 ) -> dict:
     existing_artifact = dict(state.outline_stage_artifacts.get(stage) or {})
     current_markdown = current_stage_markdown_for_revision(state, store, stage, existing_artifact)
+    if stage == "chapter_outline":
+        metadata = state.director_task_args.get("chapter_outline_metadata")
+        if not isinstance(metadata, dict):
+            metadata = chapter_outline_metadata_from_artifact(
+                existing_artifact,
+                stage_full_text(state, store, "volume_outline"),
+            )
+        current_index = int(metadata.get("current_volume_index") or 1)
+        contents = metadata.get("volume_contents") if isinstance(metadata.get("volume_contents"), dict) else {}
+        current_volume_text = str(contents.get(str(current_index)) or "").strip()
+        if not current_volume_text:
+            current_volume_text = extract_chapter_outline_volume(current_markdown, current_index)
+        if current_volume_text:
+            current_markdown = current_volume_text
     if not current_markdown.strip():
         return run_outline_stage_node(state.to_dict(), adapter, store, progress)
 
@@ -639,6 +654,25 @@ def revise_outline_stage_from_existing(
     revised = guarded.text.strip() or revised
     if stage == "worldbuilding":
         state.worldbuilding = revised
+    elif stage == "chapter_outline":
+        metadata = state.director_task_args.get("chapter_outline_metadata")
+        if not isinstance(metadata, dict):
+            metadata = chapter_outline_metadata_from_artifact(
+                existing_artifact,
+                stage_full_text(state, store, "volume_outline"),
+            )
+        current_index = int(metadata.get("current_volume_index") or 1)
+        current_key = str(current_index)
+        revised_current_volume = extract_chapter_outline_volume(revised, current_index) or revised
+        volume_text = normalize_generated_volume_outline(revised_current_volume, metadata)
+        contents = dict(metadata.get("volume_contents") or {})
+        contents[current_key] = volume_text.strip()
+        metadata["volume_contents"] = contents
+        statuses = dict(metadata.get("volume_statuses") or {})
+        statuses[current_key] = "options_ready"
+        metadata["volume_statuses"] = statuses
+        state.director_task_args["chapter_outline_metadata"] = metadata
+        revised = merge_chapter_outline_volumes(metadata)
 
     artifact = dict(existing_artifact)
     artifact.update(
@@ -748,6 +782,8 @@ def revise_outline_stage_from_existing(
 
 def should_lightly_revise_outline_stage(state: NovelState, stage: str, artifact: object, store: LocalStore) -> bool:
     if stage not in OUTLINE_STAGES:
+        return False
+    if state.director_intent == "create":
         return False
     if chapter_outline_forced_full_generation(state, stage):
         return False

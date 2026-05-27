@@ -27,6 +27,11 @@ from ai_novelist.graph_outline import (
     stage_full_text,
 )
 from ai_novelist.graph_volume_write import build_volume_write_graph
+from ai_novelist.outline.chapter_outline_structure import (
+    chapter_outline_metadata_from_artifact,
+    current_volume_spec,
+    extract_chapter_outline_volume,
+)
 from ai_novelist.outline.stage_contracts import OUTLINE_STAGES, STAGE_LABELS
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore, LocalStoreError, summarize_text
@@ -77,7 +82,8 @@ def create_project(store: LocalStore, title: str, project_id: str | None = None,
 
 def outline_stage_list(store: LocalStore, project_id: str) -> list[dict[str, Any]]:
     state = store.load_state(project_id)
-    return [outline_stage_payload(store, state, stage, include_content=False) for stage in OUTLINE_STAGES if stage != "review_lock"]
+    hidden_stages = {"review_lock", "chapter_outline"}
+    return [outline_stage_payload(store, state, stage, include_content=False) for stage in OUTLINE_STAGES if stage not in hidden_stages]
 
 
 def outline_stage_payload(store: LocalStore, state: NovelState, stage: str, *, include_content: bool = True) -> dict[str, Any]:
@@ -93,6 +99,7 @@ def outline_stage_payload(store: LocalStore, state: NovelState, stage: str, *, i
         "stage": stage,
         "label": STAGE_LABELS.get(stage, stage),
         "status": status,
+        "action_state": outline_stage_action_state(store, state, stage, status),
         "active": stage == state.outline_stage,
         "path": artifact_dict.get("path") or f"outline/{stage}.md",
         "summary": artifact_dict.get("summary") or state.outline_stage_summaries.get(stage, ""),
@@ -107,16 +114,37 @@ def outline_stage_payload(store: LocalStore, state: NovelState, stage: str, *, i
 
 
 def load_outline_stage_payload(store: LocalStore, project_id: str, stage: str) -> dict[str, Any]:
+    ensure_valid_stage(stage)
+    ensure_ordinary_stage_mutation(stage)
     state = store.load_state(project_id)
     return outline_stage_payload(store, state, stage, include_content=True)
 
 
+def ensure_outline_stage_mutable(state: NovelState, stage: str) -> None:
+    artifact = state.outline_stage_artifacts.get(stage)
+    if isinstance(artifact, dict) and str(artifact.get("status") or "") == "locked":
+        raise LocalStoreError("已锁定")
+
+
+def ensure_ordinary_stage_mutation(stage: str) -> None:
+    if stage == "chapter_outline":
+        raise LocalStoreError("章节大纲请使用分卷章节大纲工作区操作")
+
+
+def has_outline_stage_content(store: LocalStore, state: NovelState, stage: str) -> bool:
+    artifact = state.outline_stage_artifacts.get(stage)
+    artifact_dict = dict(artifact) if isinstance(artifact, dict) else {}
+    return bool(load_stage_markdown(store, state, stage, artifact_dict).strip())
+
+
 def save_outline_stage_content(store: LocalStore, project_id: str, stage: str, content: str) -> dict[str, Any]:
     ensure_valid_stage(stage)
+    ensure_ordinary_stage_mutation(stage)
+    state = store.load_state(project_id)
+    ensure_outline_stage_mutable(state, stage)
     text = content.rstrip() + "\n" if content.strip() else ""
     if not text.strip():
         raise LocalStoreError("Outline stage content cannot be empty")
-    state = store.load_state(project_id)
     artifact = dict(state.outline_stage_artifacts.get(stage) or {})
     artifact.update(
         {
@@ -251,6 +279,219 @@ def build_outline_repair_suggestions(notes: str, revision_instruction: str, summ
         }
         suggestions.append(suggestion)
     return suggestions
+
+
+PENDING_SECTION_RE = re.compile(r"^#{1,6}\s*(?:[一二三四五六七八九十]+、)?(?:待确认问题|仍需确认的问题)\s*$")
+PENDING_GENERIC_PATTERNS = (
+    "暂无",
+    "当前阶段可继续修改或确认进入下一阶段",
+    "请确认是否锁定",
+    "并进入下一阶段",
+)
+
+
+def is_generic_pending_question(text: str) -> bool:
+    normalized = str(text or "").strip().strip("-* 	")
+    if not normalized:
+        return True
+    if normalized in {"暂无", "无", "没有"}:
+        return True
+    return any(pattern in normalized for pattern in PENDING_GENERIC_PATTERNS)
+
+
+def clean_pending_question_line(line: str) -> str:
+    cleaned = str(line or "").strip()
+    cleaned = re.sub(r"^[-*+•]\s+", "", cleaned)
+    cleaned = re.sub(r"^\d+[.)、]\s*", "", cleaned)
+    return cleaned.strip()
+
+
+def dedupe_pending_questions(questions: Iterable[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for question in questions:
+        cleaned = clean_pending_question_line(question)
+        key = re.sub(r"\s+", "", cleaned)
+        if not cleaned or key in seen or is_generic_pending_question(cleaned):
+            continue
+        seen.add(key)
+        result.append(cleaned)
+    return result
+
+
+def extract_pending_questions_from_stage_markdown(text: str) -> list[str]:
+    questions: list[str] = []
+    in_pending_section = False
+    for line in str(text or "").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("#"):
+            in_pending_section = bool(PENDING_SECTION_RE.match(stripped))
+            continue
+        if not in_pending_section:
+            continue
+        cleaned = clean_pending_question_line(stripped)
+        if is_generic_pending_question(cleaned):
+            continue
+        questions.append(cleaned)
+    return dedupe_pending_questions(questions)
+
+
+def normalize_pending_source(value: Any) -> list[str]:
+    if isinstance(value, str):
+        raw = [value]
+    elif isinstance(value, list):
+        raw = [str(item) for item in value]
+    else:
+        raw = []
+    return dedupe_pending_questions(raw)
+
+
+def default_pending_options(question: str, stage: str) -> list[dict[str, str]]:
+    accept = "采纳当前建议，并写入当前阶段修订。"
+    if "章节规划" in question or stage in {"chapter_outline", "volume_outline"}:
+        accept = "采纳当前建议，并在后续章节规划阶段展开。"
+    elif "命名" in question or "预先命名" in question:
+        accept = "采纳当前建议，具体命名延后到章节规划或正文写作时决定。"
+    elif "已有世界观" in question or "具体来源" in question:
+        accept = "采纳当前建议，优先复用已有世界观来源，不新增独立设定。"
+    return [
+        {"id": "accept", "label": "采纳建议", "answer": accept},
+        {"id": "defer", "label": "延后处理", "answer": "暂不锁定细节，延后到后续规划阶段决定。"},
+        {"id": "keep", "label": "保持现状", "answer": "保持当前阶段设定，不新增稳定设定。"},
+    ]
+
+
+def collect_stage_pending_questions(store: LocalStore, state: NovelState, stage: str) -> list[str]:
+    artifact = state.outline_stage_artifacts.get(stage)
+    artifact_dict = dict(artifact) if isinstance(artifact, dict) else {}
+    artifact_questions = normalize_pending_source(artifact_dict.get("pending_questions"))
+    if artifact_questions:
+        return artifact_questions
+    if state.outline_stage == stage:
+        state_questions = normalize_pending_source(state.pending_questions)
+        if state_questions:
+            return state_questions
+    markdown = load_stage_markdown(store, state, stage, artifact_dict)
+    return extract_pending_questions_from_stage_markdown(markdown)
+
+
+def pending_item_id(stage: str, question: str) -> str:
+    return hashlib.sha1(f"{stage}|{question}".encode("utf-8")).hexdigest()[:12]
+
+
+def action_state_for_status(
+    status: str,
+    pending_questions: list[str] | None = None,
+    has_content: bool = False,
+) -> dict[str, Any]:
+    questions = list(pending_questions or [])
+    if status == "locked":
+        return {
+            "can_generate": False,
+            "can_revise": False,
+            "can_lock": False,
+            "lock_reason": "已锁定",
+        }
+    if questions:
+        lock_reason = "存在待确认问题，请先完成确认"
+    elif status != "options_ready":
+        lock_reason = "当前阶段尚未准备锁定"
+    else:
+        lock_reason = ""
+    return {
+        "can_generate": True,
+        "can_revise": has_content,
+        "can_lock": status == "options_ready" and not questions,
+        "lock_reason": lock_reason,
+    }
+
+
+def outline_stage_action_state(store: LocalStore, state: NovelState, stage: str, status: str) -> dict[str, Any]:
+    return action_state_for_status(
+        status,
+        collect_stage_pending_questions(store, state, stage),
+        has_outline_stage_content(store, state, stage),
+    )
+
+
+def chapter_outline_workspace_payload(
+    store: LocalStore,
+    project_id: str,
+    selected_volume_index: int | None = None,
+) -> dict[str, Any]:
+    state = store.load_state(project_id)
+    artifact = state.outline_stage_artifacts.get("chapter_outline")
+    artifact_dict = dict(artifact) if isinstance(artifact, dict) else {}
+    volume_artifact = state.outline_stage_artifacts.get("volume_outline")
+    volume_dict = dict(volume_artifact) if isinstance(volume_artifact, dict) else {}
+    volume_outline = load_stage_markdown(store, state, "volume_outline", volume_dict)
+    metadata = chapter_outline_metadata_from_artifact(artifact_dict, volume_outline)
+    current_index = int(metadata["current_volume_index"])
+    total_volumes = int(metadata["total_volumes"])
+    selected_index = int(current_index if selected_volume_index is None else selected_volume_index)
+    if selected_index < 1 or selected_index > total_volumes:
+        raise LocalStoreError(f"Unknown chapter outline volume: {selected_index}")
+
+    selected_metadata = dict(metadata)
+    selected_metadata["current_volume_index"] = selected_index
+    spec = current_volume_spec(selected_metadata)
+    statuses = dict(metadata.get("volume_statuses") or {})
+    completed = list(metadata.get("completed_volumes") or [])
+    status = str(
+        statuses.get(str(selected_index))
+        or (artifact_dict.get("status") if selected_index == current_index else None)
+        or ("locked" if selected_index in completed else "not_generated")
+    )
+    contents = metadata.get("volume_contents") if isinstance(metadata.get("volume_contents"), dict) else {}
+    content = str(contents.get(str(selected_index)) or "").strip()
+    if not content:
+        combined_content = load_stage_markdown(store, state, "chapter_outline", artifact_dict)
+        content = extract_chapter_outline_volume(combined_content, selected_index)
+    questions = collect_stage_pending_questions(store, state, "chapter_outline") if selected_index == current_index else []
+    action_state = action_state_for_status(status, questions, bool(content.strip()))
+    if selected_index != current_index and status != "locked":
+        action_state = {
+            "can_generate": False,
+            "can_revise": False,
+            "can_lock": False,
+            "lock_reason": "请先完成当前卷",
+        }
+    summary = str(artifact_dict.get("summary") or "") if selected_index == current_index else summarize_text(strip_markdown_heading(content))
+    return {
+        "volume_specs": list(metadata.get("volume_specs") or []),
+        "current_volume_index": current_index,
+        "completed_volumes": completed,
+        "volume_statuses": statuses,
+        "selected_volume": {
+            "index": selected_index,
+            "label": spec.label,
+            "name": spec.name,
+            "status": status,
+            "summary": summary,
+            "content": content,
+            **action_state,
+        },
+    }
+
+
+def outline_stage_pending_payload(store: LocalStore, project_id: str, stage: str) -> dict[str, Any]:
+    ensure_valid_stage(stage)
+    state = store.load_state(project_id)
+    questions = collect_stage_pending_questions(store, state, stage)
+    return {
+        "project_id": project_id,
+        "stage": stage,
+        "items": [
+            {
+                "id": pending_item_id(stage, question),
+                "question": question,
+                "options": default_pending_options(question, stage),
+            }
+            for question in questions
+        ],
+    }
 
 
 def selected_outline_revision_instruction(report: dict[str, Any], selected_issue_ids: list[str] | None) -> str:
@@ -406,6 +647,65 @@ def apply_outline_review(store: LocalStore, adapter: AgentAdapter, project_id: s
     }
 
 
+def normalize_pending_answers(answers: Any) -> list[dict[str, str]]:
+    if not isinstance(answers, list) or not answers:
+        raise LocalStoreError("请至少提交一条待确认项答案")
+    normalized: list[dict[str, str]] = []
+    for raw in answers:
+        if not isinstance(raw, dict):
+            raise LocalStoreError("待确认项答案格式无效")
+        question = str(raw.get("question") or "").strip()
+        answer = str(raw.get("answer") or raw.get("custom_answer") or "").strip()
+        selected_option_id = str(raw.get("selected_option_id") or "").strip()
+        if not question or not answer:
+            raise LocalStoreError("每条待确认项都需要选择默认方案或填写自定义答案")
+        normalized.append(
+            {
+                "question": question,
+                "answer": answer,
+                "selected_option_id": selected_option_id,
+            }
+        )
+    return normalized
+
+
+def build_pending_revision_instruction(answers: list[dict[str, str]]) -> str:
+    lines = ["针对当前阶段待确认项，按以下答案修订："]
+    for index, item in enumerate(answers, 1):
+        lines.append(f"{index}. 问题：{item['question']}")
+        lines.append(f"   答案：{item['answer']}")
+    return "\n".join(lines)
+
+
+def submit_stage_pending_answers(
+    store: LocalStore,
+    adapter: AgentAdapter,
+    project_id: str,
+    stage: str,
+    answers: Any,
+    progress: ProgressFunc | None = None,
+) -> NovelState:
+    ensure_valid_stage(stage)
+    ensure_ordinary_stage_mutation(stage)
+    state = store.load_state(project_id)
+    ensure_outline_stage_mutable(state, stage)
+    if not has_outline_stage_content(store, state, stage):
+        raise LocalStoreError("没有可修订内容")
+    normalized = normalize_pending_answers(answers)
+    instruction = build_pending_revision_instruction(normalized)
+    state.outline_stage = stage  # type: ignore[assignment]
+    state.outline_stage_status = "collecting"
+    state.current_stage = stage
+    state.active_workflow = "outline"
+    state.user_request = instruction
+    state.revision_instruction = instruction
+    state.director_action = "run_outline_stage"
+    state.director_intent = "answer_pending_questions"
+    store.save_state(state)
+    result = run_outline_stage_node(state.to_dict(), adapter, store, progress or (lambda _stage, _message: None))
+    return NovelState.from_dict(result)
+
+
 
 def generate_outline_stage(
     store: LocalStore,
@@ -416,14 +716,47 @@ def generate_outline_stage(
     progress: ProgressFunc | None = None,
 ) -> NovelState:
     ensure_valid_stage(stage)
+    ensure_ordinary_stage_mutation(stage)
     state = store.load_state(project_id)
+    ensure_outline_stage_mutable(state, stage)
     state.outline_stage = stage  # type: ignore[assignment]
     state.outline_stage_status = "collecting"
     state.current_stage = stage
     state.active_workflow = "outline"
     state.user_request = instruction.strip() or f"生成{STAGE_LABELS.get(stage, stage)}"
-    state.revision_instruction = instruction.strip()
+    state.revision_instruction = ""
     state.director_action = "run_outline_stage"
+    state.director_intent = "create"
+    store.save_state(state)
+    result = run_outline_stage_node(state.to_dict(), adapter, store, progress or (lambda _stage, _message: None))
+    return NovelState.from_dict(result)
+
+
+def revise_outline_stage(
+    store: LocalStore,
+    adapter: AgentAdapter,
+    project_id: str,
+    stage: str,
+    instruction: str = "",
+    progress: ProgressFunc | None = None,
+) -> NovelState:
+    ensure_valid_stage(stage)
+    ensure_ordinary_stage_mutation(stage)
+    state = store.load_state(project_id)
+    ensure_outline_stage_mutable(state, stage)
+    if not has_outline_stage_content(store, state, stage):
+        raise LocalStoreError("没有可修订内容")
+    revision_instruction = instruction.strip()
+    if not revision_instruction:
+        raise LocalStoreError("Revision instruction cannot be empty")
+    state.outline_stage = stage  # type: ignore[assignment]
+    state.outline_stage_status = "collecting"
+    state.current_stage = stage
+    state.active_workflow = "outline"
+    state.user_request = revision_instruction
+    state.revision_instruction = revision_instruction
+    state.director_action = "run_outline_stage"
+    state.director_intent = "revise"
     store.save_state(state)
     result = run_outline_stage_node(state.to_dict(), adapter, store, progress or (lambda _stage, _message: None))
     return NovelState.from_dict(result)
@@ -438,11 +771,109 @@ def lock_outline_stage(
     progress: ProgressFunc | None = None,
 ) -> NovelState:
     ensure_valid_stage(stage)
+    ensure_ordinary_stage_mutation(stage)
     state = store.load_state(project_id)
+    action_state = outline_stage_action_state(
+        store,
+        state,
+        stage,
+        str((state.outline_stage_artifacts.get(stage) or {}).get("status") or "not_generated"),
+    )
+    if not action_state["can_lock"]:
+        raise LocalStoreError(str(action_state["lock_reason"]))
     state.outline_stage = stage  # type: ignore[assignment]
     state.current_stage = stage
     state.active_workflow = "outline"
     state.user_request = instruction.strip() or f"锁定{STAGE_LABELS.get(stage, stage)}并进入下一阶段"
+    state.director_action = "advance_outline_stage"
+    store.save_state(state)
+    result = advance_outline_stage_node(state.to_dict(), adapter, store, progress or (lambda _stage, _message: None))
+    return NovelState.from_dict(result)
+
+
+def prepare_chapter_outline_volume_action(
+    store: LocalStore,
+    project_id: str,
+    volume_index: int,
+    action: str,
+) -> NovelState:
+    payload = chapter_outline_workspace_payload(store, project_id, selected_volume_index=volume_index)
+    state = store.load_state(project_id)
+    artifact = dict(state.outline_stage_artifacts.get("chapter_outline") or {})
+    metadata = dict(artifact.get("metadata") or {})
+    current_index = int(metadata.get("current_volume_index") or payload["current_volume_index"] or 1)
+    if volume_index != current_index:
+        raise LocalStoreError("章节大纲只能操作当前卷，请先完成当前卷")
+
+    selected = payload["selected_volume"]
+    capability = f"can_{action}"
+    if not bool(selected.get(capability)):
+        if action == "revise" and str(selected.get("status") or "") != "locked" and not str(selected.get("content") or "").strip():
+            raise LocalStoreError("没有可修订内容")
+        raise LocalStoreError(str(selected.get("lock_reason") or "当前卷不可执行此操作"))
+
+    metadata["current_volume_index"] = volume_index
+    artifact["metadata"] = metadata
+    artifact["status"] = str(selected["status"])
+    state.outline_stage_artifacts["chapter_outline"] = artifact
+    state.outline_stage = "chapter_outline"
+    state.outline_stage_status = str(selected["status"])  # type: ignore[assignment]
+    state.current_stage = "chapter_outline"
+    state.active_workflow = "outline"
+    return state
+
+
+def generate_chapter_outline_volume(
+    store: LocalStore,
+    adapter: AgentAdapter,
+    project_id: str,
+    volume_index: int,
+    instruction: str = "",
+    progress: ProgressFunc | None = None,
+) -> NovelState:
+    state = prepare_chapter_outline_volume_action(store, project_id, volume_index, "generate")
+    state.outline_stage_status = "collecting"
+    state.user_request = instruction.strip() or "生成章节大纲当前卷"
+    state.revision_instruction = ""
+    state.director_action = "run_outline_stage"
+    state.director_intent = "create"
+    store.save_state(state)
+    result = run_outline_stage_node(state.to_dict(), adapter, store, progress or (lambda _stage, _message: None))
+    return NovelState.from_dict(result)
+
+
+def revise_chapter_outline_volume(
+    store: LocalStore,
+    adapter: AgentAdapter,
+    project_id: str,
+    volume_index: int,
+    instruction: str = "",
+    progress: ProgressFunc | None = None,
+) -> NovelState:
+    state = prepare_chapter_outline_volume_action(store, project_id, volume_index, "revise")
+    revision_instruction = instruction.strip()
+    if not revision_instruction:
+        raise LocalStoreError("Revision instruction cannot be empty")
+    state.outline_stage_status = "collecting"
+    state.user_request = revision_instruction
+    state.revision_instruction = revision_instruction
+    state.director_action = "run_outline_stage"
+    state.director_intent = "revise"
+    store.save_state(state)
+    result = run_outline_stage_node(state.to_dict(), adapter, store, progress or (lambda _stage, _message: None))
+    return NovelState.from_dict(result)
+
+
+def lock_chapter_outline_volume(
+    store: LocalStore,
+    adapter: AgentAdapter,
+    project_id: str,
+    volume_index: int,
+    instruction: str = "",
+    progress: ProgressFunc | None = None,
+) -> NovelState:
+    state = prepare_chapter_outline_volume_action(store, project_id, volume_index, "lock")
+    state.user_request = instruction.strip() or f"锁定章节大纲第 {volume_index} 卷"
     state.director_action = "advance_outline_stage"
     store.save_state(state)
     result = advance_outline_stage_node(state.to_dict(), adapter, store, progress or (lambda _stage, _message: None))

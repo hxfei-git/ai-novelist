@@ -10,7 +10,7 @@ input, select, textarea { border: 1px solid #c9d1da; border-radius: 6px; backgro
 .brand { font-size: 20px; font-weight: 700; }
 .project-create { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
 .project-create input, .sidebar select { width: 100%; padding: 8px; }
-.top-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.top-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .top-tabs button { justify-content: center; }
 .top-tabs button.active, nav button.active, .chapter-list button.active { border-color: #2f6f73; background: #e8f3f1; }
 nav { display: flex; flex-direction: column; gap: 6px; }
@@ -81,6 +81,12 @@ nav small { color: #5c6f7c; font-size: 11px; }
 .toolbar div { margin-right: auto; min-width: 260px; }
 .toolbar h1 { margin: 0; font-size: 22px; }
 .toolbar p { margin: 2px 0 0; color: #60717e; line-height: 1.4; }
+.stage-action-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border: 1px solid #d9e0e7; border-radius: 6px; background: #ffffff; }
+.stage-action-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.stage-status { min-height: 28px; display: inline-flex; align-items: center; padding: 0 8px; border-radius: 999px; color: #475569; background: #eef3f7; font-size: 12px; font-weight: 700; }
+.lock-badge { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 5px 8px; border-radius: 999px; color: #7c2d12; background: #fff7ed; border: 1px solid #fed7aa; font-size: 12px; line-height: 1.3; }
+.chapter-outline-layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 14px; min-height: 560px; }
+.volume-list button { grid-template-columns: 1fr; }
 .instruction { width: 100%; padding: 10px; }
 .editor { width: 100%; flex: 1; min-height: 560px; padding: 14px; line-height: 1.55; resize: none; }
 .loading { padding: 18px; border: 1px solid #d9e0e7; border-radius: 6px; background: #ffffff; color: #516170; }
@@ -139,5 +145,5 @@ pre { white-space: pre-wrap; background: #eef3f7; border-radius: 6px; padding: 8
   .app { height: auto; overflow: visible; }
   .sidebar, .right { border: 0; overflow: visible; }
   .editor { min-height: 420px; }
-  .issues-grid, .chapter-layout, .form-grid, .outline-repair-row { grid-template-columns: 1fr; }
+  .issues-grid, .chapter-layout, .chapter-outline-layout, .form-grid, .outline-repair-row { grid-template-columns: 1fr; }
 }

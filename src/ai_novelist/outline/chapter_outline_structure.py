@@ -285,6 +285,25 @@ def extract_chapter_outline_memory(text: str, max_items: int = 28, max_chars: in
     return [fallback] if fallback else []
 
 
+def extract_chapter_outline_volume(text: str, volume_index: int) -> str:
+    content = str(text or "").strip()
+    if not content or volume_index < 1:
+        return ""
+    headings = list(
+        re.finditer(
+            r"^\s*#{2,6}\s*第\s*(?P<num>[一二两三四五六七八九十\d]+)\s*卷[^\n]*$",
+            content,
+            re.MULTILINE,
+        )
+    )
+    for position, match in enumerate(headings):
+        if chinese_number_to_int(match.group("num")) != volume_index:
+            continue
+        end = headings[position + 1].start() if position + 1 < len(headings) else len(content)
+        return content[match.start() : end].strip()
+    return ""
+
+
 def extract_chapter_outline_slice(text: str, chapter: int) -> str:
     content = str(text or "").strip()
     if not content or chapter < 1:
