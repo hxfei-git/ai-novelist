@@ -2376,3 +2376,10 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - 脚本会 source `~/.bashrc`，因此可复用其中已有的 `DEEPSEEK_API_KEY`；默认用 DeepSeek 启动本地 `127.0.0.1:8000`，由 Nginx 继续代理 `https://www.snowbell.asia/`。
 - `run/` 存放 PID 和日志并已加入 `.gitignore`。
 - 验证：`scripts/run_web.sh start` 成功；`scripts/run_web.sh status` 显示运行中；`https://www.snowbell.asia/` 返回 200 OK。
+
+### 2026-05-27 Web 大纲阶段操作防重复提交
+
+- 根因：`runStage()` 只在读取阶段内容时禁用按钮，流式生成/锁定请求运行期间没有防重入；双击“生成/修订”会启动两条 SSE 请求并各自写入右侧进度日志。
+- 修复：前端新增 `stageRunningRef` 作为同步锁，重复点击在同一请求结束前被忽略；同时用 `stageRunning` 禁用阶段动作按钮并显示“运行中”。
+- 回归测试：新增 `test_outline_stage_actions_guard_against_double_submit`，覆盖防重入 ref、运行状态和按钮禁用。
+- 验证：`PYTHONPATH=src .venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py::test_outline_stage_actions_guard_against_double_submit tests/test_frontend_review_tabs_structure.py` 6 passed；`npm run build`（`web/frontend`）通过。

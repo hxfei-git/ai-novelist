@@ -98,3 +98,16 @@ def test_right_progress_has_fixed_scroll_area() -> None:
     assert ".progress-log" in styles
     assert "overflow: auto" in styles
     assert "min-height: 0" in styles
+
+
+def test_outline_stage_actions_guard_against_double_submit() -> None:
+    source = read_main()
+
+    assert "const [stageRunning, setStageRunning] = useState(false)" in source
+    assert "const stageRunningRef = useRef(false)" in source
+    assert "if (stageRunningRef.current) return;" in source
+    assert "stageRunningRef.current = true" in source
+    assert "stageRunningRef.current = false" in source
+    assert "setStageRunning(true)" in source
+    assert "setStageRunning(false)" in source
+    assert "disabled={loadingStage || stageRunning}" in source

@@ -200,6 +200,7 @@ function App() {
   const [content, setContent] = useState('');
   const [instruction, setInstruction] = useState('');
   const [loadingStage, setLoadingStage] = useState(false);
+  const [stageRunning, setStageRunning] = useState(false);
   const [log, setLog] = useState<string[]>([]);
   const [chapterSelector, setChapterSelector] = useState('1-3');
   const [volume, setVolume] = useState(1);
@@ -218,6 +219,7 @@ function App() {
   const [selectedOutlineRepairIds, setSelectedOutlineRepairIds] = useState<Record<string, boolean>>({});
 
   const stageRequestRef = useRef(0);
+  const stageRunningRef = useRef(false);
   const chapterRequestRef = useRef(0);
   const current = useMemo(() => stages.find((item) => item.stage === activeStage), [stages, activeStage]);
   const visibleStages = useMemo(() => stages.filter((item) => item.stage !== 'review_lock'), [stages]);
@@ -299,13 +301,21 @@ function App() {
   }
 
   async function runStage(action: 'generate' | 'lock') {
-    await streamAction(
-      `/api/projects/${projectId}/outline/stages/${activeStage}/${action}`,
-      { instruction },
-      (line) => pushLog(line),
-    );
-    await refreshStages();
-    await loadStage(activeStage);
+    if (stageRunningRef.current) return;
+    stageRunningRef.current = true;
+    setStageRunning(true);
+    try {
+      await streamAction(
+        `/api/projects/${projectId}/outline/stages/${activeStage}/${action}`,
+        { instruction },
+        (line) => pushLog(line),
+      );
+      await refreshStages();
+      await loadStage(activeStage);
+    } finally {
+      stageRunningRef.current = false;
+      setStageRunning(false);
+    }
   }
 
   async function refreshChapters(selectLatest = false) {
@@ -487,9 +497,9 @@ function App() {
                   <h1>{stageLabel(current, activeStage)}</h1>
                   <p>{current?.status || 'not_generated'}</p>
                 </div>
-                <button onClick={saveStage} disabled={loadingStage}><Save size={16} />保存</button>
-                <button onClick={() => runStage('generate')} disabled={loadingStage}><RefreshCw size={16} />生成/修订</button>
-                <button onClick={() => runStage('lock')} disabled={loadingStage}><Lock size={16} />锁定</button>
+                <button onClick={saveStage} disabled={loadingStage || stageRunning}><Save size={16} />保存</button>
+                <button onClick={() => runStage('generate')} disabled={loadingStage || stageRunning}><RefreshCw size={16} />{stageRunning ? '运行中' : '生成/修订'}</button>
+                <button onClick={() => runStage('lock')} disabled={loadingStage || stageRunning}><Lock size={16} />锁定</button>
               </header>
               <input className="instruction" value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder="当前大纲阶段生成/修订说明" />
               {loadingStage ? <div className="loading">正在读取 {stageLabel(current, activeStage)}...</div> : <textarea className="editor" value={content} onChange={(event) => setContent(event.target.value)} />}

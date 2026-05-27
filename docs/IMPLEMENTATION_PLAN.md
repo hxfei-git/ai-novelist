@@ -2604,3 +2604,17 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - `curl --noproxy '*' -sS -I https://www.snowbell.asia/`：200 OK。
 
 说明：服务器重启后需要重新运行 `scripts/run_web.sh start`，除非后续另行接入 cron、rc.local 或进程管理器。
+
+## 2026-05-27 Web 大纲阶段操作防重复提交
+
+目标：修复用户在大纲阶段“生成/修订”按钮上连续点击两次时，前端同时发起两路生成请求，导致右侧进度日志重复出现的问题。
+
+已完成：
+- Web 前端新增 `stageRunningRef` 同步防重入锁，`runStage()` 在已有阶段生成/锁定请求运行时直接忽略后续点击。
+- 新增 `stageRunning` UI 状态，阶段动作运行期间禁用 `保存 / 生成/修订 / 锁定`，避免用户在同一阶段请求未结束时提交并发操作。
+- `生成/修订` 按钮运行期间显示“运行中”，让长耗时 SSE 请求有明确状态反馈。
+- 增加前端结构回归测试，覆盖阶段动作防重复提交所需的 ref 锁、状态切换和按钮禁用。
+
+验证：
+- `PYTHONPATH=src .venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py::test_outline_stage_actions_guard_against_double_submit tests/test_frontend_review_tabs_structure.py`：6 passed。
+- `npm run build`（`web/frontend`）：通过。
