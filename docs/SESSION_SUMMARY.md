@@ -129,6 +129,10 @@ Completed implementation commits before this final verification record:
 - P2 structural refactor is planned in `docs/superpowers/plans/2026-05-28-web-structural-refactor.md`.
 - No P1/P2 runtime code has been changed after the cleanup verification record yet.
 
+## P1 Verified Prune Progress
+
+- Confirmed local `__pycache__` directories are not tracked by Git; no repository deletion is needed.
+
 ## Remaining Risk
 
 No code deletion has been approved yet. The main remaining risk is stale compatibility code that appears unused but may still be reached through dynamic prompt names, old project state, or retained Web workflow helpers.
