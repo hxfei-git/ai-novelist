@@ -40,6 +40,7 @@ from ai_novelist.outline.chapter_outline_structure import (
 from ai_novelist.outline.stage_contracts import OUTLINE_STAGES, STAGE_LABELS
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore, LocalStoreError, summarize_text
+from ai_novelist.web.json_utils import parse_json_object
 
 ProgressFunc = Callable[[str, str], None]
 ProgressItem = str | dict[str, str]
@@ -1664,24 +1665,6 @@ def group_repair_suggestions_by_chapter(suggestions: list[dict[str, Any]]) -> li
     if grouped.get(None):
         ordered.append({"chapter": None, "items": grouped[None]})
     return ordered
-
-
-def parse_json_object(raw: str) -> dict[str, Any]:
-    text = str(raw or "").strip()
-    if not text:
-        return {}
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start < 0 or end <= start:
-            return {}
-        try:
-            parsed = json.loads(text[start : end + 1])
-        except json.JSONDecodeError:
-            return {}
-    return parsed if isinstance(parsed, dict) else {}
 
 
 def latest_global_review(store: LocalStore, project_id: str) -> dict[str, Any]:

@@ -36,6 +36,7 @@ Web service layer: src/ai_novelist/web/service.py
   |-- outline and chapter-outline review report persistence
   |-- volume chapter batch generation
   |-- global chapter review and repair application
+  |-- shared Web JSON parsing helpers in web/json_utils.py
   |
   v
 Workflow helpers
