@@ -162,6 +162,7 @@ Search and corpus settings still exist in configuration because some craft helpe
 - 2026-05-29: Added `workflow_payloads.py` helpers for high-risk `director_task_args` reads and writes; chapter workflow entry points and Web batch generation now use named payload helpers while preserving persisted payload keys.
 - 2026-05-29: Project and progress-log Web operations moved into `src/ai_novelist/web/project_service.py`; `web/service.py` re-exports the helpers as a compatibility facade while later outline, chapter, and review splits proceed.
 - 2026-05-29: Ordinary outline and chapter-outline Web actions moved into `src/ai_novelist/web/outline_actions.py` and `src/ai_novelist/web/chapter_outline_actions.py`; `web/service.py` re-exports the action entry points as a compatibility facade.
+- 2026-05-29: Chapter batch/list/detail and global review/repair Web actions moved into `src/ai_novelist/web/chapter_actions.py` and `src/ai_novelist/web/review_actions.py`; `web/service.py` re-exports the action entry points as a compatibility facade.
 
 ### Phase 4b: Outline Web Action Split
 - Files changed: outline/chapter outline Web action modules, service facade, Web tests, docs.
@@ -170,6 +171,14 @@ Search and corpus settings still exist in configuration because some craft helpe
 - Remaining risk: chapter list/batch/review/repair actions still need extraction.
 - Next entry point: split chapter and review Web actions.
 - Continuation note: resume at Task 8; keep `web/service.py` as a compatibility facade until all route call sites are stable.
+
+### Phase 4c: Chapter and Review Web Action Split
+- Files changed: chapter/review Web action modules, service facade, Web tests, docs.
+- Behavior changed: chapter batch/list/detail and review/repair logic now live in focused modules while public route behavior remains stable.
+- Verification: `.venv/bin/python -m pytest tests/test_web_service.py tests/test_web_chapter_service.py tests/test_web_app.py -q`; `wc -l` confirms `web/service.py` shrinkage.
+- Remaining risk: FastAPI routes still call through the facade in places where direct module imports can be cleaned later.
+- Next entry point: split outline graph helpers.
+- Continuation note: resume at Task 9; keep route behavior unchanged and avoid deleting facade exports until final full tests pass.
 
 ## Verification Policy
 

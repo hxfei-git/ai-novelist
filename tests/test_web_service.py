@@ -8,7 +8,7 @@ from pathlib import Path
 
 from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError, AgentCallOptions
 from ai_novelist.storage.local_store import LocalStore, LocalStoreError
-from ai_novelist.web import chapter_outline_actions, outline_actions, service
+from ai_novelist.web import chapter_actions, chapter_outline_actions, outline_actions, service
 
 
 def patch_run_outline_stage_node(monkeypatch, replacement) -> None:
@@ -115,6 +115,30 @@ def test_outline_action_modules_export_web_entry_points() -> None:
         "latest_chapter_outline_review_report",
     ]:
         assert hasattr(chapter_outline_actions, name)
+
+
+def test_chapter_and_review_action_modules_export_web_entry_points() -> None:
+    from ai_novelist.web import chapter_actions, review_actions
+
+    for name in [
+        "generate_chapter_batch",
+        "chapter_batch_workspace_payload",
+        "list_chapters",
+        "load_chapter_payload",
+        "latest_chapter_path",
+        "load_latest_chapter_text",
+    ]:
+        assert hasattr(chapter_actions, name)
+
+    for name in [
+        "review_all_chapters",
+        "latest_global_review",
+        "generate_repair_proposals",
+        "apply_repair",
+        "build_repair_suggestions",
+        "normalize_global_review_output",
+    ]:
+        assert hasattr(review_actions, name)
 
 
 def test_project_and_outline_stage_file_roundtrip(tmp_path: Path) -> None:
@@ -628,7 +652,7 @@ def test_generate_chapter_batch_uses_requested_count_and_first_missing_chapter(m
             captured.update(data["director_task_args"])
             return data
 
-    monkeypatch.setattr(service, "build_volume_write_graph", lambda adapter, store, progress=None: FakeGraph())
+    monkeypatch.setattr(chapter_actions, "build_volume_write_graph", lambda adapter, store, progress=None: FakeGraph())
 
     service.generate_chapter_batch(store, DummyAdapter(), "web-demo", volume=2, requested_count=50)
 
@@ -1432,7 +1456,7 @@ def test_chapter_batch_payload_sets_director_task_args(monkeypatch, tmp_path: Pa
             captured.update(data["director_task_args"])
             return data
 
-    monkeypatch.setattr(service, "build_volume_write_graph", lambda adapter, store, progress=None: FakeGraph())
+    monkeypatch.setattr(chapter_actions, "build_volume_write_graph", lambda adapter, store, progress=None: FakeGraph())
 
     service.generate_chapter_batch(store, DummyAdapter(), "web-demo", volume=2, chapters="1-3", max_workers=4)
 

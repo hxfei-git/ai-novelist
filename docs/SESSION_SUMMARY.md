@@ -235,6 +235,14 @@ Completed implementation commits before this final verification record:
 - Next entry point: split chapter and review Web actions.
 - Continuation note: resume at Task 8; keep `web/service.py` as a compatibility facade until all route call sites are stable.
 
+### Phase 4c: Chapter and Review Web Action Split
+- Files changed: chapter/review Web action modules, service facade, Web tests, docs.
+- Behavior changed: chapter batch/list/detail and review/repair logic now live in focused modules while public route behavior remains stable.
+- Verification: `.venv/bin/python -m pytest tests/test_web_service.py tests/test_web_chapter_service.py tests/test_web_app.py -q`; `wc -l` confirms `web/service.py` shrinkage.
+- Remaining risk: FastAPI routes still call through the facade in places where direct module imports can be cleaned later.
+- Next entry point: split outline graph helpers.
+- Continuation note: resume at Task 9; keep route behavior unchanged and avoid deleting facade exports until final full tests pass.
+
 ## Remaining Risk
 
 One verified dead module has been removed. The main remaining risk is stale compatibility code that appears unused but may still be reached through dynamic prompt names, old project state, or retained Web workflow helpers.
