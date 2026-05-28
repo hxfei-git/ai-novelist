@@ -28,7 +28,8 @@ Statuses:
 | --- | --- | --- | --- |
 | `src/ai_novelist/cli.py` | actual CLI exposes only `web` | retain | keep as thin Web command entrypoint |
 | `src/ai_novelist/web/app.py` | FastAPI routes and adapter selection for Web | retain | split only in P2 refactor |
-| `src/ai_novelist/web/service.py` | retained Web workflows call this layer; outline helpers now live in `web/outline_service.py` | retain | continue P2 splitting for chapter helpers and orchestration boundaries |
+| `src/ai_novelist/web/service.py` | retained Web workflows call this layer; outline helpers live in `web/outline_service.py`; chapter review helpers live in `web/chapter_service.py` | retain | continue P2 splitting for remaining orchestration boundaries |
+| `src/ai_novelist/web/chapter_service.py` | extracted chapter-outline review source and global review prompt helpers | retain | keep chapter review helper behavior outside the central Web service module |
 | `src/ai_novelist/web/outline_service.py` | extracted outline stage, pending-question, review, and payload helpers | retain | keep outline helper behavior outside the central Web service module |
 | `src/ai_novelist/graph_outline.py` | Web outline stage and review functions import from it | retain | prune internals only after route-level tests |
 | `src/ai_novelist/graph_volume_write.py` | Web chapter batch generation uses it | retain | keep while chapter body workspace exists |

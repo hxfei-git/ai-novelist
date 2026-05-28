@@ -31,6 +31,7 @@ FastAPI app: src/ai_novelist/web/app.py
   v
 Web service layer: src/ai_novelist/web/service.py
   |-- delegates outline helper behavior to src/ai_novelist/web/outline_service.py
+  |-- delegates chapter review prompt/source helpers to src/ai_novelist/web/chapter_service.py
   |-- LocalStore-backed project operations
   |-- outline stage payloads and pending-question submission
   |-- explicit outline stage generate/revise/lock calls

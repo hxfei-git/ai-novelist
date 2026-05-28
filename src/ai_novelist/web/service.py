@@ -41,6 +41,10 @@ from ai_novelist.outline.stage_contracts import OUTLINE_STAGES, STAGE_LABELS
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore, LocalStoreError, summarize_text
 from ai_novelist.web.json_utils import parse_json_object
+from ai_novelist.web.chapter_service import (
+    build_global_review_prompt,
+    chapter_outline_review_source_text,
+)
 from ai_novelist.web.outline_service import (
     action_state_for_status,
     build_outline_repair_suggestions,
@@ -484,14 +488,6 @@ def apply_outline_review(
         "updated_stages": updated_stages,
         "skipped_stages": skipped_stages,
     }
-
-
-def chapter_outline_review_source_text(state: NovelState, store: LocalStore) -> str:
-    artifact = dict(state.outline_stage_artifacts.get('chapter_outline') or {})
-    text = load_stage_markdown(store, state, 'chapter_outline', artifact).strip()
-    return text
-
-
 def review_chapter_outline(store: LocalStore, adapter: AgentAdapter, project_id: str, instruction: str = '', progress: ProgressFunc | None = None) -> dict[str, Any]:
     emit = progress or (lambda _stage, _message: None)
     state = store.load_state(project_id)
@@ -1032,34 +1028,6 @@ def local_chapter_review_issues(chapters: list[tuple[int, Path, str]]) -> list[d
         if right[0] != left[0] + 1:
             issues.append({"severity": "normal", "chapter": right[0], "category": "chapter_gap", "message": f"第 {left[0]} 章后直接跳到第 {right[0]} 章。"})
     return issues
-
-
-def build_global_review_prompt(state: NovelState, store: LocalStore, chapters: list[tuple[int, Path, str]]) -> str:
-    outline = store.load_outline_artifact(state.project_id, "chapter_outline").strip()
-    parts = [
-        "AGENT: global_consistency_reviewer",
-        f"PROJECT_ID: {state.project_id}",
-        f"TITLE: {state.title}",
-        "",
-        "请审查已生成章节之间的连续性、设定一致性、人物状态、时间线、重复/断裂问题。",
-        "只输出 JSON，不要 Markdown，不要解释。",
-        "schema: {status, summary, issues, repair_suggestions}",
-        "status 只能是 reviewed 或 needs_repair。",
-        "issues 每项 schema: {severity, chapter, category, message}。",
-        "repair_suggestions 每项 schema: {id, chapter, severity, category, message, recommendation, selected}。",
-        "severity 只能是 serious 或 normal；chapter 可为章节号或 null。",
-        "serious 用于时间线硬冲突、同一事件重复/覆盖、人物状态矛盾、关键设定冲突、章节正文不完整。",
-        "normal 用于轻微衔接、命名不统一、可读性提示。",
-        "",
-        "## Chapter Outline",
-        outline[:12000] or "暂无",
-    ]
-    for chapter, path, content in chapters:
-        relative = path.relative_to(store.project_dir(state.project_id)).as_posix()
-        parts.extend(["", f"## Chapter {chapter} ({relative})", content[:18000]])
-    return "\n".join(parts).rstrip() + "\n"
-
-
 def normalize_global_review_output(output: str) -> dict[str, Any]:
     data = parse_json_object(output)
     issues = []
