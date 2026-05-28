@@ -36,7 +36,7 @@ Statuses:
 | `src/ai_novelist/graph_bible.py` | outline graph imports bible helpers | retain | verify old-project compatibility before pruning |
 | `src/ai_novelist/state.py` Director/research fields | fields load and save through project `state.json` | candidate | remove only with backward-compatible loader behavior |
 | `src/ai_novelist/output_contracts.py` | full search found direct references only from `tests/test_output_contracts.py`; both files removed | removed | no retained workflow imported it after verification |
-| `src/ai_novelist/corpus/project_memory.py` | audit found direct references only from tests | candidate | delete only if craft retrieval no longer needs project memory artifacts |
+| `src/ai_novelist/corpus/project_memory.py` | craft resolver, query planner, retriever, and tests still use project craft memory artifacts | retain | keep until a replacement project-memory writer is implemented for the Author Craft path |
 | `src/ai_novelist/corpus/*` | some craft helpers are reachable through chapter and outline contexts | candidate | classify module-by-module with import and runtime checks |
 | `src/ai_novelist/prompts/*.md` | dynamic `load_prompt(prompt_name)` undercounts usage | candidate | remove only after tracing prompt_name values in graph code and tests |
 | `review_lock` stage compatibility | hidden from Web navigation but still present in state/contracts/helpers | compatibility-kept | remove only with old project fixture coverage |
