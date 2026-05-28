@@ -37,6 +37,38 @@ from ai_novelist.outline.stage_contracts import (
     get_stage_contract,
 )
 from ai_novelist.outline.stage_guard import guard_stage_output
+from ai_novelist.outline_graph.review_lock import (
+    extract_review_lock_issue_buckets,
+    filter_review_lock_issue_buckets_by_history,
+    review_lock_blocking_issues,
+    review_lock_blocking_message,
+    review_lock_detail_issues,
+    review_lock_issue_buckets_from_artifact,
+    review_lock_issue_lines,
+    review_lock_pending_question_text,
+)
+from ai_novelist.outline_graph.routing import (
+    OUTLINE_ACTIONS,
+    answers_stage_pending_questions,
+    delegates_stage_decision,
+    detect_stage_reference,
+    is_final_outline_save_request,
+    is_final_outline_view_request,
+    is_lock_request,
+    is_revision_request,
+    is_short_stage_confirmation,
+    is_stage_confirmation,
+    is_stage_switch_request,
+    is_stage_view_request,
+    negates_stage_advance,
+    next_outline_stage,
+    route_after_human_feedback,
+    route_after_outline_director,
+    should_defer_stage_confirmation_to_director,
+    should_run_outline_stage,
+    stage_action_from_director,
+    stage_number,
+)
 from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, with_agent_metadata
 from ai_novelist.prompts import load_prompt
 from ai_novelist.state import NovelState
@@ -48,22 +80,6 @@ class CompiledGraph(Protocol):
         """Invoke the graph with a dict state."""
 
 
-OUTLINE_ACTIONS = {
-    "ask_user",
-    "propose_directions",
-    "worldbuilding",
-    "generate_outline",
-    "review_outline",
-    "revise_outline",
-    "compare_versions",
-    "persist_outline",
-    "show_status",
-    "show_outline",
-    "run_outline_stage",
-    "advance_outline_stage",
-    "show_outline_stage",
-    "stop",
-}
 
 STAGE_ROLES = {
     "direction": ["类型定位 Agent", "主题卖点 Agent"],
@@ -746,11 +762,6 @@ def filter_stage_questions_by_history(artifact: object, questions: list[str]) ->
     return filtered
 
 
-def filter_review_lock_issue_buckets_by_history(artifact: object, issue_buckets: dict[str, list[str]]) -> dict[str, list[str]]:
-    return {
-        key: filter_stage_questions_by_history(artifact, list(issue_buckets.get(key) or []))
-        for key in ("blocking", "detail", "rework", "questions")
-    }
 
 
 def stage_question_fingerprint(question: str) -> str:
@@ -1136,80 +1147,6 @@ def show_outline_stage_node(data: dict, store: LocalStore) -> dict:
 
 
 
-def negates_stage_advance(text: str) -> bool:
-    return any(marker in text for marker in ("不要进入下一阶段", "不进入下一阶段", "先不进入下一阶段", "暂不进入下一阶段", "别进入下一阶段", "不要推进", "先不推进", "暂不推进"))
-
-
-def should_defer_stage_confirmation_to_director(text: str, state: NovelState) -> bool:
-    if state.active_workflow != "outline" or state.outline_stage_status != "options_ready":
-        return False
-    if parse_compact_numbered_answers(text):
-        return False
-    if any(marker in text for marker in ("查看", "展示", "看一下", "看下", "显示")):
-        return False
-    if negates_stage_advance(text):
-        return False
-    transition_markers = ("下一阶段", "进入下一阶段", "推进到下一阶段", "进入后续阶段", "推进后续阶段")
-    lock_and_continue = any(marker in text for marker in ("锁定当前阶段", "锁定本阶段", "通过当前阶段", "通过本阶段")) and any(marker in text for marker in ("继续", "进入", "推进", "下一阶段"))
-    delegated_advance = any(marker in text for marker in ("你决定", "由你决定", "交给你", "默认处理", "你来定")) and any(marker in text for marker in ("继续", "进入", "推进", "下一阶段"))
-    return any(marker in text for marker in transition_markers) or lock_and_continue or delegated_advance
-
-def should_run_outline_stage(text: str, state: NovelState) -> bool:
-    if state.active_workflow == "outline":
-        return True
-    markers = ("生成大纲", "写大纲", "大纲", "方向", "概念", "核心冲突", "反转", "世界观", "人物", "故事流程", "主线", "分卷", "章节", "审稿", "锁定", "卖点", "读者", "承诺", "主题", "基调", "篇幅", "一句话梗概")
-    return any(marker in text for marker in markers)
-
-
-def is_final_outline_view_request(text: str) -> bool:
-    lowered = text.strip().lower()
-    return lowered in {"show outline", "查看大纲", "当前大纲"} or any(marker in text for marker in ("查看大纲", "当前大纲", "看一下大纲", "展示大纲"))
-
-
-def is_final_outline_save_request(text: str) -> bool:
-    lowered = text.strip().lower()
-    return lowered in {"approve", "save outline", "保存大纲", "确认大纲"} or any(marker in text for marker in ("保存大纲", "确认大纲", "写入大纲"))
-
-
-def is_lock_request(text: str) -> bool:
-    return any(marker in text for marker in ("这个设定别改", "别改", "不要改", "保留"))
-
-
-def is_stage_confirmation(text: str) -> bool:
-    lowered = text.strip().lower()
-    exact = {"确认", "确定", "继续", "下一阶段", "进入下一阶段", "确认进入下一阶段", "确定进入下一阶段", "锁定", "锁定当前阶段", "通过", "认可", "同意", "ok", "yes", "approve", "confirm"}
-    if lowered in exact:
-        return True
-    return any(marker in text for marker in ("确认进入下一阶段", "确定进入下一阶段", "锁定并进入", "进入下一阶段", "推进到下一阶段"))
-
-
-
-def is_short_stage_confirmation(text: str) -> bool:
-    lowered = text.strip().lower()
-    return lowered in {
-        "下一阶段",
-        "进入下一阶段",
-        "确认进入下一阶段",
-        "确定进入下一阶段",
-        "推进到下一阶段",
-        "advance",
-    }
-
-
-def delegates_stage_decision(text: str) -> bool:
-    markers = ("你决定", "由你决定", "交给你", "系统决定", "系统裁量", "按你建议", "按系统建议", "按当前建议", "默认处理", "你来定", "你看着办")
-    wants_advance = any(marker in text for marker in ("下一阶段", "进入", "推进", "继续", "锁定", "确定"))
-    return any(marker in text for marker in markers) and wants_advance
-
-
-def answers_stage_pending_questions(text: str) -> bool:
-    if is_short_stage_confirmation(text) or delegates_stage_decision(text):
-        return False
-    if parse_compact_numbered_answers(text):
-        return True
-    if re.search(r"(^|[\s，,；;])\d+[.、)]", text):
-        return True
-    return any(marker in text for marker in ("回答", "补充", "选择", "选", "采用", "接受", "接收", "同意", "设为", "改成"))
 
 
 def build_stage_pending_answer_instruction(state: NovelState, text: str) -> str:
@@ -1241,63 +1178,6 @@ def build_stage_default_discretion_summary(state: NovelState, text: str) -> str:
         return f"用户将待确认问题交由模型按当前阶段产物逐项回答并推进；待裁量问题：{'；'.join(questions[:10])}；用户原话：{text}"
     return f"用户认可当前阶段产物，并将细节交由系统按当前建议由模型回答后推进；用户原话：{text}"
 
-def is_revision_request(text: str) -> bool:
-    return any(marker in text for marker in ("修改", "调整", "重做", "重新", "不要", "更", "太", "强化", "补充"))
-
-
-def is_stage_view_request(text: str) -> bool:
-    return any(marker in text for marker in ("查看", "看一下", "展示", "显示"))
-
-
-def is_stage_switch_request(text: str) -> bool:
-    return any(marker in text for marker in ("回到", "重做", "重新做", "切换到")) or is_revision_request(text)
-
-
-def detect_stage_reference(text: str) -> str | None:
-    mapping = [
-        ("direction", ("方向", "定位", "类型", "卖点", "故事概念", "概念", "一句话故事", "一句话梗概", "核心概念", "核心卖点", "目标读者", "故事承诺", "主题表达", "主角方向", "故事基调", "篇幅结构")),
-        ("worldbuilding", ("世界观", "设定", "规则")),
-        ("characters", ("人物", "人设", "关系", "反派", "势力")),
-        ("story_flow", ("故事流程", "流程", "主线", "节奏", "伏笔")),
-        ("volume_outline", ("分卷", "卷纲", "卷内", "卷间", "总大纲", "大纲草案", "草案")),
-        ("chapter_outline", ("章节大纲", "章节拆分", "章节钩子", "章节", "细纲")),
-        ("review_lock", ("审稿", "锁定", "终审")),
-    ]
-    for stage, markers in mapping:
-        if any(marker in text for marker in markers):
-            return stage
-    return None
-
-
-def stage_action_from_director(action: str, user_text: str, state: NovelState) -> str:
-    if action in {"propose_directions", "worldbuilding", "generate_outline", "review_outline", "revise_outline", "compare_versions"}:
-        if action == "worldbuilding":
-            state.outline_stage = "worldbuilding"
-        elif action == "review_outline":
-            state.outline_stage = "review_lock"
-        return "run_outline_stage"
-    if action == "persist_outline":
-        return "advance_outline_stage" if state.outline_stage != "done" else "persist_outline"
-    if action == "show_outline":
-        return "show_outline_stage" if state.active_workflow == "outline" and not state.outline.strip() else "show_outline"
-    if is_short_stage_confirmation(user_text) or delegates_stage_decision(user_text):
-        return "advance_outline_stage"
-    return action
-
-
-def stage_number(stage: str) -> int:
-    return OUTLINE_STAGES.index(stage) + 1 if stage in OUTLINE_STAGES else len(OUTLINE_STAGES)
-
-
-def next_outline_stage(stage: str) -> str | None:
-    if stage == "chapter_outline":
-        return None
-    if stage not in OUTLINE_STAGES:
-        return "direction"
-    index = OUTLINE_STAGES.index(stage)
-    if index + 1 >= len(OUTLINE_STAGES):
-        return None
-    return OUTLINE_STAGES[index + 1]
 
 
 def record_stage_history(state: NovelState, event: str, stage: str, user_text: str) -> None:
@@ -2334,95 +2214,6 @@ def sanitize_direction_stage_output(markdown: str, user_text: str = "") -> str:
     return render_direction_stage_markdown("\n".join(cleaned_lines))
 
 
-def extract_review_lock_issue_buckets(markdown: str) -> dict[str, list[str]]:
-    buckets: dict[str, list[str]] = {
-        "blocking": [],
-        "detail": [],
-        "rework": [],
-        "questions": [],
-    }
-    current: str | None = None
-    headings = {
-        "阻塞型结构问题": "blocking",
-        "结构阻塞问题": "blocking",
-        "非阻塞细节问题": "detail",
-        "细节问题": "detail",
-        "需要回改的阶段": "rework",
-        "回改阶段": "rework",
-        "仍需确认的问题": "questions",
-        "待确认问题": "questions",
-        "待确认的问题": "questions",
-    }
-    for raw_line in (markdown or "").splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        if line.startswith(("## ", "### ")):
-            title = line.lstrip("#").strip()
-            current = headings.get(title)
-            continue
-        if current is None:
-            continue
-        if line in {"暂无", "暂无。", "无", "无。"} or "暂无" in line:
-            continue
-        cleaned = re.sub(r"^[-*+•\s]*", "", line)
-        cleaned = re.sub(r"^\d+[.、)]\s*", "", cleaned).strip(" ：:-")
-        if cleaned and cleaned not in buckets[current]:
-            buckets[current].append(cleaned)
-    return {key: value[:10] for key, value in buckets.items()}
-
-
-def review_lock_blocking_issues(issue_buckets: dict[str, list[str]]) -> list[str]:
-    blocking = list(dict.fromkeys((issue_buckets.get("blocking") or []) + (issue_buckets.get("rework") or [])))
-    return blocking[:10]
-
-
-def review_lock_detail_issues(issue_buckets: dict[str, list[str]]) -> list[str]:
-    detail = list(dict.fromkeys((issue_buckets.get("detail") or []) + (issue_buckets.get("questions") or [])))
-    return detail[:10]
-
-
-def review_lock_issue_lines(issue_buckets: dict[str, list[str]]) -> list[str]:
-    combined = review_lock_blocking_issues(issue_buckets) + review_lock_detail_issues(issue_buckets)
-    return list(dict.fromkeys(item for item in combined if item))[:10]
-
-
-def review_lock_pending_question_text(issue_buckets: dict[str, list[str]]) -> str:
-    blocking = review_lock_blocking_issues(issue_buckets)
-    detail = review_lock_detail_issues(issue_buckets)
-    if blocking:
-        detail_note = f"，另有 {len(detail)} 项非阻塞细节问题" if detail else ""
-        return f"审稿锁定仍有 {len(blocking)} 项阻塞型结构问题{detail_note}；请先回改前序阶段，再确认是否锁定。"
-    if detail:
-        return f"审稿锁定剩余 {len(detail)} 项非阻塞细节问题；可以补齐后再锁定，或明确接受当前风险并进入章节卡。"
-    return "审稿锁定未发现阻塞型结构问题，可以确认锁定并进入章节卡。"
-
-
-def review_lock_blocking_message(issue_buckets: dict[str, list[str]]) -> str:
-    blocking = review_lock_blocking_issues(issue_buckets)
-    detail = review_lock_detail_issues(issue_buckets)
-    lines = ["审稿锁定暂不通过，需要先回改前序阶段。"]
-    if blocking:
-        lines.append("阻塞型结构问题：")
-        lines.extend(f"- {item}" for item in blocking)
-    if detail:
-        lines.append("非阻塞细节问题：")
-        lines.extend(f"- {item}" for item in detail)
-    lines.append("请先回改这些阶段，再重新进入审稿锁定。")
-    return "\n".join(lines)
-
-
-def review_lock_issue_buckets_from_artifact(artifact: dict) -> dict[str, list[str]]:
-    buckets = artifact.get("review_lock_issues")
-    if isinstance(buckets, dict):
-        normalized: dict[str, list[str]] = {"blocking": [], "detail": [], "rework": [], "questions": []}
-        for key in normalized:
-            value = buckets.get(key)
-            if isinstance(value, list):
-                normalized[key] = [str(item).strip() for item in value if str(item).strip()][:10]
-        return normalized
-    synthesis = str(artifact.get("synthesis") or "")
-    return extract_review_lock_issue_buckets(synthesis)
 
 
 def stage_ready_message(stage: str, questions: list[str] | None = None, artifact: dict | None = None) -> str:
@@ -2632,20 +2423,6 @@ def outline_show_status_node(data: dict, store: LocalStore) -> dict:
     return state.to_dict()
 
 
-def route_after_outline_director(data: dict) -> str:
-    action = data.get("director_action", "")
-    if action in OUTLINE_ACTIONS:
-        return action if action != "stop" else "end"
-    if action in {"plan_outline", "generate_outline"}:
-        return "generate_outline"
-    return "ask_user"
-
-
-def route_after_human_feedback(data: dict) -> str:
-    action = data.get("next_action", "end")
-    if action in {"persist_outline", "revise_outline", "propose_directions", "review_outline"}:
-        return action
-    return "end"
 
 
 def build_outline_director_prompt(state: NovelState) -> str:
