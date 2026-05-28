@@ -1,3 +1,8 @@
+from ai_novelist.outline_graph.artifact_io import summarize_stage_text
+from ai_novelist.outline_graph.prompts import (
+    outline_stage_boundary_prompt,
+    stage_continuity_requirement,
+)
 from ai_novelist.outline_graph.review_lock import (
     extract_review_lock_issue_buckets,
     review_lock_blocking_issues,
@@ -28,3 +33,15 @@ def test_routing_helpers_detect_lock_and_stage_reference() -> None:
     assert is_lock_request("锁定世界观并进入下一阶段")
     assert detect_stage_reference("请修订人物阶段") == "characters"
     assert next_outline_stage("characters") == "story_flow"
+
+
+def test_prompt_helpers_return_stage_specific_rules() -> None:
+    assert "完整小说世界大纲" in outline_stage_boundary_prompt("worldbuilding")
+    assert "世界观规则" in stage_continuity_requirement("characters")
+
+
+def test_artifact_io_summary_compacts_markdown() -> None:
+    text = "# 标题\n\n" + "内容" * 500
+    summary = summarize_stage_text(text, max_chars=30)
+    assert len(summary) <= 33
+    assert "\n" not in summary

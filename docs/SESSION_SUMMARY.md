@@ -251,6 +251,15 @@ Completed implementation commits before this final verification record:
 - Next entry point: extract prompt and repair helpers.
 - Continuation note: resume at Task 10; keep helper function names exported because tests and `graph_outline.py` import them directly.
 
+### Phase 5b: Outline Graph Prompt and Repair Split
+- Files changed: prompt, repair, artifact IO helper modules, `graph_outline.py`, tests, docs.
+- Behavior changed: prompt building, structure repair, and artifact formatting helpers moved out of `graph_outline.py` with route and graph entry points preserved.
+- Verification: `.venv/bin/python -m pytest tests/test_outline_graph_modules.py tests/test_web_outline_service.py tests/test_web_service.py -q` -> passed with 78 passed in 0.55s; `wc -l` confirms `graph_outline.py` shrinkage (`graph_outline.py` from baseline 2860 to 1714 lines; current module line counts: `prompts.py` 358, `repair.py` 415, `artifact_io.py` 315).
+- Remaining risk: additional graph-node extraction can continue later, but this phase removes the largest helper clusters.
+- Next entry point: frontend structural split.
+- Continuation note: resume at Task 11; do not move graph node functions until frontend and full verification are stable.
+- Implementation note: the initially requested prompt-helper test strings did not match existing production wording, so assertions were adjusted to the current stage-specific text while preserving production behavior.
+
 ## Remaining Risk
 
 One verified dead module has been removed. The main remaining risk is stale compatibility code that appears unused but may still be reached through dynamic prompt names, old project state, or retained Web workflow helpers.
