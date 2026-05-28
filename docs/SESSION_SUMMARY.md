@@ -123,11 +123,11 @@ Completed implementation commits before this final verification record:
 - `870b14f` rewrote `docs/SESSION_SUMMARY.md` from stale historical notes to the current Web-only summary.
 - `f33a34d` clarified completed cleanup work versus deferred future work in `docs/SESSION_SUMMARY.md`.
 
-## Deferred Work
+## Planned Follow-Up Work
 
-- verified deletion of state fields, prompts, modules, or tests
-- splitting large backend/frontend/test files
-- separating mock behavior from `CodexCLIAdapter`
+- P1 verified prune is planned in `docs/superpowers/plans/2026-05-28-web-only-verified-prune.md`.
+- P2 structural refactor is planned in `docs/superpowers/plans/2026-05-28-web-structural-refactor.md`.
+- No P1/P2 runtime code has been changed after the cleanup verification record yet.
 
 ## Remaining Risk
 
