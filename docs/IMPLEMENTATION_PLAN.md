@@ -30,6 +30,7 @@ FastAPI app: src/ai_novelist/web/app.py
   |
   v
 Web service layer: src/ai_novelist/web/service.py
+  |-- delegates outline helper behavior to src/ai_novelist/web/outline_service.py
   |-- LocalStore-backed project operations
   |-- outline stage payloads and pending-question submission
   |-- explicit outline stage generate/revise/lock calls
@@ -120,7 +121,7 @@ Search and corpus settings still exist in configuration because some craft helpe
 - `NovelState` retains fields from deleted flows and needs compatibility-aware trimming.
 - Large modules concentrate unrelated responsibilities:
   - `graph_outline.py`
-  - `web/service.py`
+  - `web/service.py`, reduced by moving outline helpers but still large
   - `web/frontend/src/main.tsx`
   - `adapters/mock_codex.py` as a large deterministic fixture isolated from the real adapter
   - `tests/test_web_service.py`
