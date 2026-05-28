@@ -193,6 +193,15 @@ CONTEXT_PROFILES = {
         include_reference="none",
         include_bible="summary",
     ),
+    "bible_update": ContextProfile(
+        name="bible_update",
+        purpose="bible_update",
+        max_chars=9000,
+        sections=("user_request", "task", "locked_constraints", "author_craft", "chapter_artifacts", "previous_chapter_summaries", "bible_digest"),
+        artifact_types=("review_lock", "final_chapter", "chapter_summary"),
+        include_reference="none",
+        include_bible="summary",
+    ),
 }
 
 PURPOSE_PROFILE_ALIASES = {
@@ -202,6 +211,7 @@ PURPOSE_PROFILE_ALIASES = {
     "drafting": "drafting",
     "outline_stage": "outline_role",
     "revision": "revision",
+    "bible_update": "bible_update",
 }
 
 
@@ -346,8 +356,9 @@ def render_profile_sections(sections: list[Section], profile: ContextProfile, ma
             )
         )
 
-    entries = fit_section_entries_to_limit(entries, max_chars)
+    entries, dropped_entries = fit_section_entries_to_limit(entries, max_chars)
     rendered_parts: list[Section] = [(entry.title, entry.included) for entry in entries]
+    source_entries = entries + dropped_entries
     sources = [
         ContextSource(
             section=entry.title,
@@ -358,7 +369,7 @@ def render_profile_sections(sections: list[Section], profile: ContextProfile, ma
             truncated=entry.truncated,
             digest=sha256_text(entry.original) if entry.original != "暂无" else None,
         )
-        for entry in entries
+        for entry in source_entries
     ]
     return render_sections(rendered_parts), sources
 
@@ -373,24 +384,15 @@ def truncate_content_to_budget(content: str, budget: int) -> tuple[str, bool]:
     return original[:prefix_budget].rstrip() + "\n" + TRUNCATION_MARKER, True
 
 
-def fit_section_entries_to_limit(entries: list[RenderEntry], max_chars: int) -> list[RenderEntry]:
-    fitted = [
-        RenderEntry(
-            section=entry.section,
-            title=entry.title,
-            original=entry.original,
-            included=entry.included,
-            truncated=entry.truncated,
-            protected=entry.protected,
-        )
-        for entry in entries
-    ]
+def fit_section_entries_to_limit(entries: list[RenderEntry], max_chars: int) -> tuple[list[RenderEntry], list[RenderEntry]]:
+    fitted = [copy_render_entry(entry) for entry in entries]
+    dropped: list[RenderEntry] = []
 
     def rendered_length() -> int:
         return len(render_sections([(entry.title, entry.included) for entry in fitted]))
 
     if rendered_length() <= max_chars:
-        return fitted
+        return fitted, dropped
 
     for index in range(len(fitted) - 1, -1, -1):
         if rendered_length() <= max_chars:
@@ -407,6 +409,7 @@ def fit_section_entries_to_limit(entries: list[RenderEntry], max_chars: int) -> 
             if len(previous_included) <= len(TRUNCATION_MARKER):
                 fitted[index].included = previous_included
                 fitted[index].truncated = previous_truncated
+        dropped.append(omitted_render_entry(fitted[index]))
         del fitted[index]
 
     while rendered_length() > max_chars:
@@ -427,7 +430,29 @@ def fit_section_entries_to_limit(entries: list[RenderEntry], max_chars: int) -> 
             included = TRUNCATION_MARKER
         entry.included = included
         entry.truncated = True
-    return fitted
+    return fitted, dropped
+
+
+def copy_render_entry(entry: RenderEntry) -> RenderEntry:
+    return RenderEntry(
+        section=entry.section,
+        title=entry.title,
+        original=entry.original,
+        included=entry.included,
+        truncated=entry.truncated,
+        protected=entry.protected,
+    )
+
+
+def omitted_render_entry(entry: RenderEntry) -> RenderEntry:
+    return RenderEntry(
+        section=entry.section,
+        title=entry.title,
+        original=entry.original,
+        included="",
+        truncated=True,
+        protected=entry.protected,
+    )
 
 
 def dedupe_sections_by_digest(sections: list[Section]) -> list[Section]:

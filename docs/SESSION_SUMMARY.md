@@ -182,7 +182,12 @@ Completed implementation commits before this final verification record:
 
 - Fixed context digest dedupe so protected sections (`用户当前请求`, `当前任务`, `锁定约束`) are always retained and their content suppresses duplicate unprotected sections.
 - Fixed final context cap handling so protected section headers remain present under tight budgets; unprotected overflow is dropped or reduced before protected content is truncated.
-- Verification: `.venv/bin/python -m pytest tests/test_context_builder.py -q` passed with 13 passed in 0.10s.
+
+#### Task 3 Final Quality Fix
+
+- Routed `bible_update` through a protected-aware context profile instead of the legacy truncation path.
+- Preserved dropped unprotected sections in context source metadata with `included_chars=0` and `truncated=True` so omitted content marks the bundle as truncated.
+- Verification: `.venv/bin/python -m pytest tests/test_context_builder.py -q` passed with 15 passed in 0.10s.
 
 ## Remaining Risk
 

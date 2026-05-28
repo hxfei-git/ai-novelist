@@ -204,6 +204,37 @@ def test_context_cap_keeps_protected_sections_with_long_earlier_protected_conten
     assert manifest_by_section["锁定约束"].included_chars == len(constraints_content.rstrip())
 
 
+def test_bible_update_context_uses_protected_renderer_under_cap(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.user_request = "很长圣经更新请求" * 300
+    state.locked_constraints = ["必须保留圣经约束"]
+
+    context = build_context(state, store, "bible_update", max_chars=260)
+
+    assert "## 用户当前请求" in context
+    assert "## 当前任务" in context
+    assert "## 锁定约束" in context
+    assert "bible_update" in context
+    assert "必须保留圣经约束" in context
+    assert "已截断" in context
+
+
+def test_context_bundle_marks_dropped_unprotected_sections_as_truncated(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.user_request = "短请求"
+    state.locked_constraints = ["短约束"]
+    state.current_chapter_card = "巨大章节卡" * 500
+
+    bundle = build_context_bundle(state, store, "drafting", chapter=1, max_chars=180)
+
+    assert "巨大章节卡" not in bundle.text
+    assert bundle.truncated is True
+    assert any(source.truncated or source.included_chars == 0 for source in bundle.sources)
+    assert any(source.section == "当前任务 Artifact: current_chapter_card" and source.included_chars == 0 for source in bundle.sources)
+
+
 def test_chapter_planning_context_uses_chapter_outline_slice(tmp_path):
     store = LocalStore(tmp_path)
     state = store.create_project("Demo", "demo")
