@@ -246,7 +246,7 @@ Completed implementation commits before this final verification record:
 ### Phase 5a: Outline Graph Routing and Review Lock Split
 - Files changed: `src/ai_novelist/outline_graph/routing.py`, `src/ai_novelist/outline_graph/review_lock.py`, `graph_outline.py`, tests, docs.
 - Behavior changed: routing and review-lock helpers moved out of the main outline graph without intended semantic changes.
-- Verification: `.venv/bin/python -m pytest tests/test_outline_graph_modules.py tests/test_web_outline_service.py tests/test_web_service.py::test_outline_stage_list_hides_review_lock -q`.
+- Verification: `.venv/bin/python -m pytest tests/test_outline_graph_modules.py tests/test_web_outline_service.py tests/test_web_service.py::test_outline_stage_list_hides_review_lock -q` passed with 4 passed in 0.15s.
 - Remaining risk: prompt builders and structure repair helpers still remain in `graph_outline.py`.
 - Next entry point: extract prompt and repair helpers.
 - Continuation note: resume at Task 10; keep helper function names exported because tests and `graph_outline.py` import them directly.
