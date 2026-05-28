@@ -245,7 +245,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 
-async function streamAction(path: string, body: unknown, onProgress: (event: ProgressEvent) => void): Promise<void> {
+async function streamAction(path: string, body: unknown, onProgress: (event: ProgressEvent) => void): Promise<unknown> {
   const res = await fetch(path, {
     method: 'POST',
     cache: 'no-store',
@@ -256,6 +256,7 @@ async function streamAction(path: string, body: unknown, onProgress: (event: Pro
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let donePayload: unknown;
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
@@ -277,10 +278,15 @@ async function streamAction(path: string, body: unknown, onProgress: (event: Pro
           throw new Error(data);
         }
       }
+      if (eventLine?.slice(7) === 'done') {
+        donePayload = JSON.parse(data);
+        continue;
+      }
       if (eventLine?.slice(7) !== 'progress') continue;
       onProgress(JSON.parse(data) as ProgressEvent);
     }
   }
+  return donePayload;
 }
 
 function App() {
@@ -638,7 +644,7 @@ function App() {
     setOutlineReviewApplying(true);
     pushLog({ label: '大纲审查应用', elapsed: '', tokens: '', context: '', status: 'started' });
     try {
-      await streamAction(
+      const applyResult = await streamAction(
         `/api/projects/${projectId}/outline/review/${outlineReview.run_id}/apply`,
         { decisions },
         (line) => pushLog(line),
@@ -646,8 +652,14 @@ function App() {
       await loadLatestOutlineReview();
       await loadProjectState();
       await refreshStages();
-      await loadStage(activeStage);
+      const updatedStages = Array.isArray((applyResult as { updated_stages?: unknown })?.updated_stages)
+        ? (applyResult as { updated_stages: unknown[] }).updated_stages.filter((stage): stage is string => typeof stage === 'string')
+        : [];
+      const targetStage = updatedStages.find((stage) => visibleStages.some((item) => item.stage === stage)) || activeStage;
+      setTopSection('outline');
+      setActiveStage(targetStage);
       setOutlineStageView('edit');
+      if (targetStage === activeStage) await loadStage(targetStage);
       pushLog({ label: '大纲审查应用', elapsed: '', tokens: '', context: '', status: 'completed' });
     } catch (error) {
       showError(error);

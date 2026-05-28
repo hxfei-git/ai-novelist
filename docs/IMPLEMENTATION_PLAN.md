@@ -2733,3 +2733,12 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - 修复：采纳成功后依次执行 `loadProjectState()`、`refreshStages()`、`loadStage(activeStage)`，并切回大纲编辑视图，让用户直接看到写回后的阶段内容。
 - 新增前端结构回归测试覆盖 apply 成功后的刷新链路。
 
+### 2026-05-28 大纲审查 pass 报告采纳修订
+
+目标：修复大纲总体审查报告判定为 `pass` 时，用户点击“采纳选中项”仍不产生可见修改的问题，并避免采纳后跳回错误阶段。
+
+- 根因一：`apply_outline_review()` 对 `decision == "pass"` 直接保存原始大纲，忽略了用户提交的 `decisions` / `selected_issue_ids`。
+- 修复一：只有没有逐项采纳输入时才走 `pass` 快捷保存；只要有用户决策输入，就进入 outline reviser 应用修订。
+- 根因二：前端采纳成功后固定刷新当前 `activeStage`，用户当前阶段若是 `volume_outline`，就会看起来跳回分卷大纲。
+- 修复二：`streamAction()` 返回 SSE `done` payload，前端按后端 `updated_stages` 选择实际被写回的阶段展示。
+

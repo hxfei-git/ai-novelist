@@ -860,6 +860,30 @@ def test_apply_outline_review_rejects_empty_custom_decision(tmp_path: Path) -> N
         )
 
 
+def test_apply_outline_review_pass_report_still_applies_user_decisions(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+    state.outline = "# 最终锁定总大纲\n\n## 章节大纲\n旧稿。"
+    store.save_state(state)
+    report = service.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
+    report["decision"] = "pass"
+    report["status"] = "approved"
+    service.write_outline_review_report(store, store.load_state("web-demo"), report)
+    suggestion = report["repair_suggestions"][0]
+    adapter = CapturingOutlineReviewAdapter()
+
+    service.apply_outline_review(
+        store,
+        adapter,
+        "web-demo",
+        report["run_id"],
+        decisions=[{"issue_id": suggestion["id"], "decision": "custom", "custom_answer": "按我的意见微调第一卷伏笔。"}],
+    )
+
+    assert "按我的意见微调第一卷伏笔。" in adapter.reviser_prompt
+    assert store.load_state("web-demo").outline == "# 最终锁定总大纲\n\n## 方向定位\n只采纳选中建议。"
+
+
 def test_submit_stage_pending_answers_can_return_another_round(monkeypatch, tmp_path: Path) -> None:
     store = LocalStore(tmp_path)
     state = store.create_project("Web Demo", "web-demo")

@@ -2496,3 +2496,11 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - 根因确认：日志显示 apply 接口返回 200，但前端此前只重新请求最新审查报告，没有刷新被写回的大纲内容。
 - 验证范围：新增前端结构回归测试、相关三栏审查测试、前端 build。
 
+## 2026-05-28 大纲审查 pass 报告采纳修订
+
+- 修复 `pass` 审查报告点击“采纳选中项”没有变化：现在只要带有逐项决策，后端就会进入修订器，而不是直接保存原稿。
+- 修复采纳后跳回分卷大纲：前端读取 apply 的 `updated_stages`，优先显示实际被写回的普通大纲阶段。
+- 锁定阶段不是阻止写回的主因；写回逻辑会保留 locked 状态但仍更新阶段文件。
+- 验证：`PYTHONPATH=src .venv/bin/python -m pytest tests/test_web_service.py::test_apply_outline_review_pass_report_still_applies_user_decisions tests/test_web_service.py::test_apply_outline_review_uses_recommended_custom_and_skip_decisions tests/test_web_service.py::test_apply_outline_review_rejects_empty_custom_decision tests/test_web_service.py::test_apply_outline_review_uses_only_selected_suggestions tests/test_web_service.py::test_outline_review_roundtrip_and_apply_updates_outline tests/test_frontend_review_tabs_structure.py::test_outline_review_apply_refreshes_updated_stage_after_success tests/test_frontend_review_tabs_structure.py::test_outline_review_uses_three_choice_decision_board -q`：7 passed。
+- `npm --prefix web/frontend run build`：通过。
+

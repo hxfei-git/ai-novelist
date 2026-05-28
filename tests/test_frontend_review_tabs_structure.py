@@ -163,13 +163,20 @@ def test_outline_review_uses_three_choice_decision_board() -> None:
     assert "selected_issue_ids" not in apply_block
 
 
-def test_outline_review_apply_refreshes_visible_outline_after_success() -> None:
+def test_outline_review_apply_refreshes_updated_stage_after_success() -> None:
     source = read_main()
+    stream_block = source[source.index("async function streamAction"):source.index("function App()")]
     apply_block = source[source.index("async function applyOutlineReview"):source.index("function dismissOutlineReview")]
 
-    assert "await loadProjectState()" in apply_block
-    assert "await refreshStages()" in apply_block
-    assert "await loadStage(activeStage)" in apply_block
+    assert "let donePayload" in stream_block
+    assert "eventLine?.slice(7) === 'done'" in stream_block
+    assert "return donePayload" in stream_block
+    assert "const applyResult = await streamAction" in apply_block
+    assert "updated_stages" in apply_block
+    assert "setTopSection('outline')" in apply_block
+    assert "setActiveStage(targetStage)" in apply_block
+    assert "targetStage === activeStage" in apply_block
+    assert "await loadStage(targetStage)" in apply_block
     assert "setOutlineStageView('edit')" in apply_block
 
 

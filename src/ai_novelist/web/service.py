@@ -895,7 +895,7 @@ def apply_outline_review(
     decision = str(report.get("decision") or "").strip().lower()
     if decision == "stop":
         raise LocalStoreError("当前审查结果要求停止，不能直接应用")
-    if decision == "pass":
+    if decision == "pass" and selected_issue_ids is None and decisions is None:
         state.outline = source_outline
         state.review_status = "approved"
         state.editor_decision = "pass"
