@@ -131,6 +131,7 @@ function App() {
   const [volume, setVolume] = useState(1);
   const [requestedChapterCount, setRequestedChapterCount] = useState(3);
   const [chapterBatchWorkspace, setChapterBatchWorkspace] = useState<ChapterBatchWorkspace | null>(null);
+  const [chapterBatchRunning, setChapterBatchRunning] = useState(false);
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [selectedChapter, setSelectedChapter] = useState<number | null>(null);
   const [chapterDetail, setChapterDetail] = useState<Chapter | null>(null);
@@ -241,12 +242,16 @@ function App() {
     setLog(Array.isArray(payload.items) ? payload.items : []);
   }
 
-  async function saveProjectProgressLog(items: ProgressItem[]) {
-    if (!projectId) return;
-    await api<{ items: ProgressItem[] }>(`/api/projects/${projectId}/progress-log`, {
+  async function saveProjectProgressLogForProject(targetProjectId: string, items: ProgressItem[]) {
+    if (!targetProjectId) return;
+    await api<{ items: ProgressItem[] }>(`/api/projects/${targetProjectId}/progress-log`, {
       method: 'PUT',
       body: JSON.stringify({ items }),
     });
+  }
+
+  async function saveProjectProgressLog(items: ProgressItem[]) {
+    await saveProjectProgressLogForProject(projectId, items);
   }
 
   async function refreshProjects() {
@@ -261,7 +266,7 @@ function App() {
     setProjectState(state);
     setOnboardingIdea(state.idea || '');
     setLog([]);
-    await saveProjectProgressLog([]);
+    await saveProjectProgressLogForProject(state.project_id, []);
     await refreshProjects();
   }
 
@@ -389,25 +394,36 @@ function App() {
     const token = ++chapterRequestRef.current;
     setLoadingChapter(true);
     setChapterDetail(null);
-    const item = await api<Chapter>(`/api/projects/${projectId}/chapters/${chapter}`);
-    if (token !== chapterRequestRef.current || chapter !== selectedChapter) return;
-    setChapterDetail(item);
-    setLoadingChapter(false);
+    try {
+      const item = await api<Chapter>(`/api/projects/${projectId}/chapters/${chapter}`);
+      if (token !== chapterRequestRef.current || chapter !== selectedChapter) return;
+      setChapterDetail(item);
+    } finally {
+      if (token === chapterRequestRef.current && chapter === selectedChapter) setLoadingChapter(false);
+    }
   }
 
   async function generateBatch() {
+    if (chapterBatchRunning) return;
     const remainingChapters = chapterBatchWorkspace?.remaining_chapters ?? 0;
     const requestedCount = Math.max(1, Number(requestedChapterCount) || 1);
     const actualCount = Math.min(requestedCount, remainingChapters);
     if (actualCount < 1) return;
-    pushLog({ label: '章节批量生成', elapsed: '', tokens: '', context: '', status: 'started' });
-    await streamAction(
-      `/api/projects/${projectId}/chapters/generate-batch`,
-      { volume, requested_count: actualCount },
-      (line) => pushLog(line),
-    );
-    await refreshChapters(true, volume);
-    pushLog({ label: '章节批量生成', elapsed: '', tokens: '', context: '', status: 'completed' });
+    setChapterBatchRunning(true);
+    try {
+      pushLog({ label: '章节批量生成', elapsed: '', tokens: '', context: '', status: 'started' });
+      await streamAction(
+        `/api/projects/${projectId}/chapters/generate-batch`,
+        { volume, requested_count: actualCount },
+        (line) => pushLog(line),
+      );
+      await refreshChapters(true, volume);
+      pushLog({ label: '章节批量生成', elapsed: '', tokens: '', context: '', status: 'completed' });
+    } catch (error) {
+      showError(error);
+    } finally {
+      setChapterBatchRunning(false);
+    }
   }
 
   async function loadLatestReview() {
@@ -867,7 +883,7 @@ function App() {
               </div>
               <div className="form-grid batch-form">
                 <label>生成数量<input type="number" min={1} max={Math.max(1, chapterBatchWorkspace?.remaining_chapters ?? 1)} value={requestedChapterCount} onChange={(e) => setRequestedChapterCount(Number(e.target.value))} /></label>
-                <button onClick={generateBatch} disabled={(chapterBatchWorkspace?.remaining_chapters ?? 0) < 1}><Play size={16} />生成章节</button>
+                <button onClick={generateBatch} disabled={chapterBatchRunning || (chapterBatchWorkspace?.remaining_chapters ?? 0) < 1}><Play size={16} />{chapterBatchRunning ? '生成中' : '生成章节'}</button>
               </div>
               {chapterBatchWorkspace?.next_chapter_number ? <p className="empty">下一章：第 {chapterBatchWorkspace.next_chapter_number} 章</p> : <p className="empty">当前卷没有剩余章节可生成。</p>}
             </>

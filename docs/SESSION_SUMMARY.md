@@ -1,6 +1,6 @@
 # Session Summary
 
-Updated: 2026-05-28
+Updated: 2026-05-29
 Project path: `/home/ubuntu/1.project/ai-novelist`
 
 ## Current Goal
@@ -148,6 +148,17 @@ Completed implementation commits before this final verification record:
 - Extracted chapter review source/prompt helpers into `src/ai_novelist/web/chapter_service.py`; focused chapter/Web service tests passed: 71 passed in 0.47s; full pytest passed: 230 passed in 2.04s.
 - Extracted frontend shared types and fetch helpers into `web/frontend/src/types.ts` and `web/frontend/src/api.ts`; frontend build passed with the known Vite CJS Node API deprecation warning; frontend structure tests were updated for the split and passed: 21 passed in 0.11s.
 - Final P2 verification passed: full pytest 230 passed in 2.02s; frontend build passed with the known Vite CJS Node API deprecation warning. Hotspot sizes after refactor: `web/service.py` 1477 lines, `adapters/codex_cli.py` 106 lines, `web/frontend/src/main.tsx` 1294 lines, `tests/test_web_service.py` unchanged at 1491 lines.
+
+## Architecture Web Context Remediation Progress
+
+### Phase 1: Web Operation Logic
+
+- Files changed: `web/frontend/src/main.tsx`, `tests/test_frontend_review_tabs_structure.py`, `docs/IMPLEMENTATION_PLAN.md`, and `docs/SESSION_SUMMARY.md`.
+- Behavior changed: new project progress log writes target the newly created project id; chapter detail loading resets through a current-request `finally` guard; chapter batch generation has a running guard, disabled/running button state, error reporting, and `finally` cleanup.
+- Verification: selected RED regression run first failed as expected with 4 frontend source assertions failing; `.venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py -q` passed with 25 passed in 0.05s; `npm --prefix web/frontend run build` passed with the known Vite CJS Node API deprecation warning.
+- Remaining risk: browser-level click concurrency and request-race behavior is still represented by source-level assertions and TypeScript/build verification, not Playwright interaction coverage.
+- Next entry point: continue with SSE and Web route error behavior tests in Task 2.
+- Continuation note: resume at Task 2 in `docs/superpowers/plans/2026-05-29-architecture-web-context-remediation.md`; do not revisit Task 1 unless its focused tests fail.
 
 ## Remaining Risk
 

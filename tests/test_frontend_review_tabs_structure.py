@@ -159,6 +159,49 @@ def test_chapter_batch_panel_uses_volume_summary_and_single_quantity_input() -> 
     assert "并发数" not in batch_block
     assert "Math.min(requestedCount, remainingChapters)" in source
 
+
+def test_create_project_clears_progress_for_new_project_id() -> None:
+    source = read_main()
+    create_block = re.search(r"async function createProject\(\).*?\n  }", source, re.DOTALL)
+    assert create_block is not None
+    assert "async function saveProjectProgressLogForProject" in source
+    assert "await saveProjectProgressLogForProject(state.project_id, [])" in create_block.group(0)
+    assert "await saveProjectProgressLog([])" not in create_block.group(0)
+
+
+def test_chapter_batch_generation_has_running_guard_and_disabled_button() -> None:
+    source = read_main()
+    generate_block = re.search(r"async function generateBatch\(\).*?\n  }", source, re.DOTALL)
+    assert generate_block is not None
+    assert "const [chapterBatchRunning, setChapterBatchRunning] = useState(false)" in source
+    assert "if (chapterBatchRunning) return;" in generate_block.group(0)
+    assert "setChapterBatchRunning(true)" in generate_block.group(0)
+    assert "setChapterBatchRunning(false)" in generate_block.group(0)
+    assert "disabled={chapterBatchRunning || (chapterBatchWorkspace?.remaining_chapters ?? 0) < 1}" in source
+
+
+def test_chapter_detail_loading_resets_in_finally_for_current_request() -> None:
+    source = read_main()
+    load_block = re.search(r"async function loadChapter\(chapter: number\).*?\n  }", source, re.DOTALL)
+    assert load_block is not None
+    block = load_block.group(0)
+    assert "try {" in block
+    assert "finally {" in block
+    assert "if (token === chapterRequestRef.current && chapter === selectedChapter)" in block
+    assert "setLoadingChapter(false)" in block.split("finally", 1)[1]
+
+
+def test_chapter_batch_generation_reports_errors_and_releases_running_state() -> None:
+    source = read_main()
+    generate_block = re.search(r"async function generateBatch\(\).*?\n  }", source, re.DOTALL)
+    assert generate_block is not None
+    block = generate_block.group(0)
+    assert "try {" in block
+    assert "} catch (error) {" in block
+    assert "showError(error)" in block
+    assert "} finally {" in block
+
+
 def test_outline_review_uses_three_choice_decision_board() -> None:
     source = read_main()
     apply_block = source[source.index("async function applyOutlineReview"):source.index("function dismissOutlineReview")]

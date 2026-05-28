@@ -14,6 +14,8 @@ The historical chat, compose, feishu, research-only, export, finalize, and one-o
 
 ## Runtime Architecture
 
+- 2026-05-29: Web operation hardening started with explicit project-scoped progress log writes, chapter detail loading cleanup, and chapter batch running guards. Public API paths remain unchanged.
+
 ```text
 Browser
   |
