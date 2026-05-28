@@ -264,3 +264,21 @@ def test_chapter_planning_context_uses_chapter_outline_slice(tmp_path):
     assert "第二章专属内容" in context
     assert "第一章专属内容" not in context
     assert "第三章专属内容" not in context
+
+
+def test_direct_chapter_context_profile_uses_selected_outline_and_manifest(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.user_request = "写第 2 章"
+    state.active_chapter = 2
+    state.current_chapter = 2
+    state.director_task_args["selected_chapter_outline"] = "第 2 章专属大纲"
+    state.chapter_summaries = {"1": "第一章摘要", "2": "当前章摘要不应注入"}
+
+    bundle = build_context_bundle(state, store, "direct_chapter_drafting", chapter=2)
+    manifest = build_context_manifest(bundle)
+
+    assert "第 2 章专属大纲" in bundle.text
+    assert "第一章摘要" in bundle.text
+    assert "当前章摘要不应注入" not in bundle.text
+    assert any(item["section"] == "章节大纲切片" for item in manifest)

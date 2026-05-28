@@ -10,6 +10,7 @@ from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
 from ai_novelist.artifacts import ArtifactRecord, load_artifacts, register_artifact
 from ai_novelist.bible import load_bible, render_bible_markdown
 from ai_novelist.corpus.craft_resolver import resolve_author_craft
+from ai_novelist.context_builder import build_context_bundle, build_context_manifest
 from ai_novelist.corpus.similarity_guard import save_similarity_report_for_state
 from ai_novelist.graph_chapter_plan import collect_chapter_outline
 from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, run_with_progress, with_agent_metadata
@@ -94,7 +95,9 @@ def load_direct_write_context_node(data: dict, store: LocalStore) -> dict:
         chapter_outline = f"第 {state.active_chapter} 章：章节大纲缺失，按小说圣经、锁定约束和用户请求生成兼容草稿。"
     state.director_task_args["selected_chapter_outline"] = chapter_outline
     state = resolve_author_craft(state, store, "drafting", chapter=state.active_chapter)
-    context = build_direct_chapter_context(state, store)
+    bundle = build_context_bundle(state, store, "direct_chapter_drafting", chapter=state.active_chapter)
+    context = bundle.text
+    state.director_task_args["direct_chapter_context_manifest"] = build_context_manifest(bundle)
     state.director_task_args["direct_chapter_context"] = context
     state.last_context_digest = context[:1200]
     state.review_status = "draft"
@@ -190,16 +193,13 @@ def build_direct_chapter_prompt(state: NovelState, prompt_name: str) -> str:
     )
 
 
+def build_direct_chapter_context_bundle(state: NovelState, store: LocalStore, max_chars: int = 18000):
+    chapter = state.active_chapter or state.current_chapter
+    return build_context_bundle(state, store, "direct_chapter_drafting", chapter=chapter, max_chars=max_chars)
+
+
 def build_direct_chapter_context(state: NovelState, store: LocalStore, max_chars: int = 18000) -> str:
-    sections = [
-        ("用户当前请求", state.user_request or "暂无"),
-        ("锁定约束", "\n".join(f"- {item}" for item in state.locked_constraints) or "暂无"),
-        ("小说圣经", build_bible_text(state, store)),
-        ("章节大纲切片", str(state.director_task_args.get("selected_chapter_outline") or "暂无")),
-        ("前文摘要", build_previous_summaries(state)),
-        ("作者构思参考", build_author_craft_text(state, store)),
-    ]
-    return truncate_sections(sections, max_chars=max_chars)
+    return build_direct_chapter_context_bundle(state, store, max_chars=max_chars).text
 
 
 def build_bible_text(state: NovelState, store: LocalStore) -> str:

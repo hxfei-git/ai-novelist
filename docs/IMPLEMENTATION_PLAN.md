@@ -156,6 +156,7 @@ Search and corpus settings still exist in configuration because some craft helpe
 
 - 2026-05-29: Hardened SSE/Web error behavior by adding source-level guards that require streaming workspace actions to call `showError(error)` and release running flags in `finally`; added a Web app regression for service exceptions surfacing as SSE `event: error` payloads.
 - 2026-05-29: Context profiles now record source paths and suppress duplicate artifact/state fallback content by digest before rendering.
+- 2026-05-29: Direct chapter drafting now uses the shared `direct_chapter_drafting` `ContextBundle` profile and records a context manifest for direct and volume write paths.
 
 ## Verification Policy
 

@@ -189,6 +189,16 @@ Completed implementation commits before this final verification record:
 - Preserved dropped unprotected sections in context source metadata with `included_chars=0` and `truncated=True` so omitted content marks the bundle as truncated.
 - Verification: `.venv/bin/python -m pytest tests/test_context_builder.py -q` passed with 15 passed in 0.10s.
 
+
+### Phase 2b: Direct Chapter Context Migration
+
+- Files changed: context builder, direct chapter write graph, volume write graph tests, docs.
+- Behavior changed: direct chapter drafting uses the shared context profile and records a context manifest.
+- Verification: `.venv/bin/python -m pytest tests/test_context_builder.py tests/test_graph_volume_write.py -q` passed with 20 passed in 0.66s.
+- Remaining risk: other workflows still read some payload values directly from `director_task_args`.
+- Next entry point: introduce workflow payload helpers in Task 5.
+- Continuation note: resume at Task 5; direct drafting context should remain profile name `direct_chapter_drafting`.
+
 ## Remaining Risk
 
 One verified dead module has been removed. The main remaining risk is stale compatibility code that appears unused but may still be reached through dynamic prompt names, old project state, or retained Web workflow helpers.

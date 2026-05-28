@@ -166,6 +166,14 @@ CONTEXT_PROFILES = {
         include_reference="none",
         include_bible="summary",
     ),
+    "direct_chapter_drafting": ContextProfile(
+        name="direct_chapter_drafting",
+        purpose="drafting",
+        max_chars=18000,
+        sections=("user_request", "locked_constraints", "author_craft", "bible_digest", "chapter_outline_slice", "previous_chapter_summaries"),
+        include_reference="none",
+        include_bible="full",
+    ),
     "outline_role": ContextProfile(
         name="outline_role",
         purpose="outline_stage",
@@ -593,6 +601,9 @@ def build_artifact_section_records(
 
 def build_chapter_outline_slice_section(state: NovelState, store: LocalStore, chapter: int | None) -> str:
     selected = chapter or state.active_chapter or state.current_chapter or 1
+    selected_existing = str(state.director_task_args.get("selected_chapter_outline") or "").strip()
+    if selected_existing and selected_existing != "暂无":
+        return selected_existing
     project_dir = store.project_dir(state.project_id)
     record = get_latest_artifact(project_dir, "chapter_outline", chapter=selected)
     if record is None:

@@ -13,10 +13,11 @@ from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
 from ai_novelist.agent_parallel import AgentJob, run_agent_jobs
 from ai_novelist.artifacts import ArtifactRecord, load_artifacts, register_artifact
 from ai_novelist.corpus.craft_resolver import resolve_author_craft
+from ai_novelist.context_builder import build_context_manifest
 from ai_novelist.corpus.similarity_guard import save_similarity_report_for_state
 from ai_novelist.graph_chapter_write import (
     append_agent_report,
-    build_direct_chapter_context,
+    build_direct_chapter_context_bundle,
     collect_chapter_outline,
     normalize_markdown,
     summary_line,
@@ -158,6 +159,7 @@ def prepare_volume_batch_node(data: dict, store: LocalStore) -> dict:
         return state.to_dict()
 
     items: list[dict[str, Any]] = []
+    context_manifests: dict[str, list[dict[str, object]]] = {}
     for chapter in chapters:
         chapter_state = NovelState.from_dict(state.to_dict())
         chapter_state.active_chapter = chapter
@@ -165,12 +167,17 @@ def prepare_volume_batch_node(data: dict, store: LocalStore) -> dict:
         outline_slice = extract_chapter_outline_slice(full_outline, chapter)
         chapter_state.director_task_args["selected_chapter_outline"] = outline_slice
         chapter_state = resolve_author_craft(chapter_state, store, "drafting", chapter=chapter)
-        context = build_direct_chapter_context(chapter_state, store)
-        items.append({"chapter": chapter, "outline": outline_slice, "context": context})
+        bundle = build_direct_chapter_context_bundle(chapter_state, store)
+        context = bundle.text
+        context_manifest = build_context_manifest(bundle)
+        context_manifests[str(chapter)] = context_manifest
+        items.append({"chapter": chapter, "outline": outline_slice, "context": context, "context_manifest": context_manifest})
 
     state.director_task_args["volume"] = volume
     state.director_task_args["batch_run_id"] = str(run_id)
     state.director_task_args["batch_items"] = items
+    state.director_task_args["batch_context_manifests"] = context_manifests
+    state.director_task_args["direct_chapter_context_manifest"] = next(reversed(context_manifests.values()), [])
     state.active_graph = "volume_write"
     state.active_stage = "prepare"
     state.active_artifact = "volume_batch"

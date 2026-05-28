@@ -95,3 +95,20 @@ def test_volume_write_appends_new_draft_versions_on_rerun(tmp_path, monkeypatch)
     assert result.director_task_args["batch_latest_drafts"]["1"]["version"] == 4
     assert result.director_task_args["batch_latest_drafts"]["2"]["version"] == 4
 
+
+def test_volume_write_records_direct_context_manifest(tmp_path, monkeypatch):
+    monkeypatch.setenv("AI_NOVELIST_PARALLEL_AGENTS", "1")
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.director_task_args = {"volume": 1, "chapters": "1"}
+    state.outline_stage_artifacts["chapter_outline"] = {
+        "stage": "chapter_outline",
+        "synthesis": "#### 第 1 章：开局\n- 第一章专属大纲。",
+    }
+    store.save_state(state)
+
+    result = build_volume_write_graph(CodexCLIAdapter(mock=True), store).invoke(state.to_dict())
+
+    manifest = result["director_task_args"].get("direct_chapter_context_manifest")
+    assert isinstance(manifest, list)
+    assert any(item.get("section") == "章节大纲切片" for item in manifest)
