@@ -152,6 +152,10 @@ Search and corpus settings still exist in configuration because some craft helpe
 - keep mock model behavior separate from the real Codex adapter
 - split broad Web service tests by workflow area
 
+## Architecture Web Context Remediation Notes
+
+- 2026-05-29: Hardened SSE/Web error behavior by adding source-level guards that require streaming workspace actions to call `showError(error)` and release running flags in `finally`; added a Web app regression for service exceptions surfacing as SSE `event: error` payloads.
+
 ## Verification Policy
 
 Use the smallest relevant test set during implementation. Run full pytest when a change touches state, persistence, graph contracts, adapters, prompts, or shared workflow helpers.

@@ -202,6 +202,34 @@ def test_chapter_batch_generation_reports_errors_and_releases_running_state() ->
     assert "} finally {" in block
 
 
+def test_streaming_workspace_actions_report_errors() -> None:
+    source = read_main()
+    for function_name in [
+        "runStage",
+        "runChapterOutlineVolume",
+        "generateBatch",
+        "runOutlineReview",
+        "applyOutlineReview",
+        "runChapterOutlineReview",
+        "applyChapterOutlineReview",
+        "submitPendingQuestions",
+        "reviewAll",
+    ]:
+        block = re.search(rf"async function {function_name}\(.*?\n  }}", source, re.DOTALL)
+        assert block is not None, function_name
+        assert "} catch (error) {" in block.group(0), function_name
+        assert "showError(error)" in block.group(0), function_name
+
+
+def test_chapter_outline_volume_action_releases_running_flag_in_finally() -> None:
+    source = read_main()
+    block = re.search(r"async function runChapterOutlineVolume\(.*?\n  }", source, re.DOTALL)
+    assert block is not None
+    text = block.group(0)
+    assert "setChapterOutlineRunning(true)" in text
+    assert "setChapterOutlineRunning(false)" in text.split("finally", 1)[1]
+
+
 def test_outline_review_uses_three_choice_decision_board() -> None:
     source = read_main()
     apply_block = source[source.index("async function applyOutlineReview"):source.index("function dismissOutlineReview")]

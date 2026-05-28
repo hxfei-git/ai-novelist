@@ -160,6 +160,15 @@ Completed implementation commits before this final verification record:
 - Next entry point: continue with SSE and Web route error behavior tests in Task 2.
 - Continuation note: resume at Task 2 in `docs/superpowers/plans/2026-05-29-architecture-web-context-remediation.md`; do not revisit Task 1 unless its focused tests fail.
 
+### Phase 1b: SSE and Web Error Handling
+
+- Files changed: frontend action handlers, Web app tests, docs.
+- Behavior changed: streaming Web actions report errors consistently and release running flags through `finally`; SSE service failures are represented as `event: error`.
+- Verification: `.venv/bin/python -m pytest tests/test_web_app.py tests/test_frontend_review_tabs_structure.py -q`; `npm --prefix web/frontend run build`.
+- Remaining risk: source tests verify handler structure; browser event-loop behavior is still covered indirectly.
+- Next entry point: begin Task 3 context manifest and deduplication work.
+- Continuation note: resume with context builder tests in Task 3; Web operation guard changes are complete when both focused commands above pass.
+
 ## Remaining Risk
 
 One verified dead module has been removed. The main remaining risk is stale compatibility code that appears unused but may still be reached through dynamic prompt names, old project state, or retained Web workflow helpers.

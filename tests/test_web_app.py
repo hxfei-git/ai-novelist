@@ -147,6 +147,23 @@ def test_sse_progress_returns_metric_event_not_raw_message(monkeypatch, tmp_path
     assert '"message"' not in response.text
 
 
+def test_sse_route_returns_error_event_when_service_raises(monkeypatch, tmp_path) -> None:
+    client = TestClient(web_app.make_app(Settings(projects_dir=tmp_path), mock=True))
+    created = client.post("/api/projects", json={"title": "Web Demo", "project_id": "web-demo"})
+    assert created.status_code == 200
+
+    def fake_generate(store, adapter, project_id, stage, instruction="", progress=None):
+        raise web_app.service.LocalStoreError("阶段不可执行")
+
+    monkeypatch.setattr(web_app.service, "generate_outline_stage", fake_generate)
+
+    response = client.post("/api/projects/web-demo/outline/stages/worldbuilding/generate", json={})
+
+    assert response.status_code == 200
+    assert "event: error" in response.text
+    assert "阶段不可执行" in response.text
+
+
 def test_outline_stage_pending_api_returns_recommended_options(tmp_path) -> None:
     client = TestClient(web_app.make_app(Settings(projects_dir=tmp_path), mock=True))
     created = client.post("/api/projects", json={"title": "Web Demo", "project_id": "web-demo"})

@@ -65,6 +65,9 @@ def make_app(
     def as_http_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=400, detail=str(exc))
 
+    def sse_error_payload(exc: Exception) -> dict[str, str]:
+        return {"error": str(exc)}
+
     def sse_events(run):
         from queue import Queue
         from threading import Thread
@@ -78,7 +81,7 @@ def make_app(
             try:
                 queue.put(("done", run(progress)))
             except Exception as exc:
-                queue.put(("error", {"error": str(exc)}))
+                queue.put(("error", sse_error_payload(exc)))
 
         Thread(target=worker, daemon=True).start()
         while True:

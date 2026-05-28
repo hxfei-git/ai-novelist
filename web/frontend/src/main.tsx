@@ -335,6 +335,8 @@ function App() {
       setInstruction('');
       await refreshStages();
       await loadStage(activeStage);
+    } catch (error) {
+      showError(error);
     } finally {
       stageRunningRef.current = false;
       setStageRunning(false);
@@ -364,6 +366,8 @@ function App() {
         (line) => pushLog(line),
       );
       await loadChapterOutlineWorkspace(action === 'lock' ? undefined : volumeIndex);
+    } catch (error) {
+      showError(error);
     } finally {
       setChapterOutlineRunning(false);
     }
@@ -600,6 +604,8 @@ function App() {
       setReview(latest);
       setSelectedRepairIds(buildRepairSelectionMap(latest.repair_suggestions || []));
       pushLog({ label: '章节总体审查', elapsed: '', tokens: '', context: '', status: 'completed' });
+    } catch (error) {
+      showError(error);
     } finally {
       setReviewRunning(false);
     }
