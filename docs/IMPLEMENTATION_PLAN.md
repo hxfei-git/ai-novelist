@@ -175,7 +175,7 @@ Search and corpus settings still exist in configuration because some craft helpe
 ### Phase 4c: Chapter and Review Web Action Split
 - Files changed: chapter/review Web action modules, service facade, Web tests, docs.
 - Behavior changed: chapter batch/list/detail and review/repair logic now live in focused modules while public route behavior remains stable.
-- Verification: `.venv/bin/python -m pytest tests/test_web_service.py tests/test_web_chapter_service.py tests/test_web_app.py -q`; `wc -l` confirms `web/service.py` shrinkage.
+- Verification: `.venv/bin/python -m pytest tests/test_web_service.py tests/test_web_chapter_service.py tests/test_web_app.py -q` passed with 84 passed in 1.16s; line-count proof: parent `1645404^` `web/service.py` was 758 lines, current `wc -l` reports 136 `service.py`, 286 `chapter_actions.py`, 430 `review_actions.py`, 852 total.
 - Remaining risk: FastAPI routes still call through the facade in places where direct module imports can be cleaned later.
 - Next entry point: split outline graph helpers.
 - Continuation note: resume at Task 9; keep route behavior unchanged and avoid deleting facade exports until final full tests pass.
