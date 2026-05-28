@@ -181,7 +181,8 @@ Completed implementation commits before this final verification record:
 #### Task 3 Quality Fix
 
 - Fixed context digest dedupe so protected sections (`用户当前请求`, `当前任务`, `锁定约束`) are always retained and their content suppresses duplicate unprotected sections.
-- Verification: `.venv/bin/python -m pytest tests/test_context_builder.py -q` passed with 12 passed in 0.09s.
+- Fixed final context cap handling so protected section headers remain present under tight budgets; unprotected overflow is dropped or reduced before protected content is truncated.
+- Verification: `.venv/bin/python -m pytest tests/test_context_builder.py -q` passed with 13 passed in 0.10s.
 
 ## Remaining Risk
 

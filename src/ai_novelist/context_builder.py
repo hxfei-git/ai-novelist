@@ -91,7 +91,18 @@ class ContextProfile:
     include_recent_messages: bool = True
 
 
+@dataclass
+class RenderEntry:
+    section: Section
+    title: str
+    original: str
+    included: str
+    truncated: bool
+    protected: bool
+
+
 PROTECTED_SECTION_TITLES = {"用户当前请求", "当前任务", "锁定约束"}
+TRUNCATION_MARKER = "[已截断，完整内容见 artifact path]"
 
 
 PURPOSE_ARTIFACT_TYPES = {
@@ -313,49 +324,110 @@ def build_profile_section(
 
 def render_profile_sections(sections: list[Section], profile: ContextProfile, max_chars: int) -> tuple[str, list[ContextSource]]:
     selected_sections = dedupe_sections_by_digest(sections)
-    rendered_parts: list[Section] = []
-    sources: list[ContextSource] = []
     fixed_overhead = len("# Task Context\n\n") + sum(len(f"## {section_title(section)}\n\n") + 2 for section in selected_sections)
     remaining = max(1, max_chars - fixed_overhead)
     default_budget = max(120, remaining // max(1, len(selected_sections)))
+    entries: list[RenderEntry] = []
     for section in selected_sections:
         title = section_title(section)
         original = (section_content(section) or "暂无").strip() or "暂无"
         budget = profile.per_section_budget.get(title, default_budget)
         if title in PROTECTED_SECTION_TITLES:
             budget = max(budget, min(len(original), 1200))
-        included = original
-        truncated = False
-        if len(included) > budget:
-            included = included[: max(40, budget - 28)].rstrip() + "\n[已截断，完整内容见 artifact path]"
-            truncated = True
-        rendered_parts.append((title, included))
-        digest = sha256_text(original) if original != "暂无" else None
-        sources.append(
-            ContextSource(
-                section=title,
-                source_type=section_source_type(section, profile.name),
-                path=section_path(section),
-                original_chars=len(original),
-                included_chars=len(included),
+        included, truncated = truncate_content_to_budget(original, budget)
+        entries.append(
+            RenderEntry(
+                section=section,
+                title=title,
+                original=original,
+                included=included,
                 truncated=truncated,
-                digest=digest,
+                protected=title in PROTECTED_SECTION_TITLES,
             )
         )
-    text = render_sections(rendered_parts)
-    if len(text) > max_chars:
-        text = text[:max_chars].rstrip() + "\n[已截断]"
-        if sources:
-            sources[-1] = ContextSource(
-                section=sources[-1].section,
-                source_type=sources[-1].source_type,
-                path=sources[-1].path,
-                original_chars=sources[-1].original_chars,
-                included_chars=sources[-1].included_chars,
-                truncated=True,
-                digest=sources[-1].digest,
-            )
-    return text, sources
+
+    entries = fit_section_entries_to_limit(entries, max_chars)
+    rendered_parts: list[Section] = [(entry.title, entry.included) for entry in entries]
+    sources = [
+        ContextSource(
+            section=entry.title,
+            source_type=section_source_type(entry.section, profile.name),
+            path=section_path(entry.section),
+            original_chars=len(entry.original),
+            included_chars=len(entry.included),
+            truncated=entry.truncated,
+            digest=sha256_text(entry.original) if entry.original != "暂无" else None,
+        )
+        for entry in entries
+    ]
+    return render_sections(rendered_parts), sources
+
+
+def truncate_content_to_budget(content: str, budget: int) -> tuple[str, bool]:
+    original = (content or "暂无").strip() or "暂无"
+    if len(original) <= budget:
+        return original, False
+    if budget <= len(TRUNCATION_MARKER) + 1:
+        return TRUNCATION_MARKER, True
+    prefix_budget = max(1, budget - len(TRUNCATION_MARKER) - 1)
+    return original[:prefix_budget].rstrip() + "\n" + TRUNCATION_MARKER, True
+
+
+def fit_section_entries_to_limit(entries: list[RenderEntry], max_chars: int) -> list[RenderEntry]:
+    fitted = [
+        RenderEntry(
+            section=entry.section,
+            title=entry.title,
+            original=entry.original,
+            included=entry.included,
+            truncated=entry.truncated,
+            protected=entry.protected,
+        )
+        for entry in entries
+    ]
+
+    def rendered_length() -> int:
+        return len(render_sections([(entry.title, entry.included) for entry in fitted]))
+
+    if rendered_length() <= max_chars:
+        return fitted
+
+    for index in range(len(fitted) - 1, -1, -1):
+        if rendered_length() <= max_chars:
+            break
+        if fitted[index].protected:
+            continue
+        if fitted[index].original != "暂无" and fitted[index].included != TRUNCATION_MARKER:
+            previous_included = fitted[index].included
+            previous_truncated = fitted[index].truncated
+            fitted[index].included = TRUNCATION_MARKER
+            fitted[index].truncated = True
+            if rendered_length() <= max_chars:
+                break
+            if len(previous_included) <= len(TRUNCATION_MARKER):
+                fitted[index].included = previous_included
+                fitted[index].truncated = previous_truncated
+        del fitted[index]
+
+    while rendered_length() > max_chars:
+        candidates = [
+            index
+            for index, entry in enumerate(fitted)
+            if entry.protected and entry.included != TRUNCATION_MARKER
+        ]
+        if not candidates:
+            break
+        index = max(candidates, key=lambda item: len(fitted[item].included))
+        entry = fitted[index]
+        current = entry.included
+        overflow = rendered_length() - max_chars
+        target_budget = max(len(TRUNCATION_MARKER), len(current) - overflow)
+        included, _ = truncate_content_to_budget(entry.original, target_budget)
+        if len(included) >= len(current):
+            included = TRUNCATION_MARKER
+        entry.included = included
+        entry.truncated = True
+    return fitted
 
 
 def dedupe_sections_by_digest(sections: list[Section]) -> list[Section]:

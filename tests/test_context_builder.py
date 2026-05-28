@@ -178,6 +178,32 @@ def test_context_dedupe_preserves_original_order_after_priority_selection():
     assert [source.section for source in sources] == ["第一节", "中间节", "优先重复节"]
 
 
+def test_context_cap_keeps_protected_sections_with_long_earlier_protected_content(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.user_request = "很长用户请求" * 300
+    state.locked_constraints = ["必须保留锁定约束"]
+
+    bundle = build_context_bundle(state, store, "drafting", chapter=1, max_chars=360)
+
+    assert "## 用户当前请求" in bundle.text
+    assert "## 当前任务" in bundle.text
+    assert "## 锁定约束" in bundle.text
+    assert "必须保留锁定约束" in bundle.text
+    assert "已截断" in bundle.text
+    request_content = bundle.text.split("## 用户当前请求\n", 1)[1].split("\n\n## 当前任务", 1)[0]
+    task_content = bundle.text.split("## 当前任务\n", 1)[1].split("\n\n## 锁定约束", 1)[0]
+    constraints_content = bundle.text.split("## 锁定约束\n", 1)[1].split("\n\n", 1)[0]
+    assert request_content.strip()
+    assert task_content.strip()
+    assert constraints_content.strip()
+    manifest_by_section = {source.section: source for source in bundle.sources}
+    assert manifest_by_section["用户当前请求"].truncated is True
+    assert manifest_by_section["用户当前请求"].included_chars == len(request_content)
+    assert manifest_by_section["当前任务"].included_chars == len(task_content)
+    assert manifest_by_section["锁定约束"].included_chars == len(constraints_content.rstrip())
+
+
 def test_chapter_planning_context_uses_chapter_outline_slice(tmp_path):
     store = LocalStore(tmp_path)
     state = store.create_project("Demo", "demo")
