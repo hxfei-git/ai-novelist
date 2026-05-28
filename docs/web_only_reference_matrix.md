@@ -1,0 +1,66 @@
+# Web-Only Reference Matrix
+
+Updated: 2026-05-28
+
+## Purpose
+
+This matrix records cleanup candidates from the Web-only architecture audit. It prevents deleting files solely because their names look legacy.
+
+Statuses:
+
+- `retain`: used by active Web workflows
+- `candidate`: may be removed or trimmed after deeper verification
+- `compatibility-kept`: retained for old persisted project data or migration safety
+- `deferred`: belongs to a later structural refactor plan
+
+## Confirmed Runtime Surface
+
+- CLI entrypoint: `ai-novelist web`
+- Backend app: `src/ai_novelist/web/app.py`
+- Backend service: `src/ai_novelist/web/service.py`
+- Frontend: `web/frontend/src/main.tsx`
+- Storage: `src/ai_novelist/storage/local_store.py`
+
+## Candidate Matrix
+
+| Path or Area | Current Evidence | Status | Decision Rule |
+| --- | --- | --- | --- |
+| `src/ai_novelist/cli.py` | actual CLI exposes only `web` | retain | keep as thin Web command entrypoint |
+| `src/ai_novelist/web/app.py` | FastAPI routes and adapter selection for Web | retain | split only in P2 refactor |
+| `src/ai_novelist/web/service.py` | all retained Web workflows call this layer | retain | split only in P2 refactor |
+| `src/ai_novelist/graph_outline.py` | Web outline stage and review functions import from it | retain | prune internals only after route-level tests |
+| `src/ai_novelist/graph_volume_write.py` | Web chapter batch generation uses it | retain | keep while chapter body workspace exists |
+| `src/ai_novelist/graph_chapter_write.py` | volume writer imports direct chapter write helpers | retain | verify before any split |
+| `src/ai_novelist/graph_chapter_plan.py` | chapter write and outline workspace helpers depend on it | retain | verify call path before pruning |
+| `src/ai_novelist/graph_bible.py` | outline graph imports bible helpers | retain | verify old-project compatibility before pruning |
+| `src/ai_novelist/state.py` Director/research fields | fields load and save through project `state.json` | candidate | remove only with backward-compatible loader behavior |
+| `src/ai_novelist/output_contracts.py` | audit found direct references only from tests | candidate | delete only if no retained workflow imports it after full search |
+| `src/ai_novelist/corpus/project_memory.py` | audit found direct references only from tests | candidate | delete only if craft retrieval no longer needs project memory artifacts |
+| `src/ai_novelist/corpus/*` | some craft helpers are reachable through chapter and outline contexts | candidate | classify module-by-module with import and runtime checks |
+| `src/ai_novelist/prompts/*.md` | dynamic `load_prompt(prompt_name)` undercounts usage | candidate | remove only after tracing prompt_name values in graph code and tests |
+| `review_lock` stage compatibility | hidden from Web navigation but still present in state/contracts/helpers | compatibility-kept | remove only with old project fixture coverage |
+| `.superpowers/` local directory | untracked local browser companion artifacts | candidate | ignore through `.gitignore`, do not commit |
+| `web/frontend/src/main.tsx` | active UI in a large file | deferred | split in P2 frontend plan |
+| `tests/test_web_service.py` | broad active service coverage in a large file | deferred | split in P2 test-structure plan |
+| `src/ai_novelist/adapters/codex_cli.py` mock routing | `CodexCLIAdapter` real adapter and mock fixture behavior are coupled | deferred | split mock adapter in P2 adapter plan |
+
+## Required Checks Before Deletion
+
+For any candidate deletion, run:
+
+```bash
+rg -n "candidate_name|load_prompt\\(|AGENT:" src tests docs README.md
+.venv/bin/python -m pytest -q
+```
+
+If the candidate touches frontend payloads or Web route behavior, also run:
+
+```bash
+npm --prefix web/frontend run build
+```
+
+If the candidate touches persisted state fields, create or update a test that loads an old-style `state.json` containing the removed field and verifies `NovelState.from_dict()` still succeeds.
+
+## Current Decision
+
+No P1 candidate is approved for deletion by this matrix alone. It is a prerequisite for a later verified-prune implementation plan.
