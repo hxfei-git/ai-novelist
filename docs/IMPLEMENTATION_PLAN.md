@@ -182,7 +182,7 @@ Search and corpus settings still exist in configuration because some craft helpe
 
 ### Phase 5a: Outline Graph Routing and Review Lock Split
 - Files changed: `src/ai_novelist/outline_graph/routing.py`, `src/ai_novelist/outline_graph/review_lock.py`, `graph_outline.py`, tests, docs.
-- Behavior changed: routing and review-lock helpers moved out of the main outline graph without intended semantic changes.
+- Behavior changed: routing and review-lock helpers moved out of the main outline graph, with small compatibility expansions for bare `BLOCKING:` / `DETAIL:` review-lock labels and Chinese `锁定` lock requests.
 - Verification: `.venv/bin/python -m pytest tests/test_outline_graph_modules.py tests/test_web_outline_service.py tests/test_web_service.py::test_outline_stage_list_hides_review_lock -q` passed with 4 passed in 0.15s.
 - Remaining risk: prompt builders and structure repair helpers still remain in `graph_outline.py`.
 - Next entry point: extract prompt and repair helpers.
