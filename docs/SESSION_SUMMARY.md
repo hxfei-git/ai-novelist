@@ -178,6 +178,11 @@ Completed implementation commits before this final verification record:
 - Next entry point: migrate direct chapter context to `ContextBundle`.
 - Continuation note: resume at Task 4; keep Task 3 helper names unchanged because later tasks use `SectionRecord` and `build_artifact_section_records`.
 
+#### Task 3 Quality Fix
+
+- Fixed context digest dedupe so protected sections (`用户当前请求`, `当前任务`, `锁定约束`) are always retained and their content suppresses duplicate unprotected sections.
+- Verification: `.venv/bin/python -m pytest tests/test_context_builder.py -q` passed with 12 passed in 0.09s.
+
 ## Remaining Risk
 
 One verified dead module has been removed. The main remaining risk is stale compatibility code that appears unused but may still be reached through dynamic prompt names, old project state, or retained Web workflow helpers.

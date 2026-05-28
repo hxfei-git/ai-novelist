@@ -1,6 +1,13 @@
 from ai_novelist.artifacts import save_markdown_artifact
 from ai_novelist.bible import NovelBible, save_bible
-from ai_novelist.context_builder import build_context, build_context_bundle, build_context_manifest
+from ai_novelist.context_builder import (
+    ContextProfile,
+    build_context,
+    build_context_bundle,
+    build_context_manifest,
+    render_profile_sections,
+    section_record,
+)
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
 
@@ -117,6 +124,58 @@ def test_context_deduplicates_artifact_and_state_fallback_by_digest(tmp_path):
 
     assert bundle.text.count("唯一重复内容") == 1
     assert len({item.digest for item in bundle.sources if item.digest}) == len([item for item in bundle.sources if item.digest])
+
+
+def test_context_dedupe_keeps_all_duplicate_protected_sections():
+    profile = ContextProfile(name="test_profile", purpose="test", max_chars=2000, sections=())
+    sections = [
+        ("用户当前请求", "重复保护内容"),
+        ("当前任务", "重复保护内容"),
+        ("锁定约束", "重复保护内容"),
+    ]
+
+    text, sources = render_profile_sections(sections, profile, max_chars=2000)
+
+    assert "## 用户当前请求" in text
+    assert "## 当前任务" in text
+    assert "## 锁定约束" in text
+    assert text.count("重复保护内容") == 3
+    assert [source.section for source in sources] == ["用户当前请求", "当前任务", "锁定约束"]
+
+
+def test_context_dedupe_keeps_protected_section_over_duplicate_artifact():
+    profile = ContextProfile(name="test_profile", purpose="test", max_chars=2000, sections=())
+    sections = [
+        ("锁定约束", "共享内容"),
+        section_record(
+            "当前任务 Artifact: chapter_card",
+            "共享内容",
+            source_type="artifact:chapter_card",
+            path="chapters/chapter_001/chapter_card.md",
+            priority=10,
+        ),
+    ]
+
+    text, sources = render_profile_sections(sections, profile, max_chars=2000)
+
+    assert "## 锁定约束" in text
+    assert "## 当前任务 Artifact: chapter_card" not in text
+    assert [source.section for source in sources] == ["锁定约束"]
+    assert all(source.source_type != "artifact:chapter_card" for source in sources)
+
+
+def test_context_dedupe_preserves_original_order_after_priority_selection():
+    profile = ContextProfile(name="test_profile", purpose="test", max_chars=2000, sections=())
+    sections = [
+        section_record("第一节", "第一节内容", source_type="state:first", priority=80),
+        section_record("较早重复节", "重复内容", source_type="state:duplicate", priority=80),
+        section_record("中间节", "中间内容", source_type="state:middle", priority=50),
+        section_record("优先重复节", "重复内容", source_type="artifact:chapter_card", path="chapter_card.md", priority=10),
+    ]
+
+    _, sources = render_profile_sections(sections, profile, max_chars=2000)
+
+    assert [source.section for source in sources] == ["第一节", "中间节", "优先重复节"]
 
 
 def test_chapter_planning_context_uses_chapter_outline_slice(tmp_path):

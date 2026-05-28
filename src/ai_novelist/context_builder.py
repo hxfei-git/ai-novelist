@@ -91,6 +91,9 @@ class ContextProfile:
     include_recent_messages: bool = True
 
 
+PROTECTED_SECTION_TITLES = {"用户当前请求", "当前任务", "锁定约束"}
+
+
 PURPOSE_ARTIFACT_TYPES = {
     "chapter_planning": ["chapter_outline", "novel_bible"],
     "scene_design": ["chapter_card"],
@@ -309,7 +312,6 @@ def build_profile_section(
 
 
 def render_profile_sections(sections: list[Section], profile: ContextProfile, max_chars: int) -> tuple[str, list[ContextSource]]:
-    protected_titles = {"用户当前请求", "当前任务", "锁定约束"}
     selected_sections = dedupe_sections_by_digest(sections)
     rendered_parts: list[Section] = []
     sources: list[ContextSource] = []
@@ -320,7 +322,7 @@ def render_profile_sections(sections: list[Section], profile: ContextProfile, ma
         title = section_title(section)
         original = (section_content(section) or "暂无").strip() or "暂无"
         budget = profile.per_section_budget.get(title, default_budget)
-        if title in protected_titles:
+        if title in PROTECTED_SECTION_TITLES:
             budget = max(budget, min(len(original), 1200))
         included = original
         truncated = False
@@ -359,7 +361,17 @@ def render_profile_sections(sections: list[Section], profile: ContextProfile, ma
 def dedupe_sections_by_digest(sections: list[Section]) -> list[Section]:
     selected_indices: set[int] = set()
     seen_digests: set[str] = set()
-    for index, section in sorted(enumerate(sections), key=lambda item: (section_priority(item[1]), item[0])):
+    unprotected_sections: list[tuple[int, Section]] = []
+    for index, section in enumerate(sections):
+        original = (section_content(section) or "暂无").strip() or "暂无"
+        if section_title(section) in PROTECTED_SECTION_TITLES:
+            selected_indices.add(index)
+            if original != "暂无":
+                seen_digests.add(sha256_text(original))
+            continue
+        unprotected_sections.append((index, section))
+
+    for index, section in sorted(unprotected_sections, key=lambda item: (section_priority(item[1]), item[0])):
         original = (section_content(section) or "暂无").strip() or "暂无"
         if original == "暂无":
             selected_indices.add(index)
@@ -628,9 +640,8 @@ def truncate_sections(sections: list[Section], max_chars: int) -> str:
     if len(rendered) <= max_chars:
         return rendered
 
-    protected_titles = {"用户当前请求", "当前任务", "锁定约束"}
-    protected = [section for section in sections if section_title(section) in protected_titles]
-    flexible = [section for section in sections if section_title(section) not in protected_titles]
+    protected = [section for section in sections if section_title(section) in PROTECTED_SECTION_TITLES]
+    flexible = [section for section in sections if section_title(section) not in PROTECTED_SECTION_TITLES]
     protected_text = render_sections(protected)
     if len(protected_text) >= max_chars:
         return protected_text[:max_chars].rstrip() + "\n\n[已截断，锁定约束或任务描述过长]"
