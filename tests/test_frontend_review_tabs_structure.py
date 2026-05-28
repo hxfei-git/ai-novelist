@@ -272,3 +272,9 @@ def test_frontend_progress_log_uses_project_directory_api_not_local_storage() ->
     assert "projects/${projectId}/progress-log" in source
     assert "localStorage" not in source
     assert "progressLogKey" not in source
+
+
+def test_frontend_progress_log_appends_new_items_to_the_bottom() -> None:
+    source = read_main()
+
+    assert "return [...next, message].slice(-maxLogItems)" in source

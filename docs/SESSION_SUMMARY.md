@@ -2475,3 +2475,9 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - 新增回归测试覆盖采纳后再手动审查的基线读取，以及之前的大纲待确认循环和右侧进度结构化展示回归。
 - 验证：`.venv/bin/python -m pytest tests/test_web_service.py -q` 67 passed。
 
+
+## 2026-05-28 右侧进度栏顺序修正
+
+- 右侧进度日志现在按时间正序展示：新事件追加到列表尾部，旧事件保持在上方。
+- 进度项更新时继续按 key 去重，但保存与渲染都保持“上旧下新”的顺序，避免完成态把新消息顶到顶部。
+- 验证：`PYTHONPATH=src .venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py -k progress_log -q`。

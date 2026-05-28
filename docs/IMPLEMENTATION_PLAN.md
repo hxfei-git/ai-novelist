@@ -2709,3 +2709,9 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - 采纳后不会自动触发新一轮审查；下一轮仍然只会在用户手动点击“审查”时启动，并且会读取最新已保存的基线。
 - 新增回归测试覆盖“采纳后再次手动审查读取新基线”。
 
+
+## 2026-05-28 右侧进度栏顺序修正
+
+- `upsertProgressItem()` 现在把新进度项追加到尾部，并用 `slice(-maxLogItems)` 保留最近 10 条，因此 UI 里最新记录会显示在下面。
+- 进度项仍按 `key` 去重，运行中/完成中的同一阶段会更新同一条记录，只是顺序保持时间正序。
+- 验证：`PYTHONPATH=src .venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py -k progress_log -q`。

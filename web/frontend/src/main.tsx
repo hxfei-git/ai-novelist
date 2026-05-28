@@ -217,9 +217,9 @@ function progressItemKey(item: ProgressItem) {
 
 function upsertProgressItem(items: ProgressItem[], message: ProgressItem) {
   const key = progressItemKey(message);
-  if (!key) return [message, ...items].slice(0, maxLogItems);
+  if (!key) return [...items, message].slice(-maxLogItems);
   const next = items.filter((item) => progressItemKey(item) !== key);
-  return [message, ...next].slice(0, maxLogItems);
+  return [...next, message].slice(-maxLogItems);
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
