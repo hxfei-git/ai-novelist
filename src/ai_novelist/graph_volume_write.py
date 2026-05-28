@@ -176,8 +176,15 @@ def prepare_volume_batch_node(data: dict, store: LocalStore) -> dict:
     state.director_task_args["volume"] = volume
     state.director_task_args["batch_run_id"] = str(run_id)
     state.director_task_args["batch_items"] = items
-    state.director_task_args["batch_context_manifests"] = context_manifests
-    state.director_task_args["direct_chapter_context_manifest"] = next(reversed(context_manifests.values()), [])
+    ordered_context_manifests = ordered_chapter_context_manifests(context_manifests)
+    state.director_task_args["batch_context_manifests"] = ordered_context_manifests
+    if len(ordered_context_manifests) == 1:
+        chapter, manifest = next(iter(ordered_context_manifests.items()))
+        state.director_task_args["direct_chapter_context_manifest"] = manifest
+        state.director_task_args["direct_chapter_context_manifest_chapter"] = int(chapter)
+    else:
+        state.director_task_args.pop("direct_chapter_context_manifest", None)
+        state.director_task_args.pop("direct_chapter_context_manifest_chapter", None)
     state.active_graph = "volume_write"
     state.active_stage = "prepare"
     state.active_artifact = "volume_batch"
@@ -744,7 +751,19 @@ def build_manifest(state: NovelState, status: str) -> dict[str, Any]:
         "run_id": state.director_task_args.get("batch_run_id"),
         "status": status,
         "chapters": state.director_task_args.get("batch_latest_drafts", {}),
+        "context_manifests": ordered_chapter_context_manifests(state.director_task_args.get("batch_context_manifests", {})),
         "repaired_chapters": state.director_task_args.get("batch_repaired_chapters", []),
         "consistency_report": state.director_task_args.get("volume_consistency_report_v2_path") or state.director_task_args.get("volume_consistency_report_v1_path"),
         "updated_at": datetime.now(UTC).isoformat(timespec="seconds"),
     }
+
+
+def ordered_chapter_context_manifests(value: Any) -> dict[str, list[dict[str, object]]]:
+    if not isinstance(value, dict):
+        return {}
+    ordered: dict[str, list[dict[str, object]]] = {}
+    items = ((str(chapter), manifest) for chapter, manifest in value.items())
+    for chapter, manifest in sorted(items, key=lambda item: (0, int(item[0])) if item[0].isdigit() else (1, item[0])):
+        if isinstance(manifest, list):
+            ordered[chapter] = manifest
+    return ordered

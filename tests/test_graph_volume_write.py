@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from ai_novelist.adapters.codex_cli import CodexCLIAdapter
@@ -112,3 +113,38 @@ def test_volume_write_records_direct_context_manifest(tmp_path, monkeypatch):
     manifest = result["director_task_args"].get("direct_chapter_context_manifest")
     assert isinstance(manifest, list)
     assert any(item.get("section") == "章节大纲切片" for item in manifest)
+    assert result["director_task_args"].get("direct_chapter_context_manifest_chapter") == 1
+    assert sorted(result["director_task_args"].get("batch_context_manifests", {})) == ["1"]
+
+
+def test_volume_write_records_per_chapter_context_manifests_without_single_manifest(tmp_path, monkeypatch):
+    monkeypatch.setenv("AI_NOVELIST_PARALLEL_AGENTS", "1")
+    store, state = seed_project(tmp_path)
+    state.director_task_args = {"volume": 1}
+    store.save_state(state)
+
+    result = build_volume_write_graph(CodexCLIAdapter(mock=True), store).invoke(state.to_dict())
+
+    args = result["director_task_args"]
+    batch_context_manifests = args.get("batch_context_manifests")
+    assert sorted(batch_context_manifests) == ["1", "2"]
+    assert all(any(item.get("section") == "章节大纲切片" for item in manifest) for manifest in batch_context_manifests.values())
+    assert "direct_chapter_context_manifest" not in args
+    assert "direct_chapter_context_manifest_chapter" not in args
+
+
+def test_volume_batch_manifest_includes_context_manifests(tmp_path, monkeypatch):
+    monkeypatch.setenv("AI_NOVELIST_PARALLEL_AGENTS", "1")
+    store, state = seed_project(tmp_path)
+    state.director_task_args = {"volume": 1}
+    store.save_state(state)
+
+    build_volume_write_graph(CodexCLIAdapter(mock=True), store).invoke(state.to_dict())
+
+    manifest_path = next((tmp_path / "demo" / "chapters" / "batches" / "volume_001").glob("*/manifest.json"))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert sorted(manifest.get("context_manifests", {})) == ["1", "2"]
+    assert all(
+        any(item.get("section") == "章节大纲切片" for item in chapter_manifest)
+        for chapter_manifest in manifest["context_manifests"].values()
+    )

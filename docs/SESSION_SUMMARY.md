@@ -199,6 +199,13 @@ Completed implementation commits before this final verification record:
 - Next entry point: introduce workflow payload helpers in Task 5.
 - Continuation note: resume at Task 5; direct drafting context should remain profile name `direct_chapter_drafting`.
 
+
+#### Task 4 Quality Fix
+
+- Fixed volume writes so `batch_context_manifests` remains the durable per-chapter manifest map, while `direct_chapter_context_manifest` is exposed only for single-chapter compatibility and includes `direct_chapter_context_manifest_chapter`.
+- Batch manifest JSON now includes `context_manifests` keyed by chapter in deterministic order.
+- Verification: `.venv/bin/python -m pytest tests/test_graph_volume_write.py tests/test_context_builder.py -q` passed with 22 passed in 0.80s.
+
 ## Remaining Risk
 
 One verified dead module has been removed. The main remaining risk is stale compatibility code that appears unused but may still be reached through dynamic prompt names, old project state, or retained Web workflow helpers.
