@@ -197,6 +197,14 @@ Search and corpus settings still exist in configuration because some craft helpe
 - Next entry point: frontend structural split.
 - Continuation note: resume at Task 11; do not move graph node functions until frontend and full verification are stable.
 
+### Phase 6: Frontend Workspace Split
+- Files changed: frontend progress utility, workspace components, `main.tsx`, frontend structure tests, docs.
+- Behavior changed: frontend UI is split into focused modules while existing tabs, actions, progress log, and review workspaces remain compatible.
+- Verification: `.venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py -q` -> passed with 29 passed in 0.05s; `npm --prefix web/frontend run build` -> passed with the known Vite CJS Node API deprecation warning; `main.tsx` is 799 lines (<900).
+- Remaining risk: action handlers still live in `main.tsx`; a future phase can split hooks once component boundaries settle.
+- Next entry point: final verification and cleanup.
+- Continuation note: resume at Task 12; frontend split is accepted only when `main.tsx` is below 900 lines and build passes.
+
 ## Verification Policy
 
 Use the smallest relevant test set during implementation. Run full pytest when a change touches state, persistence, graph contracts, adapters, prompts, or shared workflow helpers.

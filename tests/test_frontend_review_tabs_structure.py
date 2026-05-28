@@ -9,6 +9,8 @@ MAIN_TSX = ROOT / "web" / "frontend" / "src" / "main.tsx"
 TYPES_TS = ROOT / "web" / "frontend" / "src" / "types.ts"
 API_TS = ROOT / "web" / "frontend" / "src" / "api.ts"
 STYLES_CSS = ROOT / "web" / "frontend" / "src" / "styles.css"
+PROGRESS_TS = ROOT / "web" / "frontend" / "src" / "progress.ts"
+WORKSPACES_DIR = ROOT / "web" / "frontend" / "src" / "workspaces"
 
 
 def read_main() -> str:
@@ -21,6 +23,14 @@ def read_types() -> str:
 
 def read_api() -> str:
     return API_TS.read_text(encoding="utf-8")
+
+
+def read_progress() -> str:
+    return PROGRESS_TS.read_text(encoding="utf-8")
+
+
+def read_workspace(name: str) -> str:
+    return (WORKSPACES_DIR / name).read_text(encoding="utf-8")
 
 
 def sidebar_source(source: str) -> str:
@@ -57,6 +67,26 @@ def test_review_entries_move_into_sidebar_navigation() -> None:
     assert "setOutlineStageView('review')" in sidebar
     assert "setChapterOutlineView('review')" in sidebar
     assert "setChapterView('review')" in sidebar
+
+
+def test_frontend_workspace_modules_exist_after_split() -> None:
+    expected = [
+        ROOT / "web" / "frontend" / "src" / "progress.ts",
+        ROOT / "web" / "frontend" / "src" / "workspaces" / "review.tsx",
+        ROOT / "web" / "frontend" / "src" / "workspaces" / "chapters.tsx",
+        ROOT / "web" / "frontend" / "src" / "workspaces" / "outline.tsx",
+        ROOT / "web" / "frontend" / "src" / "workspaces" / "chapterOutline.tsx",
+        ROOT / "web" / "frontend" / "src" / "workspaces" / "project.tsx",
+    ]
+    for path in expected:
+        assert path.exists(), path
+
+
+def test_frontend_main_is_smaller_after_workspace_split() -> None:
+    source = read_main()
+    assert len(source.splitlines()) < 900
+    assert "from './progress'" in source
+    assert "from './workspaces/review'" in source
 
 
 def test_top_navigation_has_three_workspaces() -> None:
@@ -116,19 +146,17 @@ def test_chapter_outline_workspace_uses_dedicated_volume_routes() -> None:
 
 def test_chapter_outline_workspace_uses_single_left_volume_navigation() -> None:
     source = read_main()
-    start = source.index("{topSection === 'chapter-outline' &&")
-    end = source.index("{topSection === 'chapters' &&", start)
-    workspace_block = source[start:end]
+    workspace_block = read_workspace("chapterOutline.tsx")
     sidebar = sidebar_source(source)
 
     assert "(chapterOutlineWorkspace?.volume_specs || []).map" in sidebar
     assert "loadChapterOutlineWorkspace(item.index).catch(showError)" in sidebar
-    assert "chapterOutlineWorkspace.selected_volume.content" in workspace_block
+    assert "workspace.selected_volume.content" in workspace_block
     assert 'className="chapter-list volume-list"' not in workspace_block
 
 
 def test_chapter_workspace_uses_volume_navigation_and_secondary_tabs() -> None:
-    source = read_main()
+    source = read_main() + read_workspace("chapters.tsx")
 
     assert 'aria-label="章节视图"' in source
     assert "chapterView === 'batch'" in source
@@ -145,7 +173,7 @@ def test_chapter_workspace_uses_volume_navigation_and_secondary_tabs() -> None:
 
 
 def test_chapter_batch_panel_uses_volume_summary_and_single_quantity_input() -> None:
-    source = read_main()
+    source = read_main() + read_workspace("chapters.tsx")
     start = source.index("{chapterView === 'batch' &&")
     end = source.index("{chapterView === 'list' &&", start)
     batch_block = source[start:end]
@@ -170,7 +198,7 @@ def test_create_project_clears_progress_for_new_project_id() -> None:
 
 
 def test_chapter_batch_generation_has_running_guard_and_disabled_button() -> None:
-    source = read_main()
+    source = read_main() + read_workspace("chapters.tsx")
     generate_block = re.search(r"async function generateBatch\(\).*?\n  }", source, re.DOTALL)
     assert generate_block is not None
     assert "const [chapterBatchRunning, setChapterBatchRunning] = useState(false)" in source
@@ -231,7 +259,7 @@ def test_chapter_outline_volume_action_releases_running_flag_in_finally() -> Non
 
 
 def test_outline_review_uses_three_choice_decision_board() -> None:
-    source = read_main()
+    source = read_main() + read_workspace("review.tsx")
     apply_block = source[source.index("async function applyOutlineReview"):source.index("function dismissOutlineReview")]
 
     assert "outlineRepairDecisions" in source
@@ -272,7 +300,7 @@ def test_right_progress_has_fixed_scroll_area() -> None:
 
 
 def test_outline_stage_actions_guard_against_double_submit() -> None:
-    source = read_main()
+    source = read_main() + read_workspace("outline.tsx")
 
     assert "const [stageRunning, setStageRunning] = useState(false)" in source
     assert "const stageRunningRef = useRef(false)" in source
@@ -287,7 +315,7 @@ def test_outline_stage_actions_guard_against_double_submit() -> None:
 
 
 def test_outline_stage_actions_are_separate_and_backend_driven() -> None:
-    source = read_main()
+    source = read_main() + read_workspace("outline.tsx")
 
     assert "action_state" in source
     assert "actionState.can_generate" in source
@@ -314,7 +342,7 @@ def test_outline_stage_actions_clear_instruction_after_completion() -> None:
 
 
 def test_outline_stage_pending_questions_render_recommended_options() -> None:
-    source = read_main()
+    source = read_main() + read_workspace("outline.tsx")
 
     assert "type PendingQuestionPayload" in read_types()
     assert "outline/stages/${stage}/pending" in source
@@ -337,7 +365,7 @@ def test_stage_action_strip_and_lock_badge_have_distinct_styles() -> None:
     assert ".lock-badge" in styles
 
 def test_frontend_restores_new_project_onboarding_workspace() -> None:
-    source = read_main()
+    source = read_main() + read_workspace("project.tsx")
 
     assert "type ProjectState" in read_types()
     assert "const [projectState, setProjectState]" in source
@@ -360,7 +388,7 @@ def test_progress_panel_renders_structured_metrics_and_keeps_legacy_branch() -> 
 
 
 def test_progress_panel_merges_rows_by_key_and_renders_completion_metrics() -> None:
-    source = read_main()
+    source = read_main() + read_progress()
 
     assert "function upsertProgressItem" in source
     assert "progressItemKey(item)" in source
@@ -379,6 +407,6 @@ def test_frontend_progress_log_uses_project_directory_api_not_local_storage() ->
 
 
 def test_frontend_progress_log_appends_new_items_to_the_bottom() -> None:
-    source = read_main()
+    source = read_progress()
 
     assert "return [...next, message].slice(-maxLogItems)" in source

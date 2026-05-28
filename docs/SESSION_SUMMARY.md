@@ -261,6 +261,14 @@ Completed implementation commits before this final verification record:
 - Continuation note: resume at Task 11; do not move graph node functions until frontend and full verification are stable.
 - Implementation note: the initially requested prompt-helper test strings did not match existing production wording, so assertions were adjusted to the current stage-specific text while preserving production behavior.
 
+### Phase 6: Frontend Workspace Split
+- Files changed: frontend progress utility, workspace components, `main.tsx`, frontend structure tests, docs.
+- Behavior changed: frontend UI is split into focused modules while existing tabs, actions, progress log, and review workspaces remain compatible.
+- Verification: `.venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py -q` -> passed with 29 passed in 0.05s; `npm --prefix web/frontend run build` -> passed with the known Vite CJS Node API deprecation warning; `main.tsx` is 799 lines (<900).
+- Remaining risk: action handlers still live in `main.tsx`; a future phase can split hooks once component boundaries settle.
+- Next entry point: final verification and cleanup.
+- Continuation note: resume at Task 12; frontend split is accepted only when `main.tsx` is below 900 lines and build passes.
+
 ## Remaining Risk
 
 One verified dead module has been removed. The main remaining risk is stale compatibility code that appears unused but may still be reached through dynamic prompt names, old project state, or retained Web workflow helpers.
