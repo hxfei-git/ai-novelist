@@ -65,6 +65,21 @@ class CapturingOutlineReviewAdapter(AgentAdapter):
         return "{}"
 
 
+def test_project_service_exports_project_and_progress_helpers() -> None:
+    from ai_novelist.web import project_service
+
+    for name in [
+        "list_projects",
+        "create_project",
+        "project_needs_onboarding",
+        "save_project_idea",
+        "load_project_progress_log",
+        "save_project_progress_log",
+        "build_progress_event",
+    ]:
+        assert hasattr(project_service, name)
+
+
 def test_project_and_outline_stage_file_roundtrip(tmp_path: Path) -> None:
     store = LocalStore(tmp_path)
     state = service.create_project(store, "Web Demo", "web-demo", idea="一个显式流程控制的小说项目")

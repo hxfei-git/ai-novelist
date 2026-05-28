@@ -216,6 +216,15 @@ Completed implementation commits before this final verification record:
 - Next entry point: split Web service modules behind compatibility imports.
 - Continuation note: resume at Task 6; keep `workflow_payloads.py` helper names stable for later replacements.
 
+### Phase 4a: Project Service Split
+
+- Files changed: `src/ai_novelist/web/project_service.py`, `src/ai_novelist/web/service.py`, Web tests, docs.
+- Behavior changed: project and progress logic moved behind a focused service module; `web/service.py` remains a compatibility facade.
+- Verification: `.venv/bin/python -m pytest tests/test_web_service.py::test_project_service_exports_project_and_progress_helpers tests/test_web_service.py::test_project_progress_log_accepts_legacy_strings_and_structured_events tests/test_web_app.py::test_project_idea_and_progress_log_endpoints_are_project_scoped -q` passed with 3 passed in 0.39s.
+- Remaining risk: outline, chapter, and review functions still live in `web/service.py`.
+- Next entry point: split outline actions.
+- Continuation note: resume at Task 7; project/progress imports should come from `ai_novelist.web.project_service` for new code.
+
 ## Remaining Risk
 
 One verified dead module has been removed. The main remaining risk is stale compatibility code that appears unused but may still be reached through dynamic prompt names, old project state, or retained Web workflow helpers.
