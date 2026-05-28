@@ -2490,3 +2490,9 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - 变更文件：`src/ai_novelist/web/service.py`、`src/ai_novelist/web/app.py`、`web/frontend/src/main.tsx`、`web/frontend/src/styles.css`、`tests/test_web_service.py`、`tests/test_web_app.py`、`tests/test_frontend_review_tabs_structure.py`。
 - 验证范围：后端大纲审查 apply 测试、Web route 测试、前端结构测试、前端 build。
 
+## 2026-05-28 大纲审查采纳后刷新可见内容
+
+- 修复“大纲审查应用 completed 但页面没有反应”：采纳成功后现在会刷新项目状态、阶段列表和当前阶段内容，并切回编辑视图。
+- 根因确认：日志显示 apply 接口返回 200，但前端此前只重新请求最新审查报告，没有刷新被写回的大纲内容。
+- 验证范围：新增前端结构回归测试、相关三栏审查测试、前端 build。
+

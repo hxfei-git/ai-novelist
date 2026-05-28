@@ -2725,3 +2725,11 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - Web 大纲总体审查页改为三栏决策控件，并在应用时提交逐项 `decisions`。章节大纲总体审查仍保持既有 checkbox 选择行为。
 - 前端在应用前拦截空“我的意见”，应用中按钮继续禁用，失败时通过既有错误提示恢复可操作状态。
 
+### 2026-05-28 大纲审查采纳后刷新可见内容
+
+目标：修复大纲总体审查点击采纳后进度显示 completed 但页面没有明显变化的问题。
+
+- 根因：`applyOutlineReview()` 成功后只刷新 `/outline/review/latest`，没有重新拉取项目状态、阶段列表和当前阶段内容。
+- 修复：采纳成功后依次执行 `loadProjectState()`、`refreshStages()`、`loadStage(activeStage)`，并切回大纲编辑视图，让用户直接看到写回后的阶段内容。
+- 新增前端结构回归测试覆盖 apply 成功后的刷新链路。
+

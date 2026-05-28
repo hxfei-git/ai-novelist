@@ -644,6 +644,10 @@ function App() {
         (line) => pushLog(line),
       );
       await loadLatestOutlineReview();
+      await loadProjectState();
+      await refreshStages();
+      await loadStage(activeStage);
+      setOutlineStageView('edit');
       pushLog({ label: '大纲审查应用', elapsed: '', tokens: '', context: '', status: 'completed' });
     } catch (error) {
       showError(error);

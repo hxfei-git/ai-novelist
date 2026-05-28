@@ -163,6 +163,16 @@ def test_outline_review_uses_three_choice_decision_board() -> None:
     assert "selected_issue_ids" not in apply_block
 
 
+def test_outline_review_apply_refreshes_visible_outline_after_success() -> None:
+    source = read_main()
+    apply_block = source[source.index("async function applyOutlineReview"):source.index("function dismissOutlineReview")]
+
+    assert "await loadProjectState()" in apply_block
+    assert "await refreshStages()" in apply_block
+    assert "await loadStage(activeStage)" in apply_block
+    assert "setOutlineStageView('edit')" in apply_block
+
+
 def test_right_progress_has_fixed_scroll_area() -> None:
     styles = read_styles()
 
