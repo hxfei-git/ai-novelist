@@ -164,7 +164,7 @@ Completed implementation commits before this final verification record:
 
 - Files changed: frontend action handlers, Web app tests, docs.
 - Behavior changed: streaming Web actions report errors consistently and release running flags through `finally`; SSE service failures are represented as `event: error`.
-- Verification: `.venv/bin/python -m pytest tests/test_web_app.py tests/test_frontend_review_tabs_structure.py -q`; `npm --prefix web/frontend run build`.
+- Verification: RED selected run failed before implementation with 1 failed, 2 passed; focused 3-test run passed with 3 passed in 0.37s; broader `.venv/bin/python -m pytest tests/test_web_app.py tests/test_frontend_review_tabs_structure.py -q` passed with 37 passed in 0.81s; `npm --prefix web/frontend run build` passed with the known Vite CJS Node API deprecation warning.
 - Remaining risk: source tests verify handler structure; browser event-loop behavior is still covered indirectly.
 - Next entry point: begin Task 3 context manifest and deduplication work.
 - Continuation note: resume with context builder tests in Task 3; Web operation guard changes are complete when both focused commands above pass.
