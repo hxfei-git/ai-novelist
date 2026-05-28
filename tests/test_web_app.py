@@ -105,6 +105,7 @@ def test_sse_progress_returns_metric_event_not_raw_message(monkeypatch, tmp_path
     response = client.post("/api/projects/web-demo/outline/stages/worldbuilding/generate", json={})
 
     assert response.status_code == 200
+    assert '"key": "OutlineStage"' in response.text
     assert '"label": "世界观汇总"' in response.text
     assert '"tokens": "tok≈8.1K"' in response.text
     assert '"message"' not in response.text

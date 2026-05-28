@@ -2467,3 +2467,11 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - 变更文件：`src/ai_novelist/graph_outline.py`、`web/frontend/src/main.tsx`、`web/frontend/src/styles.css`、`tests/test_web_service.py`、`tests/test_frontend_review_tabs_structure.py`。
 - 已验证：`PYTHONPATH=src .venv/bin/python -m pytest tests/test_web_service.py tests/test_frontend_review_tabs_structure.py -q` 81 passed；`npm --prefix web/frontend run build` 通过（Vite CJS Node API deprecation warning only）。
 - 剩余风险：本次聚焦 Web outline/chapter-outline 锁定流程；如果 CLI 旧交互文案仍提示“锁定并进入下一阶段”，需要后续单独收紧 Director 文案。
+
+## 2026-05-28 大纲审查采纳后回写阶段基线
+
+- `apply_outline_review()` 现在会把修订后的总纲拆回各阶段 Markdown，重新写入 `outline.md`、`outline_stages/*.md` 和 `outline/*.md`，并同步保存 `state.json` 里的大纲基线。
+- 后续复审不会自动触发；只有用户再次手动点“审查”时，`review_outline()` 才会读取到新保存的基线并重新进入一轮审查。
+- 新增回归测试覆盖采纳后再手动审查的基线读取，以及之前的大纲待确认循环和右侧进度结构化展示回归。
+- 验证：`.venv/bin/python -m pytest tests/test_web_service.py -q` 67 passed。
+

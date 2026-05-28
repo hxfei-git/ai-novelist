@@ -136,6 +136,7 @@ type OutlineReviewSuggestion = {
   selected: boolean;
 };
 type ProgressEvent = {
+  key?: string;
   label: string;
   elapsed: string;
   tokens: string;
@@ -207,6 +208,18 @@ function groupRepairSuggestions(suggestions: ReviewSuggestion[]) {
       return left[0] - right[0];
     })
     .map(([chapter, items]) => ({ chapter, items }));
+}
+
+function progressItemKey(item: ProgressItem) {
+  if (typeof item === 'string') return item;
+  return item.key || item.label;
+}
+
+function upsertProgressItem(items: ProgressItem[], message: ProgressItem) {
+  const key = progressItemKey(message);
+  if (!key) return [message, ...items].slice(0, maxLogItems);
+  const next = items.filter((item) => progressItemKey(item) !== key);
+  return [message, ...next].slice(0, maxLogItems);
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -369,7 +382,7 @@ function App() {
 
   function pushLog(message: ProgressItem) {
     setLog((items) => {
-      const next = [message, ...items].slice(0, maxLogItems);
+      const next = upsertProgressItem(items, message);
       void saveProjectProgressLog(next);
       return next;
     });
@@ -1054,7 +1067,7 @@ function App() {
             ) : (
               <div className="progress-item" key={`${index}-${item.label}-${item.status}`}>
                 <strong>{item.label}</strong>
-                <span>{[item.elapsed, item.tokens, item.context].filter(Boolean).join(' · ') || item.status}</span>
+                <span>{[item.status, item.elapsed, item.tokens, item.context].filter(Boolean).join(' · ')}</span>
               </div>
             ))}
           </div>

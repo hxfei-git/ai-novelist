@@ -138,6 +138,7 @@ def test_progress_event_drops_generated_message_body_but_retains_metrics() -> No
     )
 
     assert event == {
+        "key": "OutlineStage",
         "label": "正在汇总「世界观设定」阶段产物",
         "elapsed": "12.4s",
         "tokens": "tok≈8.1K",
@@ -145,6 +146,22 @@ def test_progress_event_drops_generated_message_body_but_retains_metrics() -> No
         "status": "running",
     }
     assert "产物正文" not in json.dumps(event, ensure_ascii=False)
+
+
+def test_progress_event_includes_key_and_completion_metrics() -> None:
+    event = service.build_progress_event(
+        "OutlineStage",
+        "已完成正在汇总「世界观设定」阶段产物（deepseek/12.4s/ctx=4K/258K/tok≈8.1K）",
+    )
+
+    assert event == {
+        "key": "OutlineStage",
+        "label": "正在汇总「世界观设定」阶段产物",
+        "elapsed": "12.4s",
+        "tokens": "tok≈8.1K",
+        "context": "ctx=4K/258K",
+        "status": "completed",
+    }
 
 
 def test_generate_outline_stage_uses_explicit_full_generation_intent_with_existing_content(monkeypatch, tmp_path: Path) -> None:
@@ -709,6 +726,43 @@ def test_outline_review_roundtrip_and_apply_updates_outline(tmp_path: Path) -> N
     assert saved.outline_review_applied_run_id == report["run_id"]
     assert saved.outline_review_run_id == report["run_id"]
 
+def test_outline_review_apply_persists_new_baseline_for_manual_rereview(monkeypatch, tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+    state.outline = (
+        "# 最终锁定总大纲\n\n"
+        "## 方向定位\n旧稿。\n\n"
+        "## 世界观设定\n旧稿。"
+    )
+    store.save_state(state)
+
+    report = service.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
+    service.apply_outline_review(store, OutlineReviewAdapter(), "web-demo", report["run_id"])
+
+    saved = store.load_state("web-demo")
+    assert "已补强结尾收束" in saved.outline
+    assert "已补强结尾收束" in store.load_outline_stage("web-demo", "direction")
+    assert "已补强结尾收束" in store.load_outline_artifact("web-demo", "direction")
+
+    captured: dict[str, str] = {}
+
+    def fake_review_outline_node(data: dict, adapter: AgentAdapter, local_store: LocalStore) -> dict:
+        captured["outline"] = str(data.get("outline") or "")
+        return {
+            **data,
+            "review_status": "revise",
+            "editor_decision": "revise",
+            "quality_score": 70,
+            "editor_notes": "再次审查。",
+        }
+
+    monkeypatch.setattr(service, "review_outline_node", fake_review_outline_node)
+
+    service.review_outline(store, OutlineReviewAdapter(), "web-demo", "再次审查")
+
+    assert "已补强结尾收束" in captured["outline"]
+
+
 
 def test_outline_review_report_exposes_selectable_suggestions(tmp_path: Path) -> None:
     store = LocalStore(tmp_path)
@@ -748,6 +802,102 @@ def test_apply_outline_review_uses_only_selected_suggestions(tmp_path: Path) -> 
     assert selected["recommendation"] in adapter.reviser_prompt
     assert unselected["message"] not in adapter.reviser_prompt
     assert unselected["recommendation"] not in adapter.reviser_prompt
+
+
+def test_submit_stage_pending_answers_can_return_another_round(monkeypatch, tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+    state.outline_stage = "characters"
+    state.outline_stage_artifacts["characters"] = {
+        "stage": "characters",
+        "status": "options_ready",
+        "pending_questions": ["林霄视角章是否需提前规划？"],
+    }
+    store.save_outline_artifact(state, "characters", "# 人物关系\n\n已有草案。\n")
+    store.save_state(state)
+
+    def fake_run(data: dict, adapter: AgentAdapter, local_store: LocalStore, progress=None) -> dict:
+        data["outline_stage_artifacts"] = {
+            **data.get("outline_stage_artifacts", {}),
+            "characters": {
+                "stage": "characters",
+                "status": "options_ready",
+                "pending_questions": ["林霄是否需要额外的秘密线？"],
+            },
+        }
+        data["pending_questions"] = ["林霄是否需要额外的秘密线？"]
+        return data
+
+    monkeypatch.setattr(service, "run_outline_stage_node", fake_run)
+
+    result = service.submit_stage_pending_answers(
+        store,
+        DummyAdapter(),
+        "web-demo",
+        "characters",
+        [
+            {
+                "question": "林霄视角章是否需提前规划？",
+                "selected_option_id": "accept",
+                "answer": "采纳当前建议，提前规划1-2个专属视角章。",
+            }
+        ],
+    )
+
+    reloaded = store.load_state("web-demo")
+    pending_payload = service.outline_stage_pending_payload(store, "web-demo", "characters")
+    stage_payload = service.outline_stage_payload(store, reloaded, "characters")
+    assert reloaded.pending_questions == ["林霄是否需要额外的秘密线？"]
+    assert pending_payload["items"][0]["question"] == "林霄是否需要额外的秘密线？"
+    assert pending_payload["items"][0]["options"][0]["id"] == "accept"
+    assert stage_payload["action_state"]["can_lock"] is False
+    assert "待确认问题" in stage_payload["action_state"]["lock_reason"]
+
+
+def test_submit_stage_pending_answers_can_clear_remaining_questions(monkeypatch, tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+    state.outline_stage = "characters"
+    state.outline_stage_artifacts["characters"] = {
+        "stage": "characters",
+        "status": "options_ready",
+        "pending_questions": ["林霄视角章是否需提前规划？"],
+    }
+    store.save_outline_artifact(state, "characters", "# 人物关系\n\n已有草案。\n")
+    store.save_state(state)
+
+    def fake_run(data: dict, adapter: AgentAdapter, local_store: LocalStore, progress=None) -> dict:
+        data["outline_stage_artifacts"] = {
+            **data.get("outline_stage_artifacts", {}),
+            "characters": {
+                "stage": "characters",
+                "status": "options_ready",
+                "pending_questions": [],
+            },
+        }
+        data["pending_questions"] = []
+        return data
+
+    monkeypatch.setattr(service, "run_outline_stage_node", fake_run)
+
+    result = service.submit_stage_pending_answers(
+        store,
+        DummyAdapter(),
+        "web-demo",
+        "characters",
+        [
+            {
+                "question": "林霄视角章是否需提前规划？",
+                "selected_option_id": "accept",
+                "answer": "采纳当前建议，提前规划1-2个专属视角章。",
+            }
+        ],
+    )
+
+    reloaded = store.load_state("web-demo")
+    payload = service.outline_stage_pending_payload(store, "web-demo", "characters")
+    assert reloaded.pending_questions == []
+    assert payload["items"] == []
 
 
 def test_submit_stage_pending_answers_builds_revision_instruction(monkeypatch, tmp_path: Path) -> None:

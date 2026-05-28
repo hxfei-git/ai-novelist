@@ -2701,3 +2701,11 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - `PYTHONPATH=src .venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py::test_chapter_outline_workspace_uses_single_left_volume_navigation -q`：1 passed。
 - `PYTHONPATH=src .venv/bin/python -m pytest tests/test_web_service.py tests/test_frontend_review_tabs_structure.py -q`：81 passed。
 - `npm --prefix web/frontend run build`：通过（Vite CJS Node API deprecation warning only）。
+
+### 2026-05-28 大纲审查采纳后回写基线
+
+- `apply_outline_review()` 现在会把采纳后的总纲重新拆回各阶段基线，并同步写入 `outline.md`、`outline_stages/*.md`、`outline/*.md` 和 `state.json` 中的轻量 artifact。
+- 回写逻辑按一级 `##` 标题匹配已知阶段标签，`worldbuilding` 额外同步根目录 `worldbuilding.md`。
+- 采纳后不会自动触发新一轮审查；下一轮仍然只会在用户手动点击“审查”时启动，并且会读取最新已保存的基线。
+- 新增回归测试覆盖“采纳后再次手动审查读取新基线”。
+

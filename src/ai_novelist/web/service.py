@@ -19,12 +19,15 @@ from ai_novelist.graph_outline import (
     advance_outline_stage_node,
     build_final_outline_text,
     compare_outline_versions_node,
+    extract_outline_stage_memory_for_artifact,
     parse_status_score,
     persist_outline_node,
     review_outline_node,
     revise_outline_node,
     run_outline_stage_node,
+    save_outline_stage_outputs,
     stage_full_text,
+    summarize_outline_stage_for_artifact,
 )
 from ai_novelist.graph_volume_write import build_volume_write_graph, parse_chapter_override
 from ai_novelist.outline.chapter_outline_structure import (
@@ -134,6 +137,9 @@ def normalize_progress_log_items(items: Iterable[Any]) -> list[ProgressItem]:
                 key: str(item.get(key) or "").strip()
                 for key in ("label", "elapsed", "tokens", "context", "status")
             }
+            key = str(item.get("key") or "").strip()
+            if key:
+                event["key"] = key
             if event["label"]:
                 normalized.append(event)
         if len(normalized) >= MAX_WEB_PROGRESS_LOG_ITEMS:
@@ -144,15 +150,19 @@ def normalize_progress_log_items(items: Iterable[Any]) -> list[ProgressItem]:
 def build_progress_event(stage: str, message: str) -> dict[str, str]:
     body = str(message or "").strip()
     label = body.split("（", 1)[0].strip() or str(stage or "").strip() or "Progress"
+    label = re.sub(r"^(已完成[:：]?)", "", label).strip()
+    label = re.sub(r"^(执行失败[:：]?)", "", label).strip()
     elapsed = re.search(r"(?:^|[/（])(\d+(?:\.\d+)?s)(?:[/）]|$)", body)
     tokens = re.search(r"(tok≈[^/）\s]+)", body)
     context = re.search(r"(ctx=[^/）\s]+(?:/[^/）\s]+)?)", body)
+    status = "failed" if "失败" in body else "completed" if body.startswith("已完成") else "running"
     return {
+        "key": str(stage or "").strip() or label,
         "label": label,
         "elapsed": elapsed.group(1) if elapsed else "",
         "tokens": tokens.group(1) if tokens else "",
         "context": context.group(1) if context else "",
-        "status": "failed" if "失败" in body else "running",
+        "status": status,
     }
 
 
@@ -280,8 +290,73 @@ def outline_review_source_text(state: NovelState, store: LocalStore) -> str:
     return build_final_outline_text(state, store).strip()
 
 
+OUTLINE_REVIEW_SECTION_STAGES = {
+    STAGE_LABELS[stage]: stage
+    for stage in OUTLINE_STAGES
+    if stage != "review_lock"
+}
+
+
 def outline_review_report_paths(store: LocalStore, project_id: str, run_id: str) -> tuple[Path, Path]:
     return store.outline_review_report_path(project_id, run_id), store.outline_review_markdown_path(project_id, run_id)
+
+
+def split_outline_review_sections(text: str) -> dict[str, str]:
+    sections: dict[str, str] = {}
+    current_title = ""
+    current_lines: list[str] = []
+    for raw_line in str(text or "").splitlines():
+        stripped = raw_line.strip()
+        heading = re.match(r"^##\s+(.+?)\s*$", stripped)
+        if heading and heading.group(1) in OUTLINE_REVIEW_SECTION_STAGES:
+            if current_title:
+                sections[current_title] = "\n".join(current_lines).strip()
+            current_title = heading.group(1)
+            current_lines = []
+            continue
+        if current_title:
+            current_lines.append(raw_line)
+    if current_title:
+        sections[current_title] = "\n".join(current_lines).strip()
+    return sections
+
+
+def write_outline_review_baseline_sections(store: LocalStore, state: NovelState, outline_text: str) -> tuple[list[str], list[str]]:
+    sections = split_outline_review_sections(outline_text)
+    updated_stages: list[str] = []
+    skipped_stages: list[str] = []
+    timestamp = datetime.now(UTC).isoformat(timespec="seconds")
+    for title, stage in OUTLINE_REVIEW_SECTION_STAGES.items():
+        section_text = sections.get(title, "").strip()
+        if not section_text:
+            if title in sections:
+                skipped_stages.append(stage)
+            continue
+        artifact = dict(state.outline_stage_artifacts.get(stage) or {})
+        summary = summarize_outline_stage_for_artifact(stage, section_text)
+        stage_memory = extract_outline_stage_memory_for_artifact(stage, section_text)
+        pending_questions = extract_pending_questions_from_stage_markdown(section_text)
+        artifact.update(
+            {
+                "stage": stage,
+                "label": title,
+                "status": str(artifact.get("status") or "options_ready"),
+                "path": f"outline/{stage}.md",
+                "synthesis": section_text,
+                "summary": summary,
+                "stage_memory": stage_memory,
+                "pending_questions": pending_questions,
+                "updated_at": timestamp,
+            }
+        )
+        state.outline_stage_artifacts[stage] = artifact
+        state.outline_stage_summaries[stage] = summary
+        save_outline_stage_outputs(state, stage, section_text, store, source_agent="outline_review_apply")
+        if stage == "worldbuilding":
+            state.worldbuilding = section_text
+            store.save_worldbuilding(state)
+        updated_stages.append(stage)
+    return updated_stages, skipped_stages
 
 
 def latest_outline_review_run(store: LocalStore, project_id: str) -> str:
@@ -803,6 +878,7 @@ def apply_outline_review(store: LocalStore, adapter: AgentAdapter, project_id: s
     compared.review_status = "approved"
     compared.editor_decision = "pass" if decision == "pass" else compared.editor_decision
     compared.director_message = f"已采纳大纲审查建议并保存：{store.outline_path(project_id)}"
+    updated_stages, skipped_stages = write_outline_review_baseline_sections(store, compared, compared.outline)
     store.save_outline(compared)
     store.save_state(compared)
     emit("OutlineReview", "大纲审查建议已应用并保存。")
@@ -812,6 +888,8 @@ def apply_outline_review(store: LocalStore, adapter: AgentAdapter, project_id: s
         "applied": True,
         "path": store.outline_path(project_id).relative_to(store.project_dir(project_id)).as_posix(),
         "version_count": len(compared.outline_versions),
+        "updated_stages": updated_stages,
+        "skipped_stages": skipped_stages,
     }
 
 
@@ -979,7 +1057,9 @@ def submit_stage_pending_answers(
     state.director_intent = "answer_pending_questions"
     store.save_state(state)
     result = run_outline_stage_node(state.to_dict(), adapter, store, progress or (lambda _stage, _message: None))
-    return NovelState.from_dict(result)
+    result_state = NovelState.from_dict(result)
+    store.save_state(result_state)
+    return store.load_state(project_id)
 
 
 

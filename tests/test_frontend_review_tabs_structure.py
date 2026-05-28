@@ -255,6 +255,17 @@ def test_progress_panel_renders_structured_metrics_and_keeps_legacy_branch() -> 
     assert "latest.summary || '无摘要'" not in source
 
 
+def test_progress_panel_merges_rows_by_key_and_renders_completion_metrics() -> None:
+    source = read_main()
+
+    assert "function upsertProgressItem" in source
+    assert "progressItemKey(item)" in source
+    assert "(item.key || item.label)" in source or "item.key || item.label" in source
+    assert "[item.status, item.elapsed, item.tokens, item.context].filter(Boolean).join(' · ')" in source
+    assert "pushLog(message: ProgressItem)" in source
+    assert "void saveProjectProgressLog(next)" in source
+
+
 def test_frontend_progress_log_uses_project_directory_api_not_local_storage() -> None:
     source = read_main()
 
