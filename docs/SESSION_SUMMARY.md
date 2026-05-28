@@ -44,12 +44,12 @@ Design spec committed:
 
 Key findings:
 
-- The app is currently healthy under tests and frontend build.
-- Active docs contained stale command examples for removed CLI flows.
-- `.superpowers/` appeared as an untracked local artifact directory.
-- DeepSeek default references were inconsistent between code/docs/script.
-- `graph_outline.py`, `web/service.py`, `web/frontend/src/main.tsx`, `adapters/codex_cli.py`, and `tests/test_web_service.py` are maintenance hotspots.
-- Some modules and prompts are pruning candidates, but dynamic prompt loading and persisted project compatibility require a reference matrix before deletion.
+- The app was healthy under tests and frontend build at audit time.
+- Active docs contained stale command examples for removed CLI flows; this cleanup batch rewrote the active docs for Web-only usage.
+- `.superpowers/` appeared as an untracked local artifact directory; this cleanup batch added ignore coverage.
+- DeepSeek default references were inconsistent between code/docs/script; this cleanup batch aligned the script default and added a drift guard.
+- `graph_outline.py`, `web/service.py`, `web/frontend/src/main.tsx`, `adapters/codex_cli.py`, and `tests/test_web_service.py` remain maintenance hotspots.
+- Some modules and prompts remain pruning candidates, but dynamic prompt loading and persisted project compatibility require future verified deletion work.
 
 ## Verification Recorded During Audit
 
@@ -70,23 +70,23 @@ npm --prefix web/frontend run build
 
 Removed chat command check: invalid choice, proving the chat command is no longer active.
 
-## Cleanup Plan
+## Completed in This Cleanup Batch
 
-Current implementation plan:
+Implementation plan:
 
 - `docs/superpowers/plans/2026-05-28-web-only-architecture-cleanup.md`
 
-Batch scope:
+Completed commits and files:
 
-- ignore local `.superpowers/`
-- rewrite README for Web-only usage
-- rewrite active architecture plan
-- align DeepSeek default in `scripts/run_web.sh`
-- add a focused runtime-default drift test
-- create `docs/web_only_reference_matrix.md`
-- rewrite this session summary
+- `25bc6bf` ignored local `.superpowers/` artifacts in `.gitignore`.
+- `56999de` added `tests/test_web_runtime_defaults.py` to guard Web runtime default drift.
+- `07deb4a` aligned `scripts/run_web.sh` with the configured DeepSeek default.
+- `cc60773` rewrote `README.md` for the Web-only command surface.
+- `34702ed` rewrote `docs/IMPLEMENTATION_PLAN.md` for the current Web-only architecture and roadmap.
+- `314e5dd` created `docs/web_only_reference_matrix.md` for future verified pruning decisions.
+- `870b14f` rewrote `docs/SESSION_SUMMARY.md` from stale historical notes to the current Web-only summary.
 
-Deferred to separate future plans:
+## Deferred Work
 
 - verified deletion of state fields, prompts, modules, or tests
 - splitting large backend/frontend/test files
