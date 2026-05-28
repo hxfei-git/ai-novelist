@@ -70,21 +70,58 @@ npm --prefix web/frontend run build
 
 Removed chat command check: invalid choice, proving the chat command is no longer active.
 
+## Verification Recorded After Cleanup
+
+```bash
+.venv/bin/ai-novelist --help
+# only exposes {web}
+```
+
+Removed chat command check: invalid choice, confirming the removed chat subcommand remains inactive.
+
+Active-doc deleted command scan over README, implementation plan, and session summary returned no matches.
+
+```bash
+.venv/bin/python -m pytest tests/test_web_runtime_defaults.py -q
+# 1 passed in 0.02s
+```
+
+```bash
+.venv/bin/python -m pytest -q
+# 226 passed in 2.15s
+```
+
+```bash
+npm --prefix web/frontend run build
+# passed; Vite printed the known CJS Node API deprecation warning
+```
+
+```bash
+git status --short
+# clean
+```
+
+```bash
+git check-ignore -v .superpowers
+# .gitignore:16:.superpowers/ .superpowers
+```
+
 ## Completed in This Cleanup Batch
 
 Implementation plan:
 
 - `docs/superpowers/plans/2026-05-28-web-only-architecture-cleanup.md`
 
-Completed commits and files:
+Completed implementation commits before this final verification record:
 
 - `25bc6bf` ignored local `.superpowers/` artifacts in `.gitignore`.
-- `56999de` added `tests/test_web_runtime_defaults.py` to guard Web runtime default drift.
-- `07deb4a` aligned `scripts/run_web.sh` with the configured DeepSeek default.
+- `56999de` aligned `scripts/run_web.sh` with the configured DeepSeek default and added the initial runtime default guard.
+- `07deb4a` isolated `tests/test_web_runtime_defaults.py` from unrelated environment variables.
 - `cc60773` rewrote `README.md` for the Web-only command surface.
 - `34702ed` rewrote `docs/IMPLEMENTATION_PLAN.md` for the current Web-only architecture and roadmap.
 - `314e5dd` created `docs/web_only_reference_matrix.md` for future verified pruning decisions.
 - `870b14f` rewrote `docs/SESSION_SUMMARY.md` from stale historical notes to the current Web-only summary.
+- `f33a34d` clarified completed cleanup work versus deferred future work in `docs/SESSION_SUMMARY.md`.
 
 ## Deferred Work
 
