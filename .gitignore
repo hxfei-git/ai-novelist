@@ -13,3 +13,4 @@ projects/
 web/frontend/node_modules/
 web/frontend/tsconfig.tsbuildinfo
 run/
+.superpowers/
