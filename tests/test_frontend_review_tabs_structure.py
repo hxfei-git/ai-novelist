@@ -6,11 +6,21 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MAIN_TSX = ROOT / "web" / "frontend" / "src" / "main.tsx"
+TYPES_TS = ROOT / "web" / "frontend" / "src" / "types.ts"
+API_TS = ROOT / "web" / "frontend" / "src" / "api.ts"
 STYLES_CSS = ROOT / "web" / "frontend" / "src" / "styles.css"
 
 
 def read_main() -> str:
     return MAIN_TSX.read_text(encoding="utf-8")
+
+
+def read_types() -> str:
+    return TYPES_TS.read_text(encoding="utf-8")
+
+
+def read_api() -> str:
+    return API_TS.read_text(encoding="utf-8")
 
 
 def sidebar_source(source: str) -> str:
@@ -52,7 +62,7 @@ def test_review_entries_move_into_sidebar_navigation() -> None:
 def test_top_navigation_has_three_workspaces() -> None:
     source = read_main()
 
-    assert_union_type_includes(source, "TopSection", "outline", "chapter-outline", "chapters")
+    assert_union_type_includes(read_types(), "TopSection", "outline", "chapter-outline", "chapters")
     assert "topSection === 'outline'" in source
     assert "topSection === 'chapter-outline'" in source
     assert "topSection === 'chapters'" in source
@@ -67,7 +77,7 @@ def test_top_navigation_has_three_workspaces() -> None:
 def test_outline_workspace_uses_sidebar_review_navigation() -> None:
     source = read_main()
 
-    assert_union_type_includes(source, "OutlineStageView", "edit", "review")
+    assert_union_type_includes(read_types(), "OutlineStageView", "edit", "review")
     assert "outlineStageView === 'edit'" in source
     assert "outlineStageView === 'review'" in source
     assert "setOutlineStageView('edit')" in source
@@ -165,7 +175,8 @@ def test_outline_review_uses_three_choice_decision_board() -> None:
 
 def test_outline_review_apply_refreshes_updated_stage_after_success() -> None:
     source = read_main()
-    stream_block = source[source.index("async function streamAction"):source.index("function App()")]
+    api_source = read_api()
+    stream_block = api_source[api_source.index("async function streamAction"):]
     apply_block = source[source.index("async function applyOutlineReview"):source.index("function dismissOutlineReview")]
 
     assert "let donePayload" in stream_block
@@ -234,7 +245,7 @@ def test_outline_stage_actions_clear_instruction_after_completion() -> None:
 def test_outline_stage_pending_questions_render_recommended_options() -> None:
     source = read_main()
 
-    assert "type PendingQuestionPayload" in source
+    assert "type PendingQuestionPayload" in read_types()
     assert "outline/stages/${stage}/pending" in source
     assert "function PendingQuestionPanel" in source
     assert "提交确认" in source
@@ -257,7 +268,7 @@ def test_stage_action_strip_and_lock_badge_have_distinct_styles() -> None:
 def test_frontend_restores_new_project_onboarding_workspace() -> None:
     source = read_main()
 
-    assert "type ProjectState" in source
+    assert "type ProjectState" in read_types()
     assert "const [projectState, setProjectState]" in source
     assert "const [onboardingIdea, setOnboardingIdea]" in source
     assert "needsOnboarding" in source
@@ -269,7 +280,7 @@ def test_frontend_restores_new_project_onboarding_workspace() -> None:
 def test_progress_panel_renders_structured_metrics_and_keeps_legacy_branch() -> None:
     source = read_main()
 
-    assert "type ProgressEvent" in source
+    assert "type ProgressEvent" in read_types()
     assert "typeof item === 'string'" in source
     assert "item.elapsed" in source
     assert "item.tokens" in source
