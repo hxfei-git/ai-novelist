@@ -132,6 +132,9 @@ Completed implementation commits before this final verification record:
 ## P1 Verified Prune Progress
 
 - Confirmed local `__pycache__` directories are not tracked by Git; no repository deletion is needed.
+- Removed `src/ai_novelist/output_contracts.py` and `tests/test_output_contracts.py` after confirming the module had no runtime imports.
+- Verified output-contract removal with `tests/test_web_service.py tests/test_graph_volume_write.py`: 73 passed in 0.93s.
+- Verified output-contract removal with full pytest: 223 passed in 2.03s.
 
 ## Remaining Risk
 

@@ -35,7 +35,7 @@ Statuses:
 | `src/ai_novelist/graph_chapter_plan.py` | chapter write and outline workspace helpers depend on it | retain | verify call path before pruning |
 | `src/ai_novelist/graph_bible.py` | outline graph imports bible helpers | retain | verify old-project compatibility before pruning |
 | `src/ai_novelist/state.py` Director/research fields | fields load and save through project `state.json` | candidate | remove only with backward-compatible loader behavior |
-| `src/ai_novelist/output_contracts.py` | audit found direct references only from tests | candidate | delete only if no retained workflow imports it after full search |
+| `src/ai_novelist/output_contracts.py` | full search found direct references only from `tests/test_output_contracts.py`; both files removed | removed | no retained workflow imported it after verification |
 | `src/ai_novelist/corpus/project_memory.py` | audit found direct references only from tests | candidate | delete only if craft retrieval no longer needs project memory artifacts |
 | `src/ai_novelist/corpus/*` | some craft helpers are reachable through chapter and outline contexts | candidate | classify module-by-module with import and runtime checks |
 | `src/ai_novelist/prompts/*.md` | dynamic `load_prompt(prompt_name)` undercounts usage | candidate | remove only after tracing prompt_name values in graph code and tests |
@@ -65,4 +65,4 @@ If the candidate touches persisted state fields, create or update a test that lo
 
 ## Current Decision
 
-No P1 candidate is approved for deletion by this matrix alone. It is a prerequisite for a later verified-prune implementation plan.
+The `output_contracts` candidate has been removed after verification. Remaining P1 candidates still require candidate-specific checks before deletion.

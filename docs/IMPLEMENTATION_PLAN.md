@@ -134,7 +134,7 @@ Search and corpus settings still exist in configuration because some craft helpe
 
 ### P1: Verified Prune
 
-- maintain the P1 reference matrix after it is created
+- maintain the P1 reference matrix
 - classify candidates as retained, deleted, or compatibility-kept
 - delete only after import, dynamic prompt, Web route, test, and persisted-project checks
 - update `docs/SESSION_SUMMARY.md` with each cleanup batch
@@ -171,3 +171,5 @@ npm --prefix web/frontend run build
 
 - `docs/superpowers/specs/2026-05-28-web-only-architecture-audit-design.md`
 - `docs/superpowers/plans/2026-05-28-web-only-architecture-cleanup.md`
+- `docs/superpowers/plans/2026-05-28-web-only-verified-prune.md`
+- `docs/superpowers/plans/2026-05-28-web-structural-refactor.md`
