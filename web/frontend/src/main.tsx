@@ -2,156 +2,29 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Check, FileText, Layers, ListChecks, Lock, Play, RefreshCw, Save, X } from 'lucide-react';
 import './styles.css';
-
-type Project = { project_id: string; title: string; path: string };
-type ProjectState = {
-  project_id: string;
-  title: string;
-  idea: string;
-  outline: string;
-  worldbuilding: string;
-  chapter_plan: string;
-  outline_stage_summaries: Record<string, string>;
-  outline_stage_artifacts: Record<string, { status?: string; summary?: string }>;
-};
-type ActionState = {
-  can_generate: boolean;
-  can_revise: boolean;
-  can_lock: boolean;
-  lock_reason: string;
-};
-type Stage = {
-  stage: string;
-  label: string;
-  status: string;
-  active: boolean;
-  summary: string;
-  pending_questions: string[];
-  review_lock_issues?: { blocking: string[]; detail: string[]; revision_targets: string[] };
-  content?: string;
-  action_state?: ActionState;
-};
-type PendingOption = {
-  id: string;
-  label: string;
-  answer: string;
-  requires_input?: boolean;
-};
-type PendingQuestion = {
-  id: string;
-  question: string;
-  options: PendingOption[];
-};
-type PendingQuestionPayload = {
-  project_id: string;
-  stage: string;
-  items: PendingQuestion[];
-};
-type ChapterOutlineVolumeSpec = {
-  index: number;
-  label: string;
-  name: string;
-  summary?: string;
-};
-type ChapterOutlineSelectedVolume = {
-  index: number;
-  label: string;
-  name: string;
-  status: string;
-  summary: string;
-  content: string;
-} & ActionState;
-type ChapterOutlineWorkspace = {
-  volume_specs: ChapterOutlineVolumeSpec[];
-  current_volume_index: number;
-  completed_volumes: number[];
-  volume_statuses: Record<string, string>;
-  selected_volume: ChapterOutlineSelectedVolume;
-};
-type Chapter = {
-  chapter: number;
-  title: string;
-  path: string;
-  source: string;
-  version: number | null;
-  updated_at: string;
-  summary: string;
-  content?: string;
-};
-type ChapterBatchWorkspace = {
-  volume_index: number;
-  volume_label: string;
-  volume_name: string;
-  total_chapters: number;
-  generated_chapters: number;
-  remaining_chapters: number;
-  next_chapter_number: number | null;
-  planned_chapter_numbers: number[];
-  remaining_chapter_numbers: number[];
-  chapters: Chapter[];
-};
-type ReviewIssue = {
-  severity: string;
-  chapter: number | null;
-  category?: string;
-  message: string;
-};
-type ReviewSuggestion = {
-  id: string;
-  chapter: number | null;
-  severity: string;
-  category: string;
-  message: string;
-  recommendation: string;
-  selected: boolean;
-};
-type ReviewReportData = {
-  project_id: string;
-  run_id: string;
-  status: string;
-  summary: string;
-  issues: ReviewIssue[];
-  repair_suggestions?: ReviewSuggestion[];
-};
-type OutlineReview = {
-  project_id: string;
-  run_id: string;
-  created_at: string;
-  status: string;
-  decision: string;
-  score: number;
-  summary: string;
-  notes: string;
-  revision_instruction: string;
-  source_outline_summary: string;
-  source_outline: string;
-  repair_suggestions?: OutlineReviewSuggestion[];
-};
-type OutlineReviewSuggestion = {
-  id: string;
-  severity: string;
-  category: string;
-  message: string;
-  recommendation: string;
-  selected: boolean;
-};
-type OutlineRepairDecisionValue = 'recommended' | 'skip' | 'custom';
-type OutlineRepairDecision = {
-  decision: OutlineRepairDecisionValue;
-  custom_answer: string;
-};
-type ProgressEvent = {
-  key?: string;
-  label: string;
-  elapsed: string;
-  tokens: string;
-  context: string;
-  status: string;
-};
-type ProgressItem = string | ProgressEvent;
-type TopSection = 'outline' | 'chapter-outline' | 'chapters';
-type OutlineStageView = 'edit' | 'review';
-type ChapterView = 'batch' | 'list' | 'review';
+import { api, streamAction } from './api';
+import type {
+  ActionState,
+  Chapter,
+  ChapterBatchWorkspace,
+  ChapterOutlineWorkspace,
+  ChapterView,
+  OutlineRepairDecision,
+  OutlineRepairDecisionValue,
+  OutlineReview,
+  OutlineReviewSuggestion,
+  OutlineStageView,
+  PendingQuestion,
+  PendingQuestionPayload,
+  ProgressEvent,
+  ProgressItem,
+  Project,
+  ProjectState,
+  ReviewReportData,
+  ReviewSuggestion,
+  Stage,
+  TopSection,
+} from './types';
 
 const maxLogItems = 10;
 const disabledActionState: ActionState = {
@@ -233,60 +106,6 @@ function upsertProgressItem(items: ProgressItem[], message: ProgressItem) {
   if (!key) return [...items, message].slice(-maxLogItems);
   const next = items.filter((item) => progressItemKey(item) !== key);
   return [...next, message].slice(-maxLogItems);
-}
-
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    ...init,
-    cache: 'no-store',
-    headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
-}
-
-async function streamAction(path: string, body: unknown, onProgress: (event: ProgressEvent) => void): Promise<unknown> {
-  const res = await fetch(path, {
-    method: 'POST',
-    cache: 'no-store',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok || !res.body) throw new Error(await res.text());
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let donePayload: unknown;
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const events = buffer.split('\n\n');
-    buffer = events.pop() || '';
-    for (const event of events) {
-      const lines = event.split('\n');
-      const eventLine = lines.find((line) => line.startsWith('event: '));
-      const dataLine = lines.find((line) => line.startsWith('data: '));
-      if (!dataLine) continue;
-      const data = dataLine.slice(6);
-      if (eventLine?.slice(7) === 'error') {
-        try {
-          const parsed = JSON.parse(data);
-          throw new Error(parsed.error || data);
-        } catch (error) {
-          if (error instanceof Error && error.message !== data) throw error;
-          throw new Error(data);
-        }
-      }
-      if (eventLine?.slice(7) === 'done') {
-        donePayload = JSON.parse(data);
-        continue;
-      }
-      if (eventLine?.slice(7) !== 'progress') continue;
-      onProgress(JSON.parse(data) as ProgressEvent);
-    }
-  }
-  return donePayload;
 }
 
 function App() {

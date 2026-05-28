@@ -123,7 +123,7 @@ Search and corpus settings still exist in configuration because some craft helpe
 - Large modules concentrate unrelated responsibilities:
   - `graph_outline.py`
   - `web/service.py`, reduced by moving outline helpers but still large
-  - `web/frontend/src/main.tsx`
+  - `web/frontend/src/main.tsx`, reduced by moving shared types and API helpers into `web/frontend/src/types.ts` and `web/frontend/src/api.ts`
   - `adapters/mock_codex.py` as a large deterministic fixture isolated from the real adapter
   - `tests/test_web_service.py`
 
