@@ -49,9 +49,10 @@ Workflow helpers
   |
   v
 Model adapters
-  |-- CodexCLIAdapter
+  |-- CodexCLIAdapter for real Codex CLI execution
+  |-- MockCodexAdapter for deterministic mock mode
   |-- DeepSeekAdapter
-  `-- mock mode through CodexCLIAdapter(mock=True)
+  `-- CodexCLIAdapter(mock=True) compatibility delegates to MockCodexAdapter
   |
   v
 Local files under projects/<project>/
@@ -120,7 +121,7 @@ Search and corpus settings still exist in configuration because some craft helpe
   - `graph_outline.py`
   - `web/service.py`
   - `web/frontend/src/main.tsx`
-  - `adapters/codex_cli.py`
+  - `adapters/mock_codex.py` as a large deterministic fixture isolated from the real adapter
   - `tests/test_web_service.py`
 
 ## Cleanup Roadmap
@@ -143,7 +144,7 @@ Search and corpus settings still exist in configuration because some craft helpe
 
 - split large files by workflow boundary
 - keep Web API payloads stable
-- separate mock model behavior from the real Codex adapter
+- keep mock model behavior separate from the real Codex adapter
 - split broad Web service tests by workflow area
 
 ## Verification Policy
