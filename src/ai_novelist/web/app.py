@@ -252,6 +252,9 @@ def make_app(
             selected_issue_ids = [str(item) for item in selected_issue_ids if str(item).strip()]
         else:
             selected_issue_ids = None
+        decisions = payload.get("decisions")
+        if not isinstance(decisions, list):
+            decisions = None
         return StreamingResponse(
             sse_events(
                 lambda progress: service.apply_outline_review(
@@ -261,6 +264,7 @@ def make_app(
                     run_id,
                     progress,
                     selected_issue_ids=selected_issue_ids,
+                    decisions=decisions,
                 )
             ),
             media_type="text/event-stream",

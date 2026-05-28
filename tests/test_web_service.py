@@ -804,6 +804,62 @@ def test_apply_outline_review_uses_only_selected_suggestions(tmp_path: Path) -> 
     assert unselected["recommendation"] not in adapter.reviser_prompt
 
 
+def test_apply_outline_review_uses_recommended_custom_and_skip_decisions(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+    state.outline = "# 最终锁定总大纲\n\n## 章节大纲\n旧稿。"
+    store.save_state(state)
+    report = service.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
+    suggestions = report["repair_suggestions"]
+    skipped = {
+        "id": "skip-test",
+        "severity": "minor",
+        "category": "issue",
+        "message": "暂不处理的背景支线。",
+        "recommendation": "补写暂不处理的背景支线。",
+        "selected": True,
+    }
+    report["repair_suggestions"] = [*suggestions, skipped]
+    service.write_outline_review_report(store, store.load_state("web-demo"), report)
+    suggestions = report["repair_suggestions"]
+    adapter = CapturingOutlineReviewAdapter()
+
+    service.apply_outline_review(
+        store,
+        adapter,
+        "web-demo",
+        report["run_id"],
+        decisions=[
+            {"issue_id": suggestions[0]["id"], "decision": "recommended", "custom_answer": ""},
+            {"issue_id": suggestions[1]["id"], "decision": "custom", "custom_answer": "按我的意见收束第二卷主线，不新增支线。"},
+            {"issue_id": skipped["id"], "decision": "skip", "custom_answer": ""},
+        ],
+    )
+
+    assert suggestions[0]["recommendation"] in adapter.reviser_prompt
+    assert "按我的意见收束第二卷主线，不新增支线。" in adapter.reviser_prompt
+    assert skipped["message"] not in adapter.reviser_prompt
+    assert skipped["recommendation"] not in adapter.reviser_prompt
+
+
+def test_apply_outline_review_rejects_empty_custom_decision(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+    state.outline = "# 最终锁定总大纲\n\n## 章节大纲\n旧稿。"
+    store.save_state(state)
+    report = service.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
+    suggestion = report["repair_suggestions"][0]
+
+    with pytest.raises(LocalStoreError, match="我的意见不能为空"):
+        service.apply_outline_review(
+            store,
+            OutlineReviewAdapter(),
+            "web-demo",
+            report["run_id"],
+            decisions=[{"issue_id": suggestion["id"], "decision": "custom", "custom_answer": "   "}],
+        )
+
+
 def test_submit_stage_pending_answers_can_return_another_round(monkeypatch, tmp_path: Path) -> None:
     store = LocalStore(tmp_path)
     state = store.create_project("Web Demo", "web-demo")

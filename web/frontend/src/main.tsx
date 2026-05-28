@@ -135,6 +135,11 @@ type OutlineReviewSuggestion = {
   recommendation: string;
   selected: boolean;
 };
+type OutlineRepairDecisionValue = 'recommended' | 'skip' | 'custom';
+type OutlineRepairDecision = {
+  decision: OutlineRepairDecisionValue;
+  custom_answer: string;
+};
 type ProgressEvent = {
   key?: string;
   label: string;
@@ -180,6 +185,14 @@ function buildOutlineRepairSelectionMap(suggestions: OutlineReviewSuggestion[]) 
   const next: Record<string, boolean> = {};
   suggestions.forEach((item) => {
     next[item.id] = item.selected !== false;
+  });
+  return next;
+}
+
+function buildOutlineRepairDecisionMap(suggestions: OutlineReviewSuggestion[]) {
+  const next: Record<string, OutlineRepairDecision> = {};
+  suggestions.forEach((item) => {
+    next[item.id] = { decision: item.selected === false ? 'skip' : 'recommended', custom_answer: '' };
   });
   return next;
 }
@@ -304,7 +317,7 @@ function App() {
   const [outlineReview, setOutlineReview] = useState<OutlineReview | null>(null);
   const [outlineReviewRunning, setOutlineReviewRunning] = useState(false);
   const [outlineReviewApplying, setOutlineReviewApplying] = useState(false);
-  const [selectedOutlineRepairIds, setSelectedOutlineRepairIds] = useState<Record<string, boolean>>({});
+  const [outlineRepairDecisions, setOutlineRepairDecisions] = useState<Record<string, OutlineRepairDecision>>({});
   const [chapterOutlineReview, setChapterOutlineReview] = useState<OutlineReview | null>(null);
   const [chapterOutlineReviewRunning, setChapterOutlineReviewRunning] = useState(false);
   const [chapterOutlineReviewApplying, setChapterOutlineReviewApplying] = useState(false);
@@ -355,7 +368,7 @@ function App() {
     setOutlineReview(null);
     setChapterOutlineReview(null);
     setSelectedRepairIds({});
-    setSelectedOutlineRepairIds({});
+    setOutlineRepairDecisions({});
     setSelectedChapterOutlineRepairIds({});
     setOutlineStageView('edit');
     setChapterOutlineView('volume');
@@ -581,7 +594,7 @@ function App() {
   async function loadLatestOutlineReview() {
     const latest = await api<OutlineReview>(`/api/projects/${projectId}/outline/review/latest`);
     setOutlineReview(latest);
-    setSelectedOutlineRepairIds(buildOutlineRepairSelectionMap(latest.repair_suggestions || []));
+    setOutlineRepairDecisions(buildOutlineRepairDecisionMap(latest.repair_suggestions || []));
   }
 
   async function loadLatestChapterOutlineReview() {
@@ -607,9 +620,19 @@ function App() {
   async function applyOutlineReview() {
     if (!outlineReview?.run_id) return;
     const suggestions = outlineReview.repair_suggestions || [];
-    const selectedIssueIds = suggestions.filter((item) => selectedOutlineRepairIds[item.id] !== false).map((item) => item.id);
-    if (suggestions.length > 0 && selectedIssueIds.length === 0) {
+    const decisions = suggestions.map((item) => ({
+      issue_id: item.id,
+      decision: outlineRepairDecisions[item.id]?.decision || 'recommended',
+      custom_answer: outlineRepairDecisions[item.id]?.custom_answer || '',
+    }));
+    const activeDecisions = decisions.filter((item) => item.decision !== 'skip');
+    const emptyCustom = activeDecisions.find((item) => item.decision === 'custom' && !item.custom_answer.trim());
+    if (suggestions.length > 0 && activeDecisions.length === 0) {
       pushLog({ label: '大纲总体审查', elapsed: '', tokens: '', context: '', status: 'no_selection' });
+      return;
+    }
+    if (emptyCustom) {
+      showError(new Error('请先填写“我的意见”再应用。'));
       return;
     }
     setOutlineReviewApplying(true);
@@ -617,7 +640,7 @@ function App() {
     try {
       await streamAction(
         `/api/projects/${projectId}/outline/review/${outlineReview.run_id}/apply`,
-        { selected_issue_ids: selectedIssueIds },
+        { decisions },
         (line) => pushLog(line),
       );
       await loadLatestOutlineReview();
@@ -888,8 +911,15 @@ function App() {
               applying={outlineReviewApplying}
               onInstructionChange={setInstruction}
               onRun={runOutlineReview}
-              selectedOutlineRepairIds={selectedOutlineRepairIds}
-              onToggleSuggestion={(id, checked) => setSelectedOutlineRepairIds((currentState) => ({ ...currentState, [id]: checked }))}
+              outlineRepairDecisions={outlineRepairDecisions}
+              onDecisionChange={(id, decision) => setOutlineRepairDecisions((currentState) => ({
+                ...currentState,
+                [id]: { ...(currentState[id] || { decision: 'recommended', custom_answer: '' }), decision },
+              }))}
+              onCustomAnswerChange={(id, customAnswer) => setOutlineRepairDecisions((currentState) => ({
+                ...currentState,
+                [id]: { ...(currentState[id] || { decision: 'recommended', custom_answer: '' }), custom_answer: customAnswer },
+              }))}
               onApply={applyOutlineReview}
               onDismiss={dismissOutlineReview}
             />
@@ -1177,8 +1207,9 @@ function OutlineReviewWorkspace({
   applying,
   onInstructionChange,
   onRun,
-  selectedOutlineRepairIds,
-  onToggleSuggestion,
+  outlineRepairDecisions,
+  onDecisionChange,
+  onCustomAnswerChange,
   onApply,
   onDismiss,
 }: {
@@ -1186,10 +1217,11 @@ function OutlineReviewWorkspace({
   instruction: string;
   running: boolean;
   applying: boolean;
-  selectedOutlineRepairIds: Record<string, boolean>;
+  outlineRepairDecisions: Record<string, OutlineRepairDecision>;
   onInstructionChange: (value: string) => void;
   onRun: () => void;
-  onToggleSuggestion: (id: string, checked: boolean) => void;
+  onDecisionChange: (id: string, decision: OutlineRepairDecisionValue) => void;
+  onCustomAnswerChange: (id: string, value: string) => void;
   onApply: () => void;
   onDismiss: () => void;
 }) {
@@ -1221,10 +1253,11 @@ function OutlineReviewWorkspace({
           <p>{review?.notes}</p>
           <small>参考大纲：{review?.source_outline_summary}</small>
           {(review?.repair_suggestions || []).length > 0 && (
-            <OutlineRepairSuggestionBoard
+            <OutlineRepairDecisionBoard
               suggestions={review?.repair_suggestions || []}
-              selectedOutlineRepairIds={selectedOutlineRepairIds}
-              onToggle={onToggleSuggestion}
+              decisions={outlineRepairDecisions}
+              onDecisionChange={onDecisionChange}
+              onCustomAnswerChange={onCustomAnswerChange}
             />
           )}
         </div>
@@ -1238,6 +1271,76 @@ function OutlineReviewWorkspace({
   );
 }
 
+
+
+function OutlineRepairDecisionBoard({
+  suggestions,
+  decisions,
+  onDecisionChange,
+  onCustomAnswerChange,
+}: {
+  suggestions: OutlineReviewSuggestion[];
+  decisions: Record<string, OutlineRepairDecision>;
+  onDecisionChange: (id: string, decision: OutlineRepairDecisionValue) => void;
+  onCustomAnswerChange: (id: string, value: string) => void;
+}) {
+  return (
+    <div className="outline-repair-table outline-repair-decisions" role="table" aria-label="大纲审查建议">
+      <div className="outline-repair-row outline-repair-decision-head" role="row">
+        <span role="columnheader">问题</span>
+        <span role="columnheader">推荐修改意见</span>
+        <span role="columnheader">暂不修改</span>
+        <span role="columnheader">我的意见</span>
+      </div>
+      {suggestions.map((item) => {
+        const value = decisions[item.id] || { decision: 'recommended', custom_answer: '' };
+        return (
+          <div className="outline-repair-row outline-repair-decision-row" role="row" key={item.id}>
+            <span role="cell">
+              <strong>{item.message}</strong>
+              <small>{item.severity || 'normal'} · {item.category || 'review'}</small>
+            </span>
+            <label role="cell">
+              <input
+                type="radio"
+                name={`outline-repair-${item.id}`}
+                checked={value.decision === 'recommended'}
+                onChange={() => onDecisionChange(item.id, 'recommended')}
+              />
+              <span>{item.recommendation}</span>
+            </label>
+            <label role="cell">
+              <input
+                type="radio"
+                name={`outline-repair-${item.id}`}
+                checked={value.decision === 'skip'}
+                onChange={() => onDecisionChange(item.id, 'skip')}
+              />
+              <span>暂不修改</span>
+            </label>
+            <label role="cell" className="custom-repair-choice">
+              <span>
+                <input
+                  type="radio"
+                  name={`outline-repair-${item.id}`}
+                  checked={value.decision === 'custom'}
+                  onChange={() => onDecisionChange(item.id, 'custom')}
+                />
+                我的意见
+              </span>
+              <textarea
+                value={value.custom_answer}
+                onChange={(event) => onCustomAnswerChange(item.id, event.target.value)}
+                disabled={value.decision !== 'custom'}
+                placeholder="写入你的采纳意见"
+              />
+            </label>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function OutlineRepairSuggestionBoard({
   suggestions,

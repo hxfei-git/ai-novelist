@@ -2481,3 +2481,12 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - 右侧进度日志现在按时间正序展示：新事件追加到列表尾部，旧事件保持在上方。
 - 进度项更新时继续按 key 去重，但保存与渲染都保持“上旧下新”的顺序，避免完成态把新消息顶到顶部。
 - 验证：`PYTHONPATH=src .venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py -k progress_log -q`。
+
+## 2026-05-28 大纲总体审查三栏采纳
+
+- 大纲总体审查建议现在按逐项决策应用：推荐修改意见、暂不修改、我的意见。
+- “我的意见”会进入后端修订指令；空自定义意见会被前端和后端拦截。
+- 旧 `selected_issue_ids` 仍兼容，章节大纲审查保持现有选择行为。
+- 变更文件：`src/ai_novelist/web/service.py`、`src/ai_novelist/web/app.py`、`web/frontend/src/main.tsx`、`web/frontend/src/styles.css`、`tests/test_web_service.py`、`tests/test_web_app.py`、`tests/test_frontend_review_tabs_structure.py`。
+- 验证范围：后端大纲审查 apply 测试、Web route 测试、前端结构测试、前端 build。
+

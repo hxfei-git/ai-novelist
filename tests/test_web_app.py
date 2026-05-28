@@ -72,6 +72,42 @@ def test_chapter_outline_review_latest_route_is_exposed(tmp_path) -> None:
     assert "/api/projects/{project_id}/outline/chapter-review/latest" in routes
 
 
+def test_outline_review_apply_route_accepts_decisions(tmp_path) -> None:
+    client = TestClient(web_app.make_app(Settings(projects_dir=tmp_path), mock=True))
+    captured: dict[str, object] = {}
+
+    def fake_apply_outline_review(store, adapter, project_id, run_id, progress=None, selected_issue_ids=None, decisions=None):
+        captured["project_id"] = project_id
+        captured["run_id"] = run_id
+        captured["selected_issue_ids"] = selected_issue_ids
+        captured["decisions"] = decisions
+        return {"applied": True}
+
+    original = web_app.service.apply_outline_review
+    web_app.service.apply_outline_review = fake_apply_outline_review
+    try:
+        response = client.post(
+            "/api/projects/web-demo/outline/review/run-1/apply",
+            json={
+                "decisions": [
+                    {"issue_id": "issue-1", "decision": "recommended", "custom_answer": ""},
+                    {"issue_id": "issue-2", "decision": "custom", "custom_answer": "我的意见"},
+                ],
+            },
+        )
+    finally:
+        web_app.service.apply_outline_review = original
+
+    assert response.status_code == 200
+    assert captured["project_id"] == "web-demo"
+    assert captured["run_id"] == "run-1"
+    assert captured["selected_issue_ids"] is None
+    assert captured["decisions"] == [
+        {"issue_id": "issue-1", "decision": "recommended", "custom_answer": ""},
+        {"issue_id": "issue-2", "decision": "custom", "custom_answer": "我的意见"},
+    ]
+
+
 def test_project_idea_and_progress_log_endpoints_are_project_scoped(tmp_path) -> None:
     client = TestClient(web_app.make_app(Settings(projects_dir=tmp_path), mock=True))
     created = client.post("/api/projects", json={"title": "Idea Web", "project_id": "idea-web"})

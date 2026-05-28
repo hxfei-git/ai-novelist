@@ -2715,3 +2715,13 @@ AI_NOVELIST_PARALLEL_AGENTS=1 AI_NOVELIST_MAX_PARALLEL_AGENTS=3 .venv/bin/ai-nov
 - `upsertProgressItem()` 现在把新进度项追加到尾部，并用 `slice(-maxLogItems)` 保留最近 10 条，因此 UI 里最新记录会显示在下面。
 - 进度项仍按 `key` 去重，运行中/完成中的同一阶段会更新同一条记录，只是顺序保持时间正序。
 - 验证：`PYTHONPATH=src .venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py -k progress_log -q`。
+
+### 2026-05-28 大纲总体审查三栏采纳
+
+目标：让大纲总体审查和各阶段待确认问题保持一致，每条建议都能选择“推荐修改意见 / 暂不修改 / 我的意见”，其中“我的意见”参与采纳应用。
+
+- 后端 `apply_outline_review()` 新增 `decisions` 逐项决策输入，兼容旧的 `selected_issue_ids`。
+- `recommended` 写入审查推荐，`custom` 写入用户自定义意见，`skip` 不进入修订指令；空自定义意见会抛出明确错误。
+- Web 大纲总体审查页改为三栏决策控件，并在应用时提交逐项 `decisions`。章节大纲总体审查仍保持既有 checkbox 选择行为。
+- 前端在应用前拦截空“我的意见”，应用中按钮继续禁用，失败时通过既有错误提示恢复可操作状态。
+

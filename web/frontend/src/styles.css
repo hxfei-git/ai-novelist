@@ -136,6 +136,11 @@ nav small { color: #5c6f7c; font-size: 11px; }
 .outline-repair-row input { margin-top: 3px; }
 .outline-repair-row strong { display: block; line-height: 1.4; }
 .outline-repair-row span { min-width: 0; line-height: 1.45; }
+.outline-repair-decisions .outline-repair-row { grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(110px, 0.55fr) minmax(220px, 1.1fr); }
+.outline-repair-decision-row label { display: flex; gap: 8px; align-items: flex-start; min-width: 0; line-height: 1.45; }
+.custom-repair-choice { flex-direction: column; }
+.custom-repair-choice > span { display: flex; gap: 8px; align-items: center; }
+.custom-repair-choice textarea { width: 100%; min-height: 68px; resize: vertical; }
 .outline-repair-head { color: #475569; background: #f1f5f9; font-size: 12px; font-weight: 700; }
 .empty-review { color: #647582; }
 .review-report { display: flex; flex-direction: column; gap: 8px; border: 1px solid #d9e0e7; background: #ffffff; border-radius: 6px; padding: 12px; }

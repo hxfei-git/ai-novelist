@@ -737,8 +737,60 @@ def outline_stage_pending_payload(store: LocalStore, project_id: str, stage: str
     }
 
 
-def selected_outline_revision_instruction(report: dict[str, Any], selected_issue_ids: list[str] | None) -> str:
+def outline_revision_instruction_lines(suggestions: list[dict[str, Any]]) -> list[str]:
+    lines: list[str] = []
+    for item in suggestions:
+        message = str(item.get("message") or "").strip()
+        recommendation = str(item.get("recommendation") or message).strip()
+        if message and recommendation and message != recommendation:
+            lines.append(f"- {message} -> {recommendation}")
+        elif recommendation:
+            lines.append(f"- {recommendation}")
+    return lines
+
+
+def outline_revision_instruction_from_decisions(
+    report: dict[str, Any],
+    suggestions: list[dict[str, Any]],
+    decisions: list[dict[str, Any]],
+) -> str:
+    _ = report
+    suggestions_by_id = {str(item.get("id") or ""): item for item in suggestions}
+    lines: list[str] = []
+    for raw_decision in decisions:
+        issue_id = str(raw_decision.get("issue_id") or "").strip()
+        decision = str(raw_decision.get("decision") or "").strip()
+        if issue_id not in suggestions_by_id:
+            raise LocalStoreError("未找到选中的大纲审查建议")
+        if decision == "skip":
+            continue
+        if decision == "recommended":
+            lines.extend(outline_revision_instruction_lines([suggestions_by_id[issue_id]]))
+            continue
+        if decision == "custom":
+            custom_answer = str(raw_decision.get("custom_answer") or "").strip()
+            if not custom_answer:
+                raise LocalStoreError("我的意见不能为空")
+            message = str(suggestions_by_id[issue_id].get("message") or "").strip()
+            if message:
+                lines.append(f"- {message} -> {custom_answer}")
+            else:
+                lines.append(f"- {custom_answer}")
+            continue
+        raise LocalStoreError("不支持的大纲审查处理方式")
+    if not lines:
+        raise LocalStoreError("请选择至少一条大纲审查建议")
+    return "按用户逐项确认采纳以下大纲审查意见：\n" + "\n".join(lines)
+
+
+def selected_outline_revision_instruction(
+    report: dict[str, Any],
+    selected_issue_ids: list[str] | None,
+    decisions: list[dict[str, Any]] | None = None,
+) -> str:
     suggestions = [item for item in report.get("repair_suggestions", []) if isinstance(item, dict)]
+    if decisions is not None:
+        return outline_revision_instruction_from_decisions(report, suggestions, decisions)
     selected_ids = [str(item) for item in (selected_issue_ids or []) if str(item).strip()]
     if selected_issue_ids is not None and not selected_ids:
         raise LocalStoreError("请选择至少一条大纲审查建议")
@@ -747,14 +799,7 @@ def selected_outline_revision_instruction(report: dict[str, Any], selected_issue
         if not suggestions:
             raise LocalStoreError("未找到选中的大纲审查建议")
     if suggestions:
-        lines = []
-        for item in suggestions:
-            message = str(item.get("message") or "").strip()
-            recommendation = str(item.get("recommendation") or message).strip()
-            if message and recommendation and message != recommendation:
-                lines.append(f"- {message} -> {recommendation}")
-            elif recommendation:
-                lines.append(f"- {recommendation}")
+        lines = outline_revision_instruction_lines(suggestions)
         if lines:
             return "仅采纳以下选中的大纲审查建议：\n" + "\n".join(lines)
     return str(report.get("revision_instruction") or report.get("summary") or report.get("notes") or "").strip()
@@ -832,7 +877,15 @@ def review_outline(store: LocalStore, adapter: AgentAdapter, project_id: str, in
     return report
 
 
-def apply_outline_review(store: LocalStore, adapter: AgentAdapter, project_id: str, run_id: str, progress: ProgressFunc | None = None, selected_issue_ids: list[str] | None = None) -> dict[str, Any]:
+def apply_outline_review(
+    store: LocalStore,
+    adapter: AgentAdapter,
+    project_id: str,
+    run_id: str,
+    progress: ProgressFunc | None = None,
+    selected_issue_ids: list[str] | None = None,
+    decisions: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     emit = progress or (lambda _stage, _message: None)
     report = load_outline_review_report(store, project_id, run_id)
     state = store.load_state(project_id)
@@ -863,8 +916,8 @@ def apply_outline_review(store: LocalStore, adapter: AgentAdapter, project_id: s
         }
     emit("OutlineReview", "正在应用大纲审查建议...")
     state.outline = source_outline
-    state.revision_instruction = selected_outline_revision_instruction(report, selected_issue_ids)
-    state.editor_notes = state.revision_instruction if selected_issue_ids is not None else str(report.get("notes") or "")
+    state.revision_instruction = selected_outline_revision_instruction(report, selected_issue_ids, decisions)
+    state.editor_notes = state.revision_instruction if selected_issue_ids is not None or decisions is not None else str(report.get("notes") or "")
     state.review_status = "draft"
     store.save_state(state)
     revised = NovelState.from_dict(revise_outline_node(state.to_dict(), adapter, store))

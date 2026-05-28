@@ -149,13 +149,18 @@ def test_chapter_batch_panel_uses_volume_summary_and_single_quantity_input() -> 
     assert "并发数" not in batch_block
     assert "Math.min(requestedCount, remainingChapters)" in source
 
-def test_outline_review_uses_selectable_suggestion_board() -> None:
+def test_outline_review_uses_three_choice_decision_board() -> None:
     source = read_main()
+    apply_block = source[source.index("async function applyOutlineReview"):source.index("function dismissOutlineReview")]
 
-    assert "selectedOutlineRepairIds" in source
-    assert "OutlineRepairSuggestionBoard" in source
-    assert "selected_issue_ids" in source
-    assert "采纳选中项" in source
+    assert "outlineRepairDecisions" in source
+    assert "OutlineRepairDecisionBoard" in source
+    assert "推荐修改意见" in source
+    assert "暂不修改" in source
+    assert "我的意见" in source
+    assert "custom_answer" in source
+    assert "{ decisions }" in apply_block
+    assert "selected_issue_ids" not in apply_block
 
 
 def test_right_progress_has_fixed_scroll_area() -> None:
