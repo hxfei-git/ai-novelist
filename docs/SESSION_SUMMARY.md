@@ -136,6 +136,7 @@ Completed implementation commits before this final verification record:
 - Verified output-contract removal with `tests/test_web_service.py tests/test_graph_volume_write.py`: 73 passed in 0.93s.
 - Verified output-contract removal with full pytest: 223 passed in 2.03s.
 - Retained `src/ai_novelist/corpus/project_memory.py` because Author Craft query and retrieval paths still reference project craft memory artifacts; focused craft tests passed: 5 passed in 0.10s.
+- Retained Director/research fields in `NovelState`; active Web/graph paths still use them, and old-state compatibility coverage was added.; `tests/test_state.py` passed: 2 passed in 0.03s.
 
 ## Remaining Risk
 
