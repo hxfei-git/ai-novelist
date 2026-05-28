@@ -206,6 +206,16 @@ Completed implementation commits before this final verification record:
 - Batch manifest JSON now includes `context_manifests` keyed by chapter in deterministic order.
 - Verification: `.venv/bin/python -m pytest tests/test_graph_volume_write.py tests/test_context_builder.py -q` passed with 22 passed in 0.80s.
 
+
+### Phase 3: Workflow Payload Helpers
+
+- Files changed: `src/ai_novelist/workflow_payloads.py`, chapter workflow entry points, Web batch generation, tests, docs.
+- Behavior changed: high-risk chapter and batch payload reads/writes use named helpers while preserving `director_task_args` persistence compatibility.
+- Verification: `.venv/bin/python -m pytest tests/test_workflow_payloads.py tests/test_graph_volume_write.py tests/test_web_service.py::test_chapter_batch_payload_sets_director_task_args -q` passed with 9 passed in 0.71s.
+- Remaining risk: outline and Craft payload keys still have raw reads until later graph/service extraction tasks.
+- Next entry point: split Web service modules behind compatibility imports.
+- Continuation note: resume at Task 6; keep `workflow_payloads.py` helper names stable for later replacements.
+
 ## Remaining Risk
 
 One verified dead module has been removed. The main remaining risk is stale compatibility code that appears unused but may still be reached through dynamic prompt names, old project state, or retained Web workflow helpers.

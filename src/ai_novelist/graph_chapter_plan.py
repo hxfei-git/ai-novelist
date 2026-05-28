@@ -16,6 +16,7 @@ from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, run
 from ai_novelist.prompts import load_prompt
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
+from ai_novelist.workflow_payloads import get_task_arg_int, set_task_arg
 
 
 class CompiledGraph(Protocol):
@@ -95,7 +96,7 @@ def progress_node(progress: ProgressFunc, stage: str, message: str, fn) -> dict:
 
 def select_chapter_node(data: dict, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
-    chapter = int(state.director_task_args.get("chapter") or state.current_chapter or state.active_chapter or 1)
+    chapter = get_task_arg_int(state, "chapter", state.current_chapter or state.active_chapter or 1)
     state.current_chapter = max(1, chapter)
     state.active_chapter = state.current_chapter
     state.active_graph = "chapter_plan"
@@ -108,12 +109,12 @@ def select_chapter_node(data: dict, store: LocalStore) -> dict:
 def load_chapter_context_node(data: dict, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
     chapter_outline = collect_chapter_outline(state, store)
-    state.director_task_args["selected_chapter_outline"] = chapter_outline
+    set_task_arg(state, "selected_chapter_outline", chapter_outline)
     if "pacing_target" not in state.director_task_args:
-        state.director_task_args["pacing_target"] = infer_pacing_target_from_outline(state.active_chapter or state.current_chapter or 1, chapter_outline).to_dict()
+        set_task_arg(state, "pacing_target", infer_pacing_target_from_outline(state.active_chapter or state.current_chapter or 1, chapter_outline).to_dict())
     state = resolve_author_craft(state, store, "chapter_planning", chapter=state.active_chapter)
     context = build_context(state, store, "chapter_planning", chapter=state.active_chapter, max_chars=14000)
-    state.director_task_args["chapter_planning_context"] = context
+    set_task_arg(state, "chapter_planning_context", context)
     state.last_context_digest = context[:1200]
     state.active_stage = "load_chapter_context"
     store.save_state(state)

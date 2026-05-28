@@ -40,6 +40,7 @@ from ai_novelist.outline.chapter_outline_structure import (
 from ai_novelist.outline.stage_contracts import OUTLINE_STAGES, STAGE_LABELS
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore, LocalStoreError, summarize_text
+from ai_novelist.workflow_payloads import set_chapter_batch_payload
 from ai_novelist.web.json_utils import parse_json_object
 from ai_novelist.web.chapter_service import (
     build_global_review_prompt,
@@ -842,7 +843,8 @@ def generate_chapter_batch(
         raise LocalStoreError("Volume must be greater than 0")
     state = store.load_state(project_id)
     state.director_action = "write_volume"
-    state.director_task_args = {"volume": volume}
+    state.director_task_args = {}
+    set_chapter_batch_payload(state, volume=volume)
     if requested_count is not None:
         workspace = chapter_batch_workspace_payload(store, project_id, volume)
         remaining_numbers = list(workspace.get("remaining_chapter_numbers") or [])
@@ -852,15 +854,14 @@ def generate_chapter_batch(
             raise LocalStoreError(f"第 {volume} 卷没有剩余章节可生成")
         os.environ["AI_NOVELIST_PARALLEL_AGENTS"] = "1"
         os.environ["AI_NOVELIST_MAX_PARALLEL_AGENTS"] = str(max(1, requested_total))
-        state.director_task_args["requested_count"] = requested_total
-        state.director_task_args["chapters"] = ",".join(str(item) for item in selected_numbers)
+        set_chapter_batch_payload(state, volume=volume, requested_count=requested_total, chapters=selected_numbers)
         state.user_request = f"批量生成第 {volume} 卷 {requested_total} 章"
     else:
         os.environ["AI_NOVELIST_PARALLEL_AGENTS"] = "1"
         os.environ["AI_NOVELIST_MAX_PARALLEL_AGENTS"] = str(max(1, min(int(max_workers or 3), 8)))
         chapter_text = normalize_chapter_selector(chapters)
         if chapter_text:
-            state.director_task_args["chapters"] = chapter_text
+            set_chapter_batch_payload(state, volume=volume, chapters=chapter_text)
         state.user_request = f"批量生成第 {volume} 卷"
     state.review_status = "draft"
     state.error = ""

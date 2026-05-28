@@ -17,6 +17,7 @@ from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, run
 from ai_novelist.prompts import load_prompt
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
+from ai_novelist.workflow_payloads import get_task_arg_int, set_task_arg
 
 
 class CompiledGraph(Protocol):
@@ -82,7 +83,7 @@ def route_after_load(data: dict) -> str:
 
 def load_direct_write_context_node(data: dict, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
-    chapter = int(state.director_task_args.get("chapter") or state.current_chapter or state.active_chapter or 1)
+    chapter = get_task_arg_int(state, "chapter", state.current_chapter or state.active_chapter or 1)
     state.active_chapter = max(1, chapter)
     state.current_chapter = state.active_chapter
     state.active_graph = "chapter_write"
@@ -93,12 +94,12 @@ def load_direct_write_context_node(data: dict, store: LocalStore) -> dict:
     chapter_outline = collect_chapter_outline(state, store)
     if not chapter_outline.strip() or chapter_outline.strip() == "暂无":
         chapter_outline = f"第 {state.active_chapter} 章：章节大纲缺失，按小说圣经、锁定约束和用户请求生成兼容草稿。"
-    state.director_task_args["selected_chapter_outline"] = chapter_outline
+    set_task_arg(state, "selected_chapter_outline", chapter_outline)
     state = resolve_author_craft(state, store, "drafting", chapter=state.active_chapter)
     bundle = build_context_bundle(state, store, "direct_chapter_drafting", chapter=state.active_chapter)
     context = bundle.text
-    state.director_task_args["direct_chapter_context_manifest"] = build_context_manifest(bundle)
-    state.director_task_args["direct_chapter_context"] = context
+    set_task_arg(state, "direct_chapter_context_manifest", build_context_manifest(bundle))
+    set_task_arg(state, "direct_chapter_context", context)
     state.last_context_digest = context[:1200]
     state.review_status = "draft"
     state.error = ""

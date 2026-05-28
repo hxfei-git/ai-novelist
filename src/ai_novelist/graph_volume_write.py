@@ -27,6 +27,7 @@ from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, run
 from ai_novelist.prompts import load_prompt
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
+from ai_novelist.workflow_payloads import chapter_batch_payload, parse_chapter_selector
 
 
 class CompiledGraph(Protocol):
@@ -145,10 +146,11 @@ def route_after_step(data: dict) -> str:
 
 def prepare_volume_batch_node(data: dict, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
-    volume = int(state.director_task_args.get("volume") or 1)
-    run_id = state.director_task_args.get("batch_run_id") or datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+    payload = chapter_batch_payload(state)
+    volume = payload.volume
+    run_id = payload.run_id or datetime.now(UTC).strftime("%Y%m%d%H%M%S")
     full_outline = load_full_chapter_outline(state, store)
-    chapters = parse_chapter_override(state.director_task_args.get("chapters"))
+    chapters = payload.chapters
     if not chapters:
         chapters = chapters_for_volume(full_outline, volume)
     if not chapters:
@@ -584,20 +586,7 @@ def chapters_for_volume(outline: str, volume: int) -> list[int]:
 
 
 def parse_chapter_override(value: Any) -> list[int]:
-    text = str(value or "").strip()
-    if not text:
-        return []
-    chapters: set[int] = set()
-    for part in re.split(r"[,，\s]+", text):
-        if not part:
-            continue
-        range_match = re.fullmatch(r"(\d+)-(\d+)", part)
-        if range_match:
-            start, end = int(range_match.group(1)), int(range_match.group(2))
-            chapters.update(range(min(start, end), max(start, end) + 1))
-        elif part.isdigit():
-            chapters.add(int(part))
-    return sorted(chapter for chapter in chapters if chapter > 0)
+    return parse_chapter_selector(value)
 
 
 def normalize_consistency_report(output: str) -> dict[str, Any]:
