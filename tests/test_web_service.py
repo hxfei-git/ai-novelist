@@ -8,7 +8,16 @@ from pathlib import Path
 
 from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError, AgentCallOptions
 from ai_novelist.storage.local_store import LocalStore, LocalStoreError
-from ai_novelist.web import service
+from ai_novelist.web import chapter_outline_actions, outline_actions, service
+
+
+def patch_run_outline_stage_node(monkeypatch, replacement) -> None:
+    monkeypatch.setattr(outline_actions, "run_outline_stage_node", replacement)
+    monkeypatch.setattr(chapter_outline_actions, "run_outline_stage_node", replacement)
+
+
+def patch_advance_outline_stage_node(monkeypatch, replacement) -> None:
+    monkeypatch.setattr(chapter_outline_actions, "advance_outline_stage_node", replacement)
 
 
 class DummyAdapter(AgentAdapter):
@@ -78,6 +87,34 @@ def test_project_service_exports_project_and_progress_helpers() -> None:
         "build_progress_event",
     ]:
         assert hasattr(project_service, name)
+
+
+def test_outline_action_modules_export_web_entry_points() -> None:
+    from ai_novelist.web import chapter_outline_actions, outline_actions
+
+    for name in [
+        "load_outline_stage_payload",
+        "save_outline_stage_content",
+        "outline_stage_pending_payload",
+        "submit_stage_pending_answers",
+        "generate_outline_stage",
+        "revise_outline_stage",
+        "lock_outline_stage",
+        "review_outline",
+        "apply_outline_review",
+    ]:
+        assert hasattr(outline_actions, name)
+
+    for name in [
+        "chapter_outline_workspace_payload",
+        "generate_chapter_outline_volume",
+        "revise_chapter_outline_volume",
+        "lock_chapter_outline_volume",
+        "review_chapter_outline",
+        "apply_chapter_outline_review",
+        "latest_chapter_outline_review_report",
+    ]:
+        assert hasattr(chapter_outline_actions, name)
 
 
 def test_project_and_outline_stage_file_roundtrip(tmp_path: Path) -> None:
@@ -191,7 +228,7 @@ def test_generate_outline_stage_uses_explicit_full_generation_intent_with_existi
         captured.update(data)
         return data
 
-    monkeypatch.setattr(service, "run_outline_stage_node", fake_run)
+    patch_run_outline_stage_node(monkeypatch, fake_run)
 
     state = service.generate_outline_stage(store, DummyAdapter(), "web-demo", "characters", "补强人物关系")
 
@@ -771,7 +808,7 @@ def test_outline_review_apply_persists_new_baseline_for_manual_rereview(monkeypa
             "editor_notes": "再次审查。",
         }
 
-    monkeypatch.setattr(service, "review_outline_node", fake_review_outline_node)
+    monkeypatch.setattr(outline_actions, "review_outline_node", fake_review_outline_node)
 
     service.review_outline(store, OutlineReviewAdapter(), "web-demo", "再次审查")
 
@@ -923,7 +960,7 @@ def test_submit_stage_pending_answers_can_return_another_round(monkeypatch, tmp_
         data["pending_questions"] = ["林霄是否需要额外的秘密线？"]
         return data
 
-    monkeypatch.setattr(service, "run_outline_stage_node", fake_run)
+    patch_run_outline_stage_node(monkeypatch, fake_run)
 
     result = service.submit_stage_pending_answers(
         store,
@@ -973,7 +1010,7 @@ def test_submit_stage_pending_answers_can_clear_remaining_questions(monkeypatch,
         data["pending_questions"] = []
         return data
 
-    monkeypatch.setattr(service, "run_outline_stage_node", fake_run)
+    patch_run_outline_stage_node(monkeypatch, fake_run)
 
     result = service.submit_stage_pending_answers(
         store,
@@ -1019,7 +1056,7 @@ def test_submit_stage_pending_answers_builds_revision_instruction(monkeypatch, t
         }
         return data
 
-    monkeypatch.setattr(service, "run_outline_stage_node", fake_run)
+    patch_run_outline_stage_node(monkeypatch, fake_run)
 
     result = service.submit_stage_pending_answers(
         store,
@@ -1116,7 +1153,7 @@ def test_revise_outline_stage_sets_revision_intent(monkeypatch, tmp_path: Path) 
         captured.update(data)
         return data
 
-    monkeypatch.setattr(service, "run_outline_stage_node", fake_run)
+    patch_run_outline_stage_node(monkeypatch, fake_run)
 
     state = service.revise_outline_stage(store, DummyAdapter(), "web-demo", "characters", "收紧人物关系")
 
@@ -1217,8 +1254,8 @@ def test_chapter_outline_volume_actions_reject_non_current_volume(action: str, m
         called["run"] = True
         raise AssertionError("graph must not execute for a non-current volume")
 
-    monkeypatch.setattr(service, "run_outline_stage_node", fail_run)
-    monkeypatch.setattr(service, "advance_outline_stage_node", fail_run)
+    patch_run_outline_stage_node(monkeypatch, fail_run)
+    patch_advance_outline_stage_node(monkeypatch, fail_run)
 
     with pytest.raises(LocalStoreError, match="请先完成当前卷"):
         if action == "generate":
@@ -1297,7 +1334,7 @@ def test_generate_current_chapter_outline_volume_sets_default_current_index(monk
         captured.update(data)
         return data
 
-    monkeypatch.setattr(service, "run_outline_stage_node", fake_run)
+    patch_run_outline_stage_node(monkeypatch, fake_run)
 
     service.generate_chapter_outline_volume(store, DummyAdapter(), "web-demo", 1)
 
@@ -1325,7 +1362,7 @@ def test_generate_current_chapter_outline_volume_uses_full_generation_intent_wit
         captured.update(data)
         return data
 
-    monkeypatch.setattr(service, "run_outline_stage_node", fake_run)
+    patch_run_outline_stage_node(monkeypatch, fake_run)
 
     service.generate_chapter_outline_volume(store, DummyAdapter(), "web-demo", 1, "重建第一卷")
 
@@ -1355,7 +1392,7 @@ def test_revise_current_chapter_outline_volume_uses_existing_content(monkeypatch
         captured.update(data)
         return data
 
-    monkeypatch.setattr(service, "run_outline_stage_node", fake_run)
+    patch_run_outline_stage_node(monkeypatch, fake_run)
 
     service.revise_chapter_outline_volume(store, DummyAdapter(), "web-demo", 1, "细化第一卷")
 

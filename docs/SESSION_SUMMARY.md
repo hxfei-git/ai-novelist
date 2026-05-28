@@ -225,6 +225,16 @@ Completed implementation commits before this final verification record:
 - Next entry point: split outline actions.
 - Continuation note: resume at Task 7; project/progress imports should come from `ai_novelist.web.project_service` for new code.
 
+
+### Phase 4b: Outline Web Action Split
+
+- Files changed: outline/chapter outline Web action modules, service facade, Web tests, docs.
+- Behavior changed: ordinary outline and chapter outline Web actions now live in focused modules while route behavior remains stable.
+- Verification: `.venv/bin/python -m pytest tests/test_web_service.py tests/test_web_app.py -q`.
+- Remaining risk: chapter list/batch/review/repair actions still need extraction.
+- Next entry point: split chapter and review Web actions.
+- Continuation note: resume at Task 8; keep `web/service.py` as a compatibility facade until all route call sites are stable.
+
 ## Remaining Risk
 
 One verified dead module has been removed. The main remaining risk is stale compatibility code that appears unused but may still be reached through dynamic prompt names, old project state, or retained Web workflow helpers.

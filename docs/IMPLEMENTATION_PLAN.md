@@ -33,6 +33,8 @@ FastAPI app: src/ai_novelist/web/app.py
   v
 Web service layer: src/ai_novelist/web/service.py
   |-- delegates outline helper behavior to src/ai_novelist/web/outline_service.py
+  |-- delegates ordinary outline actions to src/ai_novelist/web/outline_actions.py
+  |-- delegates chapter-outline actions to src/ai_novelist/web/chapter_outline_actions.py
   |-- delegates chapter review prompt/source helpers to src/ai_novelist/web/chapter_service.py
   |-- LocalStore-backed project operations
   |-- outline stage payloads and pending-question submission
@@ -124,7 +126,7 @@ Search and corpus settings still exist in configuration because some craft helpe
 - `NovelState` retains fields from deleted flows and needs compatibility-aware trimming.
 - Large modules concentrate unrelated responsibilities:
   - `graph_outline.py`
-  - `web/service.py`, reduced by moving outline helpers but still large
+  - `web/service.py`, reduced by moving project/progress helpers and outline/chapter-outline actions but still large
   - `web/frontend/src/main.tsx`, reduced by moving shared types and API helpers into `web/frontend/src/types.ts` and `web/frontend/src/api.ts`
   - `adapters/mock_codex.py` as a large deterministic fixture isolated from the real adapter
   - `tests/test_web_service.py`
@@ -159,6 +161,15 @@ Search and corpus settings still exist in configuration because some craft helpe
 - 2026-05-29: Direct chapter drafting now uses the shared `direct_chapter_drafting` `ContextBundle` profile and records a context manifest for direct and volume write paths.
 - 2026-05-29: Added `workflow_payloads.py` helpers for high-risk `director_task_args` reads and writes; chapter workflow entry points and Web batch generation now use named payload helpers while preserving persisted payload keys.
 - 2026-05-29: Project and progress-log Web operations moved into `src/ai_novelist/web/project_service.py`; `web/service.py` re-exports the helpers as a compatibility facade while later outline, chapter, and review splits proceed.
+- 2026-05-29: Ordinary outline and chapter-outline Web actions moved into `src/ai_novelist/web/outline_actions.py` and `src/ai_novelist/web/chapter_outline_actions.py`; `web/service.py` re-exports the action entry points as a compatibility facade.
+
+### Phase 4b: Outline Web Action Split
+- Files changed: outline/chapter outline Web action modules, service facade, Web tests, docs.
+- Behavior changed: ordinary outline and chapter outline Web actions now live in focused modules while route behavior remains stable.
+- Verification: `.venv/bin/python -m pytest tests/test_web_service.py tests/test_web_app.py -q`.
+- Remaining risk: chapter list/batch/review/repair actions still need extraction.
+- Next entry point: split chapter and review Web actions.
+- Continuation note: resume at Task 8; keep `web/service.py` as a compatibility facade until all route call sites are stable.
 
 ## Verification Policy
 
