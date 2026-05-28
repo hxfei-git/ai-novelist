@@ -17,9 +17,11 @@ from ai_novelist.outline.chapter_outline_structure import (
     build_chapter_outline_target_context,
     chapter_outline_metadata_from_artifact,
     extract_chapter_outline_volume,
+    merge_chapter_outline_volumes,
+    normalize_generated_volume_outline,
 )
 from ai_novelist.outline.question_filter import filter_stage_confirmation_questions
-from ai_novelist.outline.renderers import render_direction_stage_markdown
+from ai_novelist.outline.renderers import build_stage_output_rule, render_direction_stage_markdown
 from ai_novelist.outline.stage_contracts import (
     LEGACY_OUTLINE_STAGES,
     OUTLINE_STAGES,
@@ -75,7 +77,10 @@ from ai_novelist.outline_graph.prompts import (
     CHAPTER_OUTLINE_INTERNAL_REQUEST_KEY,
     build_outline_stage_role_prompt,
     build_outline_stage_synthesizer_prompt,
+    chapter_outline_forced_full_generation,
     locked_stage_summary,
+    outline_stage_boundary_prompt,
+    stage_continuity_requirement,
 )
 from ai_novelist.outline_graph.repair import (
     chapter_outline_has_next_volume,

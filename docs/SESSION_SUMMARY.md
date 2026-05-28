@@ -254,7 +254,8 @@ Completed implementation commits before this final verification record:
 ### Phase 5b: Outline Graph Prompt and Repair Split
 - Files changed: prompt, repair, artifact IO helper modules, `graph_outline.py`, tests, docs.
 - Behavior changed: prompt building, structure repair, and artifact formatting helpers moved out of `graph_outline.py` with route and graph entry points preserved.
-- Verification: `.venv/bin/python -m pytest tests/test_outline_graph_modules.py tests/test_web_outline_service.py tests/test_web_service.py -q` -> passed with 78 passed in 0.55s; `wc -l` confirms phase-local `graph_outline.py` shrinkage (`graph_outline.py` from parent commit 2637 to 1714 lines; current module line counts: `prompts.py` 358, `repair.py` 415, `artifact_io.py` 315; total 2802).
+- Verification: `.venv/bin/python -m pytest tests/test_outline_graph_modules.py tests/test_web_outline_service.py tests/test_web_service.py -q` -> passed with 81 passed in 0.56s; `wc -l` confirms phase-local `graph_outline.py` shrinkage (`graph_outline.py` from parent commit 2637 to 1719 lines; current module line counts: `prompts.py` 358, `repair.py` 415, `artifact_io.py` 315; total 2807).
+- Regression coverage: `tests/test_outline_graph_modules.py` now smokes remaining `graph_outline.py` runtime references to moved prompt helpers, stage output rules, and chapter volume helper globals.
 - Remaining risk: additional graph-node extraction can continue later, but this phase removes the largest helper clusters.
 - Next entry point: frontend structural split.
 - Continuation note: resume at Task 11; do not move graph node functions until frontend and full verification are stable.

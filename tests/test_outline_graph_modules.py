@@ -1,3 +1,6 @@
+from ai_novelist import graph_outline
+from ai_novelist.state import NovelState
+from ai_novelist.storage.local_store import LocalStore
 from ai_novelist.outline_graph.artifact_io import summarize_stage_text
 from ai_novelist.outline_graph.prompts import (
     outline_stage_boundary_prompt,
@@ -45,3 +48,40 @@ def test_artifact_io_summary_compacts_markdown() -> None:
     summary = summarize_stage_text(text, max_chars=30)
     assert len(summary) <= 33
     assert "\n" not in summary
+
+
+def test_graph_outline_light_revision_chapter_path_resolves_moved_prompt_helper(tmp_path) -> None:
+    state = NovelState(
+        project_id="runtime-imports",
+        title="Runtime Imports",
+        user_request="请轻修订当前章纲",
+        director_intent="revise",
+    )
+    store = LocalStore(tmp_path)
+    artifact = {"stage": "chapter_outline", "synthesis": "## 第 1 卷章节大纲\n\n- 第 1 章：开端"}
+
+    assert graph_outline.should_lightly_revise_outline_stage(state, "chapter_outline", artifact, store)
+
+
+def test_graph_outline_revision_prompt_resolves_moved_prompt_helpers() -> None:
+    state = NovelState(
+        project_id="runtime-imports",
+        title="Runtime Imports",
+        user_request="调整人物关系动机",
+        director_intent="revise",
+    )
+
+    prompt = graph_outline.build_outline_stage_revision_prompt(
+        state=state,
+        stage="characters",
+        current_markdown="## 人物关系稿\n\n- 主角与导师存在信任裂痕。",
+    )
+
+    assert "世界观规则" in prompt
+    assert "STAGE_BOUNDARY" in prompt
+
+
+def test_graph_outline_chapter_volume_helpers_remain_runtime_globals() -> None:
+    assert graph_outline.chapter_outline_has_next_volume({"current_volume_index": 1, "total_volumes": 2})
+    assert callable(graph_outline.normalize_generated_volume_outline)
+    assert callable(graph_outline.merge_chapter_outline_volumes)
