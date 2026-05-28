@@ -169,6 +169,15 @@ Completed implementation commits before this final verification record:
 - Next entry point: begin Task 3 context manifest and deduplication work.
 - Continuation note: resume with context builder tests in Task 3; Web operation guard changes are complete when both focused commands above pass.
 
+### Phase 2: Context Manifest Paths and Deduplication
+
+- Files changed: `src/ai_novelist/context_builder.py`, `tests/test_context_builder.py`, docs.
+- Behavior changed: context manifests now expose artifact paths and source types; repeated artifact/state fallback content is deduplicated by digest.
+- Verification: `.venv/bin/python -m pytest tests/test_context_builder.py -q` passed with 9 passed in 0.11s.
+- Remaining risk: direct chapter writing still uses its own context assembler until Task 4.
+- Next entry point: migrate direct chapter context to `ContextBundle`.
+- Continuation note: resume at Task 4; keep Task 3 helper names unchanged because later tasks use `SectionRecord` and `build_artifact_section_records`.
+
 ## Remaining Risk
 
 One verified dead module has been removed. The main remaining risk is stale compatibility code that appears unused but may still be reached through dynamic prompt names, old project state, or retained Web workflow helpers.

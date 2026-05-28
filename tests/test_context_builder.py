@@ -83,6 +83,42 @@ def test_context_bundle_records_sources_and_respects_profile_limit(tmp_path):
     assert all("included_chars" in item for item in manifest)
 
 
+def test_context_manifest_records_artifact_path(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    save_markdown_artifact(
+        store.project_dir("demo"),
+        "chapters/chapter_001/chapter_card.md",
+        "# 章节卡\n\n唯一章节卡内容",
+        "chapter_card",
+        chapter=1,
+    )
+
+    bundle = build_context_bundle(state, store, "drafting", chapter=1)
+    manifest = build_context_manifest(bundle)
+
+    assert any(item["path"] == "chapters/chapter_001/chapter_card.md" for item in manifest)
+    assert any(item["source_type"] == "artifact:chapter_card" for item in manifest)
+
+
+def test_context_deduplicates_artifact_and_state_fallback_by_digest(tmp_path):
+    store = LocalStore(tmp_path)
+    state = store.create_project("Demo", "demo")
+    state.current_chapter_card = "# 章节卡\n\n唯一重复内容"
+    save_markdown_artifact(
+        store.project_dir("demo"),
+        "chapters/chapter_001/chapter_card.md",
+        "# 章节卡\n\n唯一重复内容",
+        "chapter_card",
+        chapter=1,
+    )
+
+    bundle = build_context_bundle(state, store, "drafting", chapter=1)
+
+    assert bundle.text.count("唯一重复内容") == 1
+    assert len({item.digest for item in bundle.sources if item.digest}) == len([item for item in bundle.sources if item.digest])
+
+
 def test_chapter_planning_context_uses_chapter_outline_slice(tmp_path):
     store = LocalStore(tmp_path)
     state = store.create_project("Demo", "demo")

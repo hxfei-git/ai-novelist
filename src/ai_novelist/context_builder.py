@@ -13,7 +13,47 @@ from ai_novelist.outline.chapter_outline_structure import extract_chapter_outlin
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
 
-Section = tuple[str, str]
+
+@dataclass(frozen=True)
+class SectionRecord:
+    title: str
+    content: str
+    source_type: str
+    path: str | None
+    priority: int
+
+
+Section = tuple[str, str] | SectionRecord
+
+
+def section_record(
+    title: str,
+    content: str,
+    source_type: str,
+    path: str | None = None,
+    priority: int = 50,
+) -> SectionRecord:
+    return SectionRecord(title=title, content=content, source_type=source_type, path=path, priority=priority)
+
+
+def section_title(section: Section) -> str:
+    return section.title if isinstance(section, SectionRecord) else section[0]
+
+
+def section_content(section: Section) -> str:
+    return section.content if isinstance(section, SectionRecord) else section[1]
+
+
+def section_source_type(section: Section, default: str = "") -> str:
+    return section.source_type if isinstance(section, SectionRecord) else default
+
+
+def section_path(section: Section) -> str | None:
+    return section.path if isinstance(section, SectionRecord) else None
+
+
+def section_priority(section: Section) -> int:
+    return section.priority if isinstance(section, SectionRecord) else 50
 
 
 @dataclass(frozen=True)
@@ -195,14 +235,29 @@ def build_context_bundle(
     selected_chapter = chapter or state.active_chapter or state.current_chapter
     selected_stage = stage or state.outline_stage
     limit = min(max_chars or profile.max_chars, profile.max_chars)
-    sections = [build_profile_section(key, state, store, profile, selected_chapter, selected_stage) for key in profile.sections]
+    sections: list[Section] = []
+    for key in profile.sections:
+        if key == "chapter_artifacts":
+            sections.extend(
+                build_artifact_section_records(
+                    state,
+                    store,
+                    profile.purpose,
+                    selected_chapter,
+                    selected_stage,
+                    artifact_types=profile.artifact_types,
+                )
+            )
+            sections.extend(build_state_artifact_fallback_records(state, profile.purpose))
+            continue
+        sections.append(build_profile_section(key, state, store, profile, selected_chapter, selected_stage))
     text, sources = render_profile_sections(sections, profile, limit)
     return ContextBundle(
         text=text,
         sources=sources,
         total_chars=len(text),
         estimated_tokens=estimate_tokens(text),
-        truncated=any(source.truncated for source in sources) or len(render_sections(sections)) > limit,
+        truncated=any(source.truncated for source in sources),
     )
 
 
@@ -255,13 +310,15 @@ def build_profile_section(
 
 def render_profile_sections(sections: list[Section], profile: ContextProfile, max_chars: int) -> tuple[str, list[ContextSource]]:
     protected_titles = {"用户当前请求", "当前任务", "锁定约束"}
+    selected_sections = dedupe_sections_by_digest(sections)
     rendered_parts: list[Section] = []
     sources: list[ContextSource] = []
-    fixed_overhead = len("# Task Context\n\n") + sum(len(f"## {title}\n\n") + 2 for title, _ in sections)
+    fixed_overhead = len("# Task Context\n\n") + sum(len(f"## {section_title(section)}\n\n") + 2 for section in selected_sections)
     remaining = max(1, max_chars - fixed_overhead)
-    default_budget = max(120, remaining // max(1, len(sections)))
-    for title, content in sections:
-        original = (content or "暂无").strip() or "暂无"
+    default_budget = max(120, remaining // max(1, len(selected_sections)))
+    for section in selected_sections:
+        title = section_title(section)
+        original = (section_content(section) or "暂无").strip() or "暂无"
         budget = profile.per_section_budget.get(title, default_budget)
         if title in protected_titles:
             budget = max(budget, min(len(original), 1200))
@@ -271,15 +328,16 @@ def render_profile_sections(sections: list[Section], profile: ContextProfile, ma
             included = included[: max(40, budget - 28)].rstrip() + "\n[已截断，完整内容见 artifact path]"
             truncated = True
         rendered_parts.append((title, included))
+        digest = sha256_text(original) if original != "暂无" else None
         sources.append(
             ContextSource(
                 section=title,
-                source_type=profile.name,
-                path=None,
+                source_type=section_source_type(section, profile.name),
+                path=section_path(section),
                 original_chars=len(original),
                 included_chars=len(included),
                 truncated=truncated,
-                digest=sha256_text(original),
+                digest=digest,
             )
         )
     text = render_sections(rendered_parts)
@@ -296,6 +354,22 @@ def render_profile_sections(sections: list[Section], profile: ContextProfile, ma
                 digest=sources[-1].digest,
             )
     return text, sources
+
+
+def dedupe_sections_by_digest(sections: list[Section]) -> list[Section]:
+    selected_indices: set[int] = set()
+    seen_digests: set[str] = set()
+    for index, section in sorted(enumerate(sections), key=lambda item: (section_priority(item[1]), item[0])):
+        original = (section_content(section) or "暂无").strip() or "暂无"
+        if original == "暂无":
+            selected_indices.add(index)
+            continue
+        digest = sha256_text(original)
+        if digest in seen_digests:
+            continue
+        seen_digests.add(digest)
+        selected_indices.add(index)
+    return [section for index, section in enumerate(sections) if index in selected_indices]
 
 
 def build_task_summary(purpose: str, chapter: int | None, stage: str | None) -> str:
@@ -366,8 +440,27 @@ def build_artifact_section(
     stage: str | None,
     artifact_types: tuple[str, ...] | None = None,
 ) -> str:
+    records = build_artifact_section_records(state, store, purpose, chapter, stage, artifact_types=artifact_types)
+    parts = [
+        f"## {section.source_type.removeprefix('artifact:')} ({section.path})\n{(section.content or '暂无').strip() or '暂无'}"
+        for section in records
+    ]
+    fallback = build_state_artifact_fallback(state, purpose)
+    if fallback:
+        parts.append(fallback)
+    return "\n\n".join(parts) if parts else "暂无"
+
+
+def build_artifact_section_records(
+    state: NovelState,
+    store: LocalStore,
+    purpose: str,
+    chapter: int | None,
+    stage: str | None,
+    artifact_types: tuple[str, ...] | None = None,
+) -> list[SectionRecord]:
     project_dir = store.project_dir(state.project_id)
-    parts: list[str] = []
+    records: list[SectionRecord] = []
     for artifact_type in artifact_types or tuple(PURPOSE_ARTIFACT_TYPES.get(purpose, [])):
         record = get_latest_artifact(project_dir, artifact_type, chapter=chapter)
         if record is None and stage:
@@ -376,12 +469,17 @@ def build_artifact_section(
             record = get_latest_artifact(project_dir, artifact_type)
         if record is None:
             continue
-        text = load_artifact_text(project_dir, record).strip()
-        parts.append(f"## {artifact_type} ({record.path})\n{text or '暂无'}")
-    fallback = build_state_artifact_fallback(state, purpose)
-    if fallback:
-        parts.append(fallback)
-    return "\n\n".join(parts) if parts else "暂无"
+        text = load_artifact_text(project_dir, record).strip() or "暂无"
+        records.append(
+            section_record(
+                f"当前任务 Artifact: {artifact_type}",
+                text,
+                source_type=f"artifact:{artifact_type}",
+                path=record.path,
+                priority=10,
+            )
+        )
+    return records
 
 
 def build_chapter_outline_slice_section(state: NovelState, store: LocalStore, chapter: int | None) -> str:
@@ -406,16 +504,35 @@ def build_chapter_outline_slice_section(state: NovelState, store: LocalStore, ch
     return extract_chapter_outline_slice(text, selected)
 
 
+def build_state_artifact_fallback_records(state: NovelState, purpose: str) -> list[SectionRecord]:
+    records: list[SectionRecord] = []
+    fallback_fields = [
+        ("current_chapter_card", {"scene_design", "drafting", "review", "revision"}, state.current_chapter_card),
+        ("current_scene_cards", {"drafting", "review", "revision"}, state.current_scene_cards),
+        ("chapter_draft", {"revision"}, state.chapter_draft),
+        ("current_review_report", {"revision"}, state.current_review_report),
+    ]
+    for field_name, purposes, content in fallback_fields:
+        cleaned = content.strip()
+        if purpose not in purposes or not cleaned:
+            continue
+        records.append(
+            section_record(
+                f"当前任务 Artifact: {field_name}",
+                cleaned,
+                source_type=f"state:{field_name}",
+                path=f"state:{field_name}",
+                priority=80,
+            )
+        )
+    return records
+
+
 def build_state_artifact_fallback(state: NovelState, purpose: str) -> str:
     parts = []
-    if purpose in {"scene_design", "drafting", "review", "revision"} and state.current_chapter_card.strip():
-        parts.append("## current_chapter_card\n" + state.current_chapter_card.strip())
-    if purpose in {"drafting", "review", "revision"} and state.current_scene_cards.strip():
-        parts.append("## current_scene_cards\n" + state.current_scene_cards.strip())
-    if purpose == "revision" and state.chapter_draft.strip():
-        parts.append("## chapter_draft\n" + state.chapter_draft.strip())
-    if purpose == "revision" and state.current_review_report.strip():
-        parts.append("## current_review_report\n" + state.current_review_report.strip())
+    for record in build_state_artifact_fallback_records(state, purpose):
+        field_name = record.source_type.removeprefix("state:")
+        parts.append(f"## {field_name}\n{record.content}")
     return "\n\n".join(parts)
 
 
@@ -512,8 +629,8 @@ def truncate_sections(sections: list[Section], max_chars: int) -> str:
         return rendered
 
     protected_titles = {"用户当前请求", "当前任务", "锁定约束"}
-    protected = [(title, content) for title, content in sections if title in protected_titles]
-    flexible = [(title, content) for title, content in sections if title not in protected_titles]
+    protected = [section for section in sections if section_title(section) in protected_titles]
+    flexible = [section for section in sections if section_title(section) not in protected_titles]
     protected_text = render_sections(protected)
     if len(protected_text) >= max_chars:
         return protected_text[:max_chars].rstrip() + "\n\n[已截断，锁定约束或任务描述过长]"
@@ -521,8 +638,9 @@ def truncate_sections(sections: list[Section], max_chars: int) -> str:
     remaining = max_chars - len(protected_text) - 2
     per_section = max(120, remaining // max(1, len(flexible)))
     clipped: list[Section] = list(protected)
-    for title, content in flexible:
-        text = content.strip() or "暂无"
+    for section in flexible:
+        title = section_title(section)
+        text = section_content(section).strip() or "暂无"
         if len(text) > per_section:
             text = text[: max(40, per_section - 28)].rstrip() + "\n[已截断，完整内容见 artifact path]"
         clipped.append((title, text))
@@ -534,9 +652,9 @@ def truncate_sections(sections: list[Section], max_chars: int) -> str:
 
 def render_sections(sections: Iterable[Section]) -> str:
     lines = ["# Task Context", ""]
-    for title, content in sections:
-        lines.append(f"## {title}")
-        lines.append((content or "暂无").strip() or "暂无")
+    for section in sections:
+        lines.append(f"## {section_title(section)}")
+        lines.append((section_content(section) or "暂无").strip() or "暂无")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 

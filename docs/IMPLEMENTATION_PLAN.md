@@ -155,6 +155,7 @@ Search and corpus settings still exist in configuration because some craft helpe
 ## Architecture Web Context Remediation Notes
 
 - 2026-05-29: Hardened SSE/Web error behavior by adding source-level guards that require streaming workspace actions to call `showError(error)` and release running flags in `finally`; added a Web app regression for service exceptions surfacing as SSE `event: error` payloads.
+- 2026-05-29: Context profiles now record source paths and suppress duplicate artifact/state fallback content by digest before rendering.
 
 ## Verification Policy
 
