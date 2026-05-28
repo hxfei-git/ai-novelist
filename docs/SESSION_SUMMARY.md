@@ -269,6 +269,15 @@ Completed implementation commits before this final verification record:
 - Next entry point: final verification and cleanup.
 - Continuation note: resume at Task 12; frontend split is accepted only when `main.tsx` is below 900 lines and build passes.
 
+### Final Verification: Architecture Web Context Remediation
+- Files changed: Web frontend, Web services, context builder, workflow payload helpers, outline graph helpers, tests, docs.
+- Behavior changed: Web operations have stronger guards and error reporting; context is traceable and deduplicated; large modules are split into focused helper modules while public Web routes remain stable.
+- Verification: `.venv/bin/python -m pytest -q` -> 263 passed in 2.28s; `npm --prefix web/frontend run build` -> passed with the known Vite CJS Node API deprecation warning; residual `rg` architecture scan was rerun excluding `web/frontend/node_modules/**` and `web/frontend/dist/**`; file-size scan reports `graph_outline.py` 1719 lines, `web/service.py` 136 lines, `main.tsx` 799 lines, `context_builder.py` 796 lines.
+- Residual scan notes: no frontend source `localStorage` hit remains and the old chapter-batch disabled expression is absent; remaining `director_task_args` hits are compatibility debt in graph/corpus/context paths plus documented plan snippets.
+- Remaining risk: any retained `director_task_args` access is compatibility debt and should be handled with targeted payload helpers in future work; source/build tests do not replace browser-level click coverage.
+- Next recommended work: add browser-level interaction tests if a real UI runtime issue appears after these source and service-level guards.
+- Continuation note: this remediation batch is complete when full pytest, frontend build, and residual scans match the recorded outputs.
+
 ## Remaining Risk
 
 One verified dead module has been removed. The main remaining risk is stale compatibility code that appears unused but may still be reached through dynamic prompt names, old project state, or retained Web workflow helpers.

@@ -163,6 +163,7 @@ Search and corpus settings still exist in configuration because some craft helpe
 - 2026-05-29: Project and progress-log Web operations moved into `src/ai_novelist/web/project_service.py`; `web/service.py` re-exports the helpers as a compatibility facade while later outline, chapter, and review splits proceed.
 - 2026-05-29: Ordinary outline and chapter-outline Web actions moved into `src/ai_novelist/web/outline_actions.py` and `src/ai_novelist/web/chapter_outline_actions.py`; `web/service.py` re-exports the action entry points as a compatibility facade.
 - 2026-05-29: Chapter batch/list/detail and global review/repair Web actions moved into `src/ai_novelist/web/chapter_actions.py` and `src/ai_novelist/web/review_actions.py`; `web/service.py` re-exports the action entry points as a compatibility facade.
+- 2026-05-29: Completed the architecture/Web/context remediation batch. Web actions have stronger running/error guards, context profiles record source manifests and deduplicate sources, Web services and outline graph helpers are split behind compatibility facades, and frontend workspace components are split from the entry file.
 
 ### Phase 4b: Outline Web Action Split
 - Files changed: outline/chapter outline Web action modules, service facade, Web tests, docs.
