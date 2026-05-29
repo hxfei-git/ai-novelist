@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from ai_novelist.artifacts import save_markdown_artifact
 from ai_novelist.bible import NovelBible, save_bible
 from ai_novelist.context_builder import (
@@ -282,3 +284,14 @@ def test_direct_chapter_context_profile_uses_selected_outline_and_manifest(tmp_p
     assert "第一章摘要" in bundle.text
     assert "当前章摘要不应注入" not in bundle.text
     assert any(item["section"] == "章节大纲切片" for item in manifest)
+
+
+def test_direct_chapter_context_manifest_marks_fallback_outline(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("web-demo", "Web Demo")
+    state.current_chapter = 7
+    state.active_chapter = 7
+    bundle = build_context_bundle(state, store, "direct_chapter_drafting", chapter=7)
+    manifest = build_context_manifest(bundle)
+    assert any(item["section"] == "章节大纲切片" for item in manifest)
+    assert "暂无" in bundle.text or "缺失" in bundle.text

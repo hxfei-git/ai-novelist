@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from ai_novelist.adapters.codex_cli import CodexCLIAdapter
-from ai_novelist.graph_volume_write import build_volume_revision_graph, build_volume_write_graph
+from ai_novelist.graph_volume_write import build_volume_revision_graph, build_volume_write_graph, prepare_volume_batch_node
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
 
@@ -148,3 +148,29 @@ def test_volume_batch_manifest_includes_context_manifests(tmp_path, monkeypatch)
         any(item.get("section") == "章节大纲切片" for item in chapter_manifest)
         for chapter_manifest in manifest["context_manifests"].values()
     )
+
+
+def test_volume_batch_context_manifest_uses_chapter_specific_outline_slice(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("web-demo", "Web Demo")
+    state.director_task_args = {"volume": 1, "chapters": "2"}
+    outline = """## 第一卷
+
+### 第 1 章：只给第一章
+
+### 第 2 章：只给第二章
+
+### 第 3 章：只给第三章
+"""
+    store.save_outline_artifact(state, "chapter_outline", outline)
+    store.save_state(state)
+
+    result = NovelState.from_dict(prepare_volume_batch_node(state.to_dict(), store))
+    item = result.director_task_args["batch_items"][0]
+
+    assert item["chapter"] == 2
+    assert "只给第二章" in item["outline"]
+    assert "只给第一章" not in item["outline"]
+    assert "只给第三章" not in item["outline"]
+    manifest_text = json.dumps(result.director_task_args["batch_context_manifests"], ensure_ascii=False)
+    assert "chapter_outline_slice" in manifest_text

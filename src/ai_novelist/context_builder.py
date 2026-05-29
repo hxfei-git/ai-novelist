@@ -322,7 +322,12 @@ def build_profile_section(
     if key == "chapter_artifacts":
         return "当前任务 Artifact", build_artifact_section(state, store, profile.purpose, chapter, stage, artifact_types=profile.artifact_types)
     if key == "chapter_outline_slice":
-        return "章节大纲切片", build_chapter_outline_slice_section(state, store, chapter)
+        return section_record(
+            "章节大纲切片",
+            build_chapter_outline_slice_section(state, store, chapter),
+            source_type="chapter_outline_slice",
+            priority=20,
+        )
     if key == "previous_chapter_summaries":
         return "已写前文摘要", build_chapter_summaries_section(state, chapter)
     if key == "reference_brief":

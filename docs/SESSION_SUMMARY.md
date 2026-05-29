@@ -352,3 +352,9 @@ Any pruning batch must update this summary with:
 - tests run
 - residual compatibility risk
 - whether frontend build was required
+
+### Task 7: Chapter Batch Selection And Context Slice Proof
+- Files changed: src/ai_novelist/context_builder.py, tests/test_context_builder.py, tests/test_graph_volume_write.py, docs/IMPLEMENTATION_PLAN.md, and docs/SESSION_SUMMARY.md.
+- Behavior changed: chapter outline slice context manifest entries now expose source_type=chapter_outline_slice; selected-volume chapter batching has regression coverage proving chapter 2 receives only chapter 2 outline slice, and direct chapter drafting has coverage proving missing outline context remains visible in the manifest/text.
+- Verification: focused RED run first failed because batch_context_manifests did not contain chapter_outline_slice; after the manifest source tagging fix, the two new tests passed with 2 passed. Final affected-suite verification: .venv/bin/python -m pytest tests/test_context_builder.py tests/test_graph_volume_write.py -q passed with 24 passed in 0.69s; git diff --check passed with no output.
+- Remaining risk: no real Codex batch drafting was run; this verifies context assembly and manifest contracts only.
