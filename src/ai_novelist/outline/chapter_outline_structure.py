@@ -383,7 +383,7 @@ def extract_chapter_outline_slice(text: str, chapter: int) -> str:
     end = len(content)
     if heading_level:
         next_heading = re.compile(
-            rf"^\s*#{{1,{heading_level}}}\s+第\s*(?P<num>[一二两三四五六七八九十\d]+)\s*章",
+            rf"^\s*#{{1,{heading_level}}}\s*第\s*(?P<num>[一二两三四五六七八九十\d]+)\s*章",
             re.MULTILINE,
         )
         for next_match in next_heading.finditer(content, match.end()):
