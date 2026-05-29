@@ -310,6 +310,14 @@ Completed implementation commits before this final verification record:
 - Verification: targeted RED tests failed before implementation for missing applied report state and review-page completion UI; final-review RED concurrency test failed with `assert 2 == 1` for duplicate reviser calls before the lock; focused server-side duplicate-apply tests passed with `.venv/bin/python -m pytest tests/test_web_service.py::test_apply_outline_review_concurrent_duplicate_waits_for_applied_report tests/test_web_service.py::test_apply_outline_review_is_idempotent_after_report_applied tests/test_web_service.py::test_outline_review_apply_marks_latest_report_applied -q`; final affected-suite verification passed with `.venv/bin/python -m pytest tests/test_web_service.py tests/test_web_app.py tests/test_frontend_review_tabs_structure.py -q` -> 125 passed in 1.33s; full pytest passed with `.venv/bin/python -m pytest -q` -> 276 passed in 2.30s; frontend build passed with `npm --prefix web/frontend run build` and the known Vite CJS Node API deprecation warning.
 - Remaining risk: no live browser/SSE click test was added; source-structure tests verify the state handling and TypeScript build verifies the component compiles.
 
+## Web Prompt Context Prune Audit
+
+- Task 1 from commit `a4c73a5` added `src/ai_novelist/prompts/registry.py`, gated `load_prompt()` through the registry, trimmed stale `AUTHOR_CRAFT_POLICY_PROMPTS` entries, and added prompt registry guard tests.
+- Task 1 focused verification: `.venv/bin/python -m pytest tests/test_prompt_loader.py -q` -> 12 passed.
+- Added a manifest-backed prompt registry plan and started strict Web-only pruning.
+- Current rule: prompts and branches are retained only when reachable from active Web routes, retained graph nodes, prompt loading, adapter execution, or active Web behavior tests.
+- Compatibility with old deleted CLI flows is no longer a default retention reason for this cleanup batch.
+
 ## Remaining Risk
 
 One verified dead module has been removed. The main remaining risk is stale compatibility code that appears unused but may still be reached through dynamic prompt names, old project state, or retained Web workflow helpers.
