@@ -91,8 +91,16 @@ def test_graph_outline_chapter_volume_helpers_remain_runtime_globals() -> None:
 
 def test_outline_graph_no_longer_loads_deleted_director_prompt():
     source = Path("src/ai_novelist/graph_outline.py").read_text(encoding="utf-8")
-    assert 'load_prompt("director")' not in source
-    assert "def build_outline_director_prompt" not in source
+    deleted_helpers = [
+        'load_prompt("director")',
+        "def build_outline_director_prompt",
+        "def parse_outline_director_output",
+        "def normalize_outline_director_action",
+        "def outline_show_outline_node",
+        "def outline_show_status_node",
+    ]
+    for helper in deleted_helpers:
+        assert helper not in source
 
 
 def test_outline_routing_no_longer_exports_director_only_routes():

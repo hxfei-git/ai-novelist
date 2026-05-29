@@ -158,6 +158,7 @@ Search and corpus settings still exist in configuration because some craft helpe
 
 - 2026-05-29: Added an explicit prompt registry for retained Web prompt files and prompt-loader tests that reject missing registry entries, orphan prompt files, and stale author-craft policy prompt names.
 - 2026-05-29: Pruned legacy mock adapter branches and stale DeepSeek agent category names for deleted non-Web agents; deleted first-line mock agents now return `UNSUPPORTED_AGENT: <agent>` before any body substring routing, while active retained mock agents keep fallback behavior for Web mock mode.
+- 2026-05-29: Removed unreachable outline Director prompt/parser helpers, show/status nodes, and Director-only routing helpers from the active outline graph surface; tests now guard against reintroducing those deleted names.
 
 ## Architecture Web Context Remediation Notes
 
