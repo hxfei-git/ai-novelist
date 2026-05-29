@@ -469,7 +469,7 @@ git commit -m "fix: keep outline review apply in place"
 - Modify: `docs/IMPLEMENTATION_PLAN.md`
 - Modify: `docs/SESSION_SUMMARY.md`
 
-- [ ] **Step 1: Run affected backend and frontend suites**
+- [x] **Step 1: Run affected backend and frontend suites**
 
 Run:
 
@@ -479,7 +479,7 @@ Run:
 
 Expected: affected Web service, route, and frontend structure tests pass.
 
-- [ ] **Step 2: Run full persistence-safe pytest suite**
+- [x] **Step 2: Run full persistence-safe pytest suite**
 
 Run:
 
@@ -489,7 +489,7 @@ Run:
 
 Expected: full pytest suite passes because the backend change updates persisted review report behavior.
 
-- [ ] **Step 3: Run frontend build**
+- [x] **Step 3: Run frontend build**
 
 Run:
 
@@ -499,7 +499,7 @@ npm --prefix web/frontend run build
 
 Expected: frontend build passes with only the known Vite CJS Node API deprecation warning if that warning appears.
 
-- [ ] **Step 4: Update implementation plan documentation**
+- [x] **Step 4: Update implementation plan documentation**
 
 In `docs/IMPLEMENTATION_PLAN.md`, add this entry before `## Verification Policy`:
 
@@ -518,7 +518,7 @@ Also add this plan file to the `## Current Reference Documents` list:
 - `docs/superpowers/plans/2026-05-29-outline-review-apply-completion.md`
 ```
 
-- [ ] **Step 5: Update session summary documentation**
+- [x] **Step 5: Update session summary documentation**
 
 In `docs/SESSION_SUMMARY.md`, add this entry above `## Remaining Risk`:
 
@@ -530,7 +530,7 @@ In `docs/SESSION_SUMMARY.md`, add this entry above `## Remaining Risk`:
 - Remaining risk: no live browser/SSE click test was added; source-structure tests verify the state handling and TypeScript build verifies the component compiles.
 ```
 
-- [ ] **Step 6: Run diff and status checks**
+- [x] **Step 6: Run diff and status checks**
 
 Run:
 
@@ -541,7 +541,7 @@ git status --short
 
 Expected: `git diff --check` has no output. `git status --short` shows only the documentation files changed in this task.
 
-- [ ] **Step 7: Commit documentation change**
+- [x] **Step 7: Commit documentation change**
 
 Run:
 
@@ -550,7 +550,7 @@ git add docs/IMPLEMENTATION_PLAN.md docs/SESSION_SUMMARY.md docs/superpowers/pla
 git commit -m "docs: record outline review apply completion"
 ```
 
-- [ ] **Step 8: Confirm final clean state**
+- [x] **Step 8: Confirm final clean state**
 
 Run:
 
