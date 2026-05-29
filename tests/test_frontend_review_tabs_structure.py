@@ -308,7 +308,8 @@ def test_long_running_actions_release_flags_in_finally() -> None:
         assert "catch (error)" in block
         assert "showError(error)" in block
         assert "finally" in block
-        assert setter in block
+        finally_block = block.split("finally", 1)[1]
+        assert setter in finally_block
 
 
 def test_chapter_outline_volume_action_releases_running_flag_in_finally() -> None:
