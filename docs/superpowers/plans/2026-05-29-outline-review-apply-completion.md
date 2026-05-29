@@ -565,4 +565,5 @@ Expected: no output.
 - [x] Added a process-local apply lock keyed by `(project_id, run_id)` around report load, applied check, revision, state write, and report mark-applied write.
 - [x] RED result: focused concurrency test failed with `assert 2 == 1` for `adapter.reviser_calls` before the lock.
 - [x] GREEN result: focused server-side duplicate-apply tests passed with `.venv/bin/python -m pytest tests/test_web_service.py::test_apply_outline_review_concurrent_duplicate_waits_for_applied_report tests/test_web_service.py::test_apply_outline_review_is_idempotent_after_report_applied tests/test_web_service.py::test_outline_review_apply_marks_latest_report_applied -q`.
+- [x] Final verification after the concurrency guard passed with `.venv/bin/python -m pytest tests/test_web_service.py tests/test_web_app.py tests/test_frontend_review_tabs_structure.py -q` -> 125 passed in 1.33s; `.venv/bin/python -m pytest -q` -> 276 passed in 2.30s; `npm --prefix web/frontend run build` passed with the known Vite CJS Node API deprecation warning.
 
