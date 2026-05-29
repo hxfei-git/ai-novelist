@@ -156,6 +156,7 @@ Search and corpus settings still exist in configuration because some craft helpe
 
 ## Architecture Web Context Remediation Notes
 
+- 2026-05-29: Web progress events now preserve a `model` field, parse elapsed time from both slash-separated and pipe-separated metadata, and render the right-side progress panel newest-first without changing persisted chronological order.
 - 2026-05-29: Saving an onboarding idea no longer pre-fills the outline-stage instruction input, and transient browser `Failed to fetch` errors from background project/stage refreshes are filtered out of the persisted progress log.
 - 2026-05-29: Hardened SSE/Web error behavior by adding source-level guards that require streaming workspace actions to call `showError(error)` and release running flags in `finally`; added a Web app regression for service exceptions surfacing as SSE `event: error` payloads.
 - 2026-05-29: Context profiles now record source paths and suppress duplicate artifact/state fallback content by digest before rendering.
@@ -214,6 +215,13 @@ Search and corpus settings still exist in configuration because some craft helpe
 - Remaining risk: this is source/build coverage, not browser-level interaction coverage; user-triggered action failures still persist to the progress log through `showError`.
 - Next entry point: add browser interaction coverage if more UI state leakage appears.
 
+### Phase 6c: Progress Order and Model Metrics
+- Files changed: Web project progress service, frontend progress types/rendering, Web/front-end structure tests, docs, and the Superpowers implementation plan.
+- Behavior changed: right-side progress rows render newest-first while the saved progress log remains append-ordered; structured progress rows now include `model` between status and elapsed time; backend parsing keeps legacy `/` metadata, accepts `|` metadata, and does not treat context capacity as a model when no model is present such as `deepseek-v4-pro | medium | 12.4s | ctx=4K/1M | tok≈8.1K`.
+- Verification: backend RED failed first because `model` was dropped and pipe-separated elapsed time was empty; frontend RED failed first because `visibleLog` and `item.model` rendering were absent. Target verification passed with `.venv/bin/python -m pytest tests/test_web_service.py::test_project_progress_log_accepts_legacy_strings_and_structured_events tests/test_web_service.py::test_progress_event_drops_generated_message_body_but_retains_metrics tests/test_web_service.py::test_progress_event_includes_key_and_completion_metrics tests/test_web_service.py::test_progress_event_includes_model_and_elapsed_from_pipe_metadata tests/test_web_service.py::test_progress_event_without_model_does_not_use_context_capacity_as_model tests/test_frontend_review_tabs_structure.py::test_progress_panel_renders_structured_metrics_and_keeps_legacy_branch tests/test_frontend_review_tabs_structure.py::test_progress_panel_merges_rows_by_key_and_renders_completion_metrics -q` -> 7 passed in 0.14s; final affected-suite verification passed with `.venv/bin/python -m pytest tests/test_web_service.py tests/test_web_app.py tests/test_frontend_review_tabs_structure.py -q` -> 116 passed in 1.25s; `npm --prefix web/frontend run build` passed with the known Vite CJS Node API deprecation warning.
+- Remaining risk: coverage is source/service/build level; no browser screenshot test was added for visual order, and old persisted structured rows without `model` render with that slot omitted.
+- Next entry point: add browser-level progress-panel ordering coverage if UI regressions continue.
+
 ## Verification Policy
 
 Use the smallest relevant test set during implementation. Run full pytest when a change touches state, persistence, graph contracts, adapters, prompts, or shared workflow helpers.
@@ -241,3 +249,4 @@ npm --prefix web/frontend run build
 - `docs/superpowers/plans/2026-05-28-web-only-architecture-cleanup.md`
 - `docs/superpowers/plans/2026-05-28-web-only-verified-prune.md`
 - `docs/superpowers/plans/2026-05-28-web-structural-refactor.md`
+- `docs/superpowers/plans/2026-05-29-progress-order-and-model-metrics.md`

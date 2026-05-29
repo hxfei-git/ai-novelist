@@ -404,7 +404,9 @@ def test_progress_panel_renders_structured_metrics_and_keeps_legacy_branch() -> 
     source = read_main()
 
     assert "type ProgressEvent" in read_types()
+    assert "model: string;" in read_types()
     assert "typeof item === 'string'" in source
+    assert "item.model" in source
     assert "item.elapsed" in source
     assert "item.tokens" in source
     assert "item.context" in source
@@ -417,7 +419,9 @@ def test_progress_panel_merges_rows_by_key_and_renders_completion_metrics() -> N
     assert "function upsertProgressItem" in source
     assert "progressItemKey(item)" in source
     assert "(item.key || item.label)" in source or "item.key || item.label" in source
-    assert "[item.status, item.elapsed, item.tokens, item.context].filter(Boolean).join(' · ')" in source
+    assert "const visibleLog = [...log].reverse()" in source
+    assert "visibleLog.map((item, index)" in source
+    assert "[item.status, item.model, item.elapsed, item.tokens, item.context].filter(Boolean).join(' · ')" in source
     assert "pushLog(message: ProgressItem)" in source
     assert "void saveProjectProgressLog(next)" in source
 

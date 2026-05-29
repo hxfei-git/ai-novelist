@@ -138,6 +138,7 @@ export type OutlineRepairDecision = {
 export type ProgressEvent = {
   key?: string;
   label: string;
+  model: string;
   elapsed: string;
   tokens: string;
   context: string;

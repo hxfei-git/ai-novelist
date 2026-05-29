@@ -200,7 +200,7 @@ def test_project_progress_log_accepts_legacy_strings_and_structured_events(tmp_p
     store = LocalStore(tmp_path)
     service.create_project(store, "Progress A", "progress-a")
     legacy = "旧日志中的原始内容不迁移"
-    event = {"label": "世界观汇总", "elapsed": "12.4s", "tokens": "tok≈8.1K", "context": "ctx=4K/258K", "status": "completed"}
+    event = {"label": "世界观汇总", "model": "deepseek-v4-pro", "elapsed": "12.4s", "tokens": "tok≈8.1K", "context": "ctx=4K/258K", "status": "completed"}
 
     service.save_project_progress_log(store, "progress-a", [event, legacy])
 
@@ -216,6 +216,7 @@ def test_progress_event_drops_generated_message_body_but_retains_metrics() -> No
     assert event == {
         "key": "OutlineStage",
         "label": "正在汇总「世界观设定」阶段产物",
+        "model": "deepseek",
         "elapsed": "12.4s",
         "tokens": "tok≈8.1K",
         "context": "ctx=4K/258K",
@@ -233,6 +234,41 @@ def test_progress_event_includes_key_and_completion_metrics() -> None:
     assert event == {
         "key": "OutlineStage",
         "label": "正在汇总「世界观设定」阶段产物",
+        "model": "deepseek",
+        "elapsed": "12.4s",
+        "tokens": "tok≈8.1K",
+        "context": "ctx=4K/258K",
+        "status": "completed",
+    }
+
+
+def test_progress_event_includes_model_and_elapsed_from_pipe_metadata() -> None:
+    event = service.build_progress_event(
+        "OutlineStage",
+        "已完成正在汇总「世界观设定」阶段产物（deepseek-v4-pro | medium | 12.4s | ctx=4K/1M | tok≈8.1K）",
+    )
+
+    assert event == {
+        "key": "OutlineStage",
+        "label": "正在汇总「世界观设定」阶段产物",
+        "model": "deepseek-v4-pro",
+        "elapsed": "12.4s",
+        "tokens": "tok≈8.1K",
+        "context": "ctx=4K/1M",
+        "status": "completed",
+    }
+
+
+def test_progress_event_without_model_does_not_use_context_capacity_as_model() -> None:
+    event = service.build_progress_event(
+        "OutlineStage",
+        "已完成加载上下文（12.4s/ctx=4K/258K/tok≈8.1K）",
+    )
+
+    assert event == {
+        "key": "OutlineStage",
+        "label": "加载上下文",
+        "model": "",
         "elapsed": "12.4s",
         "tokens": "tok≈8.1K",
         "context": "ctx=4K/258K",

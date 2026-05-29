@@ -94,7 +94,7 @@ def normalize_progress_log_items(items: Iterable[Any]) -> list[ProgressItem]:
         elif isinstance(item, dict):
             event = {
                 key: str(item.get(key) or "").strip()
-                for key in ("label", "elapsed", "tokens", "context", "status")
+                for key in ("label", "model", "elapsed", "tokens", "context", "status")
             }
             key = str(item.get("key") or "").strip()
             if key:
@@ -111,14 +111,31 @@ def build_progress_event(stage: str, message: str) -> dict[str, str]:
     label = body.split("（", 1)[0].strip() or str(stage or "").strip() or "Progress"
     label = re.sub(r"^(已完成[:：]?)", "", label).strip()
     label = re.sub(r"^(执行失败[:：]?)", "", label).strip()
-    elapsed = re.search(r"(?:^|[/（])(\d+(?:\.\d+)?s)(?:[/）]|$)", body)
+    metadata = ""
+    if "（" in body and body.endswith("）"):
+        metadata = body.rsplit("（", 1)[1][:-1]
+    metadata_parts = [part.strip() for part in re.split(r"\s*\|\s*|/", metadata) if part.strip()]
+    elapsed_value = next((part for part in metadata_parts if re.fullmatch(r"\d+(?:\.\d+)?s", part)), "")
+    if not elapsed_value:
+        elapsed = re.search(r"(?:^|[/（])(\d+(?:\.\d+)?s)(?:[/）]|$)", body)
+        elapsed_value = elapsed.group(1) if elapsed else ""
+    model_value = ""
+    if metadata_parts:
+        first_metadata_part = metadata_parts[0]
+        if (
+            not re.fullmatch(r"\d+(?:\.\d+)?s", first_metadata_part)
+            and not first_metadata_part.startswith("ctx=")
+            and not first_metadata_part.startswith("tok≈")
+        ):
+            model_value = first_metadata_part
     tokens = re.search(r"(tok≈[^/）\s]+)", body)
     context = re.search(r"(ctx=[^/）\s]+(?:/[^/）\s]+)?)", body)
     status = "failed" if "失败" in body else "completed" if body.startswith("已完成") else "running"
     return {
         "key": str(stage or "").strip() or label,
         "label": label,
-        "elapsed": elapsed.group(1) if elapsed else "",
+        "model": model_value,
+        "elapsed": elapsed_value,
         "tokens": tokens.group(1) if tokens else "",
         "context": context.group(1) if context else "",
         "status": status,

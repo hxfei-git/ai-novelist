@@ -390,14 +390,14 @@ function App() {
     if (actualCount < 1) return;
     setChapterBatchRunning(true);
     try {
-      pushLog({ label: '章节批量生成', elapsed: '', tokens: '', context: '', status: 'started' });
+      pushLog({ label: '章节批量生成', model: '', elapsed: '', tokens: '', context: '', status: 'started' });
       await streamAction(
         `/api/projects/${projectId}/chapters/generate-batch`,
         { volume, requested_count: actualCount },
         (line) => pushLog(line),
       );
       await refreshChapters(true, volume);
-      pushLog({ label: '章节批量生成', elapsed: '', tokens: '', context: '', status: 'completed' });
+      pushLog({ label: '章节批量生成', model: '', elapsed: '', tokens: '', context: '', status: 'completed' });
     } catch (error) {
       showError(error);
     } finally {
@@ -425,11 +425,11 @@ function App() {
 
   async function runOutlineReview() {
     setOutlineReviewRunning(true);
-    pushLog({ label: '大纲总体审查', elapsed: '', tokens: '', context: '', status: 'started' });
+    pushLog({ label: '大纲总体审查', model: '', elapsed: '', tokens: '', context: '', status: 'started' });
     try {
       await streamAction(`/api/projects/${projectId}/outline/review`, { instruction: instruction.trim() }, (line) => pushLog(line));
       await loadLatestOutlineReview();
-      pushLog({ label: '大纲总体审查', elapsed: '', tokens: '', context: '', status: 'completed' });
+      pushLog({ label: '大纲总体审查', model: '', elapsed: '', tokens: '', context: '', status: 'completed' });
     } catch (error) {
       showError(error);
     } finally {
@@ -448,7 +448,7 @@ function App() {
     const activeDecisions = decisions.filter((item) => item.decision !== 'skip');
     const emptyCustom = activeDecisions.find((item) => item.decision === 'custom' && !item.custom_answer.trim());
     if (suggestions.length > 0 && activeDecisions.length === 0) {
-      pushLog({ label: '大纲总体审查', elapsed: '', tokens: '', context: '', status: 'no_selection' });
+      pushLog({ label: '大纲总体审查', model: '', elapsed: '', tokens: '', context: '', status: 'no_selection' });
       return;
     }
     if (emptyCustom) {
@@ -456,7 +456,7 @@ function App() {
       return;
     }
     setOutlineReviewApplying(true);
-    pushLog({ label: '大纲审查应用', elapsed: '', tokens: '', context: '', status: 'started' });
+    pushLog({ label: '大纲审查应用', model: '', elapsed: '', tokens: '', context: '', status: 'started' });
     try {
       const applyResult = await streamAction(
         `/api/projects/${projectId}/outline/review/${outlineReview.run_id}/apply`,
@@ -474,7 +474,7 @@ function App() {
       setActiveStage(targetStage);
       setOutlineStageView('edit');
       if (targetStage === activeStage) await loadStage(targetStage);
-      pushLog({ label: '大纲审查应用', elapsed: '', tokens: '', context: '', status: 'completed' });
+      pushLog({ label: '大纲审查应用', model: '', elapsed: '', tokens: '', context: '', status: 'completed' });
     } catch (error) {
       showError(error);
     } finally {
@@ -484,17 +484,17 @@ function App() {
 
   function dismissOutlineReview() {
     if (!outlineReview) return;
-    pushLog({ label: '大纲审查建议', elapsed: '', tokens: '', context: '', status: 'dismissed' });
+    pushLog({ label: '大纲审查建议', model: '', elapsed: '', tokens: '', context: '', status: 'dismissed' });
     setOutlineReview((currentReview) => (currentReview ? { ...currentReview, status: 'dismissed' } : currentReview));
   }
 
   async function runChapterOutlineReview() {
     setChapterOutlineReviewRunning(true);
-    pushLog({ label: '章节大纲总体审查', elapsed: '', tokens: '', context: '', status: 'started' });
+    pushLog({ label: '章节大纲总体审查', model: '', elapsed: '', tokens: '', context: '', status: 'started' });
     try {
       await streamAction(`/api/projects/${projectId}/outline/chapter-review`, { instruction: instruction.trim() }, (line) => pushLog(line));
       await loadLatestChapterOutlineReview();
-      pushLog({ label: '章节大纲总体审查', elapsed: '', tokens: '', context: '', status: 'completed' });
+      pushLog({ label: '章节大纲总体审查', model: '', elapsed: '', tokens: '', context: '', status: 'completed' });
     } catch (error) {
       showError(error);
     } finally {
@@ -507,11 +507,11 @@ function App() {
     const suggestions = chapterOutlineReview.repair_suggestions || [];
     const selectedIssueIds = suggestions.filter((item) => selectedChapterOutlineRepairIds[item.id] !== false).map((item) => item.id);
     if (suggestions.length > 0 && selectedIssueIds.length === 0) {
-      pushLog({ label: '章节大纲总体审查', elapsed: '', tokens: '', context: '', status: 'no_selection' });
+      pushLog({ label: '章节大纲总体审查', model: '', elapsed: '', tokens: '', context: '', status: 'no_selection' });
       return;
     }
     setChapterOutlineReviewApplying(true);
-    pushLog({ label: '章节大纲审查应用', elapsed: '', tokens: '', context: '', status: 'started' });
+    pushLog({ label: '章节大纲审查应用', model: '', elapsed: '', tokens: '', context: '', status: 'started' });
     try {
       await streamAction(
         `/api/projects/${projectId}/outline/chapter-review/${chapterOutlineReview.run_id}/apply`,
@@ -520,7 +520,7 @@ function App() {
       );
       await loadLatestChapterOutlineReview();
       await loadChapterOutlineWorkspace(chapterOutlineWorkspace?.selected_volume.index);
-      pushLog({ label: '章节大纲审查应用', elapsed: '', tokens: '', context: '', status: 'completed' });
+      pushLog({ label: '章节大纲审查应用', model: '', elapsed: '', tokens: '', context: '', status: 'completed' });
     } catch (error) {
       showError(error);
     } finally {
@@ -530,7 +530,7 @@ function App() {
 
   function dismissChapterOutlineReview() {
     if (!chapterOutlineReview) return;
-    pushLog({ label: '章节大纲审查建议', elapsed: '', tokens: '', context: '', status: 'dismissed' });
+    pushLog({ label: '章节大纲审查建议', model: '', elapsed: '', tokens: '', context: '', status: 'dismissed' });
     setChapterOutlineReview((currentReview) => (currentReview ? { ...currentReview, status: 'dismissed' } : currentReview));
   }
 
@@ -572,13 +572,13 @@ function App() {
     setReviewRunning(true);
     setReview(null);
     setSelectedRepairIds({});
-    pushLog({ label: '章节总体审查', elapsed: '', tokens: '', context: '', status: 'started' });
+    pushLog({ label: '章节总体审查', model: '', elapsed: '', tokens: '', context: '', status: 'started' });
     try {
       await streamAction(`/api/projects/${projectId}/chapters/review-all`, {}, (line) => pushLog(line));
       const latest = await api<ReviewReportData>(`/api/projects/${projectId}/chapters/review-all/latest`);
       setReview(latest);
       setSelectedRepairIds(buildRepairSelectionMap(latest.repair_suggestions || []));
-      pushLog({ label: '章节总体审查', elapsed: '', tokens: '', context: '', status: 'completed' });
+      pushLog({ label: '章节总体审查', model: '', elapsed: '', tokens: '', context: '', status: 'completed' });
     } catch (error) {
       showError(error);
     } finally {
@@ -591,7 +591,7 @@ function App() {
     const suggestions = (review.repair_suggestions || []).filter((item) => item.chapter === chapter);
     const selectedIssueIds = suggestions.filter((item) => selectedRepairIds[item.id] !== false).map((item) => item.id);
     if (selectedIssueIds.length === 0) {
-      pushLog({ label: `第 ${chapter} 章修改`, elapsed: '', tokens: '', context: '', status: 'no_selection' });
+      pushLog({ label: `第 ${chapter} 章修改`, model: '', elapsed: '', tokens: '', context: '', status: 'no_selection' });
       return;
     }
     setApplyingChapter(chapter);
@@ -600,7 +600,7 @@ function App() {
         method: 'POST',
         body: JSON.stringify({ run_id: review.run_id, selected_issue_ids: selectedIssueIds }),
       });
-      pushLog({ label: `第 ${chapter} 章修改`, elapsed: '', tokens: '', context: '', status: `draft_v${result.version}` });
+      pushLog({ label: `第 ${chapter} 章修改`, model: '', elapsed: '', tokens: '', context: '', status: `draft_v${result.version}` });
       await refreshChapters();
       if (selectedChapter === chapter) await loadChapter(chapter);
     } catch (error) {
@@ -609,6 +609,8 @@ function App() {
       setApplyingChapter(null);
     }
   }
+
+  const visibleLog = [...log].reverse();
 
   return (
     <main className="app">
@@ -789,12 +791,12 @@ function App() {
           <h2>进度</h2>
           <div className="progress-log">
             {log.length === 0 && <p className="empty">暂无进度。</p>}
-            {log.map((item, index) => typeof item === 'string' ? (
+            {visibleLog.map((item, index) => typeof item === 'string' ? (
               <pre key={`${index}-${item}`}>{item}</pre>
             ) : (
               <div className="progress-item" key={`${index}-${item.label}-${item.status}`}>
                 <strong>{item.label}</strong>
-                <span>{[item.status, item.elapsed, item.tokens, item.context].filter(Boolean).join(' · ')}</span>
+                <span>{[item.status, item.model, item.elapsed, item.tokens, item.context].filter(Boolean).join(' · ')}</span>
               </div>
             ))}
           </div>
