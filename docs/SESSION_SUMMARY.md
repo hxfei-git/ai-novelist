@@ -113,7 +113,15 @@ git check-ignore -v .superpowers
 - Legacy mock adapter branches were removed for deleted non-Web agents, stale DeepSeek categories were pruned including `retrieval_context_synthesizer`, and deleted first-line mock agents are denied before body substring routing. Active retained mock fallback is preserved for Web mock mode. Verification: `.venv/bin/python -m pytest tests/test_mock_codex_adapter.py tests/test_deepseek_adapter.py -q` and `.venv/bin/python -m pytest tests/test_web_service.py -q` passed during Task 3 review.
 - Unreachable outline Director prompt/parser helpers, show/status nodes, and Director-only routing helpers were removed from the active graph surface. Verification: `.venv/bin/python -m pytest tests/test_outline_graph_modules.py tests/test_web_outline_service.py tests/test_web_service.py::test_outline_stage_list_hides_review_lock -q` passed during Task 4 review.
 - Web service facade prune is complete for FastAPI routes: routes now import focused modules directly, and `web/service.py` is compatibility-only.
-- Remaining risk: later tasks still need to prove chapter-outline/body context consistency.
+- Chapter-outline/body context consistency has focused coverage for missing and present chapter slices across direct drafting, volume batch generation, and Arabic/Chinese Markdown/plain headings.
+- Remaining risk: no live Codex drafting run or browser-level interaction run was performed in this batch; verification is focused unit/API/frontend build coverage.
+
+## Web Prompt Context Prune Audit Completion
+
+- Files changed: prompt registry/loading, mock and DeepSeek adapter branch handling, outline graph helper pruning, focused Web route/action boundaries, chapter-outline review apply persistence, chapter context slice extraction, frontend/Web SSE guard tests, and docs.
+- Behavior changed: prompt loading is registry-gated; old non-Web agent branches and unreachable outline Director helpers are removed; FastAPI routes call focused Web modules directly; chapter-outline review apply state is persisted; chapter drafting context now rejects missing or adjacent outline slices explicitly.
+- Verification: final Task 9 commands passed: `.venv/bin/python -m pytest tests/test_prompt_loader.py tests/test_mock_codex_adapter.py tests/test_deepseek_adapter.py -q` -> 29 passed in 0.11s; `.venv/bin/python -m pytest tests/test_web_service.py tests/test_web_app.py tests/test_web_chapter_service.py tests/test_web_outline_service.py -q` -> 96 passed in 1.23s; `.venv/bin/python -m pytest tests/test_context_builder.py tests/test_graph_volume_write.py tests/test_workflow_payloads.py -q` -> 30 passed in 0.73s; `npm --prefix web/frontend run build` passed with the known Vite CJS Node API deprecation warning; `.venv/bin/python -m pytest -q` -> 305 passed in 2.39s.
+- Remaining risk: `NovelState` Director/research fields and `review_lock` compatibility remain intentionally retained for active graph state and old project compatibility; `web/service.py` remains compatibility-only until remaining tests stop importing it; no live Codex/DeepSeek generation run was performed.
 
 ## Completed in This Cleanup Batch
 
