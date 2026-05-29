@@ -92,7 +92,7 @@ from ai_novelist.outline_graph.repair import (
     ensure_worldbuilding_outline_structure,
     sanitize_direction_stage_output,
 )
-from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, with_agent_metadata
+from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, run_with_progress, with_agent_metadata
 from ai_novelist.prompts import load_prompt
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
@@ -320,9 +320,12 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
         state.pending_question = review_lock_pending_question_text(issue_buckets)
         state.director_message = stage_ready_message(stage, combined_issues, artifact)
         record_stage_history(state, "run", stage, state.user_request)
-        emit_progress(progress, "OutlineStage", f"正在保存「{label}」阶段产物...")
-        save_outline_stage_outputs(state, stage, format_stage_markdown(artifact), store)
-        store.save_state(state)
+
+        def save_stage_outputs() -> None:
+            save_outline_stage_outputs(state, stage, format_stage_markdown(artifact), store)
+            store.save_state(state)
+
+        run_with_progress(progress, "OutlineStage", f"正在保存「{label}」阶段产物...", save_stage_outputs)
         return state.to_dict()
 
     questions = extract_stage_confirmation_questions(synthesis)
@@ -397,11 +400,14 @@ def run_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalStore,
         state.pending_question = f"请确认是否锁定{STAGE_LABELS[stage]}并进入下一阶段，或继续提出修改。"
         state.pending_questions = [state.pending_question]
     record_stage_history(state, "run", stage, state.user_request)
-    emit_progress(progress, "OutlineStage", f"正在保存「{label}」阶段产物...")
-    save_outline_stage_outputs(state, stage, format_stage_markdown(artifact), store)
-    if stage == "worldbuilding":
-        store.save_worldbuilding(state)
-    store.save_state(state)
+
+    def save_stage_outputs() -> None:
+        save_outline_stage_outputs(state, stage, format_stage_markdown(artifact), store)
+        if stage == "worldbuilding":
+            store.save_worldbuilding(state)
+        store.save_state(state)
+
+    run_with_progress(progress, "OutlineStage", f"正在保存「{label}」阶段产物...", save_stage_outputs)
     return state.to_dict()
 
 
@@ -583,11 +589,14 @@ def revise_outline_stage_from_existing(
     state.director_action = "run_outline_stage"
     state.outline_stage_summaries[stage] = artifact["summary"]
     record_stage_history(state, "light_revise", stage, state.user_request)
-    emit_progress(progress, "OutlineStage", f"正在保存「{label}」轻修订产物...")
-    save_outline_stage_outputs(state, stage, format_stage_markdown(artifact), store, source_agent="outline_stage_reviser")
-    if stage == "worldbuilding":
-        store.save_worldbuilding(state)
-    store.save_state(state)
+
+    def save_stage_outputs() -> None:
+        save_outline_stage_outputs(state, stage, format_stage_markdown(artifact), store, source_agent="outline_stage_reviser")
+        if stage == "worldbuilding":
+            store.save_worldbuilding(state)
+        store.save_state(state)
+
+    run_with_progress(progress, "OutlineStage", f"正在保存「{label}」轻修订产物...", save_stage_outputs)
     return state.to_dict()
 
 

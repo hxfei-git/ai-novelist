@@ -1222,6 +1222,40 @@ def test_revise_outline_stage_sets_revision_intent(monkeypatch, tmp_path: Path) 
     assert captured["director_action"] == "run_outline_stage"
 
 
+def test_revise_outline_stage_completes_save_progress(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+    state.outline_stage_artifacts["characters"] = {
+        "stage": "characters",
+        "label": "人物关系",
+        "status": "options_ready",
+        "synthesis": "# 人物关系\n\n已有草案。",
+    }
+    store.save_outline_artifact(state, "characters", "# 人物关系\n\n已有草案。\n")
+    store.save_state(state)
+    events: list[dict[str, str]] = []
+
+    def progress(stage: str, message: str) -> None:
+        events.append(service.build_progress_event(stage, message))
+
+    service.revise_outline_stage(store, DummyAdapter(), "web-demo", "characters", "收紧人物关系", progress=progress)
+
+    save_events = [event for event in events if "保存「人物关系」轻修订产物" in event["label"]]
+
+    assert save_events[0] == {
+        "key": "OutlineStage",
+        "label": "正在保存「人物关系」轻修订产物...",
+        "model": "",
+        "elapsed": "",
+        "tokens": "",
+        "context": "",
+        "status": "running",
+    }
+    assert save_events[-1]["key"] == "OutlineStage"
+    assert save_events[-1]["label"] == "保存「人物关系」轻修订产物"
+    assert save_events[-1]["status"] == "completed"
+
+
 def test_lock_outline_stage_rejects_real_pending_questions(tmp_path: Path) -> None:
     store = LocalStore(tmp_path)
     state = store.create_project("Web Demo", "web-demo")

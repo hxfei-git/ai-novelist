@@ -156,6 +156,7 @@ Search and corpus settings still exist in configuration because some craft helpe
 
 ## Architecture Web Context Remediation Notes
 
+- 2026-05-29: Outline-stage save steps now emit completed progress events after artifacts and state are written, preventing right-side save rows from remaining `running` after successful generation or light revision.
 - 2026-05-29: Web progress events now preserve a `model` field, parse elapsed time from both slash-separated and pipe-separated metadata, and render the right-side progress panel newest-first without changing persisted chronological order.
 - 2026-05-29: Saving an onboarding idea no longer pre-fills the outline-stage instruction input, and transient browser `Failed to fetch` errors from background project/stage refreshes are filtered out of the persisted progress log.
 - 2026-05-29: Hardened SSE/Web error behavior by adding source-level guards that require streaming workspace actions to call `showError(error)` and release running flags in `finally`; added a Web app regression for service exceptions surfacing as SSE `event: error` payloads.
@@ -222,6 +223,13 @@ Search and corpus settings still exist in configuration because some craft helpe
 - Remaining risk: coverage is source/service/build level; no browser screenshot test was added for visual order, and old persisted structured rows without `model` render with that slot omitted.
 - Next entry point: add browser-level progress-panel ordering coverage if UI regressions continue.
 
+### Phase 6d: Outline Save Progress Completion
+- Files changed: outline graph save progress handling, Web service regression tests, docs, and the Superpowers implementation plan.
+- Behavior changed: full outline-stage saves and light-revision saves are wrapped with `run_with_progress`, so successful artifact/state writes emit a matching completed `OutlineStage` event and failures emit a failed event instead of leaving the save row `running`.
+- Verification: RED run `.venv/bin/python -m pytest tests/test_web_service.py::test_revise_outline_stage_completes_save_progress -q` first failed because the final save event remained `running`; after the fix the same test passed with 1 passed in 0.17s. Affected-suite verification passed with `.venv/bin/python -m pytest tests/test_web_service.py tests/test_web_app.py tests/test_outline_graph_modules.py -q` -> 93 passed in 1.17s.
+- Remaining risk: coverage is service/graph-level; no live browser SSE run was performed. Existing generated project logs can still contain stale `running` rows until refreshed or cleaned.
+- Next entry point: browser-level SSE progress coverage if more long-running status drift appears.
+
 ## Verification Policy
 
 Use the smallest relevant test set during implementation. Run full pytest when a change touches state, persistence, graph contracts, adapters, prompts, or shared workflow helpers.
@@ -250,3 +258,4 @@ npm --prefix web/frontend run build
 - `docs/superpowers/plans/2026-05-28-web-only-verified-prune.md`
 - `docs/superpowers/plans/2026-05-28-web-structural-refactor.md`
 - `docs/superpowers/plans/2026-05-29-progress-order-and-model-metrics.md`
+- `docs/superpowers/plans/2026-05-29-outline-save-progress-completion.md`
