@@ -9,7 +9,14 @@ from threading import Event, Thread
 
 from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError, AgentCallOptions
 from ai_novelist.storage.local_store import LocalStore, LocalStoreError
-from ai_novelist.web import chapter_actions, chapter_outline_actions, outline_actions, service
+from ai_novelist.web import (
+    chapter_actions,
+    chapter_outline_actions,
+    outline_actions,
+    outline_service,
+    project_service,
+    review_actions,
+)
 
 
 def patch_run_outline_stage_node(monkeypatch, replacement) -> None:
@@ -170,13 +177,13 @@ def test_chapter_and_review_action_modules_export_web_entry_points() -> None:
 
 def test_project_and_outline_stage_file_roundtrip(tmp_path: Path) -> None:
     store = LocalStore(tmp_path)
-    state = service.create_project(store, "Web Demo", "web-demo", idea="一个显式流程控制的小说项目")
+    state = project_service.create_project(store, "Web Demo", "web-demo", idea="一个显式流程控制的小说项目")
 
-    projects = service.list_projects(store)
+    projects = project_service.list_projects(store)
     assert [item.project_id for item in projects] == ["web-demo"]
     assert store.load_state(state.project_id).idea == "一个显式流程控制的小说项目"
 
-    saved = service.save_outline_stage_content(store, "web-demo", "worldbuilding", "# 世界观设定\n\n规则清晰。")
+    saved = outline_actions.save_outline_stage_content(store, "web-demo", "worldbuilding", "# 世界观设定\n\n规则清晰。")
     assert saved["status"] == "options_ready"
     assert "规则清晰" in saved["content"]
 
@@ -190,21 +197,21 @@ def test_project_and_outline_stage_file_roundtrip(tmp_path: Path) -> None:
 
 def test_project_onboarding_requires_idea_or_existing_outline_context(tmp_path: Path) -> None:
     store = LocalStore(tmp_path)
-    state = service.create_project(store, "Onboarding Demo", "onboarding-demo")
+    state = project_service.create_project(store, "Onboarding Demo", "onboarding-demo")
 
-    assert service.project_needs_onboarding(state) is True
+    assert project_service.project_needs_onboarding(state) is True
 
     state.idea = "月球城市失忆工程师追查自己的小说手稿"
     store.save_state(state)
 
-    assert service.project_needs_onboarding(store.load_state("onboarding-demo")) is False
+    assert project_service.project_needs_onboarding(store.load_state("onboarding-demo")) is False
 
 
 def test_save_project_idea_persists_onboarding_seed(tmp_path: Path) -> None:
     store = LocalStore(tmp_path)
-    service.create_project(store, "Idea Demo", "idea-demo")
+    project_service.create_project(store, "Idea Demo", "idea-demo")
 
-    state = service.save_project_idea(store, "idea-demo", "  赛博唐代女仵作悬疑故事  ")
+    state = project_service.save_project_idea(store, "idea-demo", "  赛博唐代女仵作悬疑故事  ")
 
     assert state.idea == "赛博唐代女仵作悬疑故事"
     assert store.load_state("idea-demo").idea == "赛博唐代女仵作悬疑故事"
@@ -212,30 +219,30 @@ def test_save_project_idea_persists_onboarding_seed(tmp_path: Path) -> None:
 
 def test_project_progress_log_is_project_scoped_and_file_backed(tmp_path: Path) -> None:
     store = LocalStore(tmp_path)
-    service.create_project(store, "Progress A", "progress-a")
-    service.create_project(store, "Progress B", "progress-b")
+    project_service.create_project(store, "Progress A", "progress-a")
+    project_service.create_project(store, "Progress B", "progress-b")
 
-    service.save_project_progress_log(store, "progress-a", ["A2", "A1"])
-    service.save_project_progress_log(store, "progress-b", ["B1"])
+    project_service.save_project_progress_log(store, "progress-a", ["A2", "A1"])
+    project_service.save_project_progress_log(store, "progress-b", ["B1"])
 
-    assert service.load_project_progress_log(store, "progress-a") == ["A2", "A1"]
-    assert service.load_project_progress_log(store, "progress-b") == ["B1"]
+    assert project_service.load_project_progress_log(store, "progress-a") == ["A2", "A1"]
+    assert project_service.load_project_progress_log(store, "progress-b") == ["B1"]
     assert (store.project_dir("progress-a") / "web_progress_log.json").exists()
 
 
 def test_project_progress_log_accepts_legacy_strings_and_structured_events(tmp_path: Path) -> None:
     store = LocalStore(tmp_path)
-    service.create_project(store, "Progress A", "progress-a")
+    project_service.create_project(store, "Progress A", "progress-a")
     legacy = "旧日志中的原始内容不迁移"
     event = {"label": "世界观汇总", "model": "deepseek-v4-pro", "elapsed": "12.4s", "tokens": "tok≈8.1K", "context": "ctx=4K/258K", "status": "completed"}
 
-    service.save_project_progress_log(store, "progress-a", [event, legacy])
+    project_service.save_project_progress_log(store, "progress-a", [event, legacy])
 
-    assert service.load_project_progress_log(store, "progress-a") == [event, legacy]
+    assert project_service.load_project_progress_log(store, "progress-a") == [event, legacy]
 
 
 def test_progress_event_drops_generated_message_body_but_retains_metrics() -> None:
-    event = service.build_progress_event(
+    event = project_service.build_progress_event(
         "OutlineStage",
         "正在汇总「世界观设定」阶段产物（deepseek/12.4s/ctx=4K/258K/tok≈8.1K）",
     )
@@ -253,7 +260,7 @@ def test_progress_event_drops_generated_message_body_but_retains_metrics() -> No
 
 
 def test_progress_event_includes_key_and_completion_metrics() -> None:
-    event = service.build_progress_event(
+    event = project_service.build_progress_event(
         "OutlineStage",
         "已完成正在汇总「世界观设定」阶段产物（deepseek/12.4s/ctx=4K/258K/tok≈8.1K）",
     )
@@ -270,7 +277,7 @@ def test_progress_event_includes_key_and_completion_metrics() -> None:
 
 
 def test_progress_event_includes_model_and_elapsed_from_pipe_metadata() -> None:
-    event = service.build_progress_event(
+    event = project_service.build_progress_event(
         "OutlineStage",
         "已完成正在汇总「世界观设定」阶段产物（deepseek-v4-pro | medium | 12.4s | ctx=4K/1M | tok≈8.1K）",
     )
@@ -287,7 +294,7 @@ def test_progress_event_includes_model_and_elapsed_from_pipe_metadata() -> None:
 
 
 def test_progress_event_without_model_does_not_use_context_capacity_as_model() -> None:
-    event = service.build_progress_event(
+    event = project_service.build_progress_event(
         "OutlineStage",
         "已完成加载上下文（12.4s/ctx=4K/258K/tok≈8.1K）",
     )
@@ -317,7 +324,7 @@ def test_generate_outline_stage_uses_explicit_full_generation_intent_with_existi
 
     patch_run_outline_stage_node(monkeypatch, fake_run)
 
-    state = service.generate_outline_stage(store, DummyAdapter(), "web-demo", "characters", "补强人物关系")
+    state = outline_actions.generate_outline_stage(store, DummyAdapter(), "web-demo", "characters", "补强人物关系")
 
     assert captured["outline_stage"] == "characters"
     assert captured["director_intent"] == "create"
@@ -334,7 +341,7 @@ def test_outline_stage_list_hides_review_lock(tmp_path: Path) -> None:
     state.outline_stage_artifacts["chapter_outline"] = {"stage": "chapter_outline", "status": "options_ready"}
     store.save_state(state)
 
-    stages = service.outline_stage_list(store, "web-demo")
+    stages = outline_service.outline_stage_list(store, "web-demo")
 
     assert all(item["stage"] != "review_lock" for item in stages)
     assert all(item["stage"] != "chapter_outline" for item in stages)
@@ -356,7 +363,7 @@ def test_outline_stage_payload_includes_action_state(tmp_path: Path) -> None:
     store.save_outline_artifact(state, "worldbuilding", "# 世界观设定\n\n已有草案。\n")
     store.save_state(state)
 
-    payload = service.outline_stage_payload(store, state, "worldbuilding")
+    payload = outline_service.outline_stage_payload(store, state, "worldbuilding")
 
     assert payload["stage"] == "worldbuilding"
     assert payload["action_state"]["can_generate"] is True
@@ -371,7 +378,7 @@ def test_load_outline_stage_payload_rejects_chapter_outline_workspace(tmp_path: 
     store.create_project("Web Demo", "web-demo")
 
     with pytest.raises(LocalStoreError, match="章节大纲工作区"):
-        service.load_outline_stage_payload(store, "web-demo", "chapter_outline")
+        outline_actions.load_outline_stage_payload(store, "web-demo", "chapter_outline")
 
 
 def test_outline_stage_payload_disables_revise_without_content(tmp_path: Path) -> None:
@@ -381,7 +388,7 @@ def test_outline_stage_payload_disables_revise_without_content(tmp_path: Path) -
     state.outline_stage_artifacts["characters"] = {"stage": "characters", "status": "collecting"}
     store.save_state(state)
 
-    payload = service.outline_stage_payload(store, state, "characters")
+    payload = outline_service.outline_stage_payload(store, state, "characters")
 
     assert payload["action_state"]["can_revise"] is False
 
@@ -391,7 +398,7 @@ def test_revise_outline_stage_rejects_stage_without_content(tmp_path: Path) -> N
     store.create_project("Web Demo", "web-demo")
 
     with pytest.raises(LocalStoreError, match="没有可修订内容"):
-        service.revise_outline_stage(store, DummyAdapter(), "web-demo", "characters", "细化角色")
+        outline_actions.revise_outline_stage(store, DummyAdapter(), "web-demo", "characters", "细化角色")
 
 
 def test_outline_stage_payload_marks_locked_stage_as_locked(tmp_path: Path) -> None:
@@ -408,7 +415,7 @@ def test_outline_stage_payload_marks_locked_stage_as_locked(tmp_path: Path) -> N
     }
     store.save_state(state)
 
-    payload = service.outline_stage_payload(store, state, "characters")
+    payload = outline_service.outline_stage_payload(store, state, "characters")
 
     assert payload["action_state"]["can_generate"] is False
     assert payload["action_state"]["can_revise"] is False
@@ -425,11 +432,11 @@ def test_locked_outline_stage_rejects_mutations(action: str, tmp_path: Path) -> 
 
     with pytest.raises(LocalStoreError, match="已锁定"):
         if action == "save":
-            service.save_outline_stage_content(store, "web-demo", "characters", "# 人物关系\n\n改稿。")
+            outline_actions.save_outline_stage_content(store, "web-demo", "characters", "# 人物关系\n\n改稿。")
         elif action == "generate":
-            service.generate_outline_stage(store, DummyAdapter(), "web-demo", "characters")
+            outline_actions.generate_outline_stage(store, DummyAdapter(), "web-demo", "characters")
         else:
-            service.revise_outline_stage(store, DummyAdapter(), "web-demo", "characters", "改稿")
+            outline_actions.revise_outline_stage(store, DummyAdapter(), "web-demo", "characters", "改稿")
 
 
 @pytest.mark.parametrize("action", ["save", "generate", "revise", "lock"])
@@ -442,13 +449,13 @@ def test_generic_outline_stage_mutations_reject_chapter_outline_workspace(action
 
     with pytest.raises(LocalStoreError, match="章节大纲工作区"):
         if action == "save":
-            service.save_outline_stage_content(store, "web-demo", "chapter_outline", "## 第一卷\n\n改稿。")
+            outline_actions.save_outline_stage_content(store, "web-demo", "chapter_outline", "## 第一卷\n\n改稿。")
         elif action == "generate":
-            service.generate_outline_stage(store, DummyAdapter(), "web-demo", "chapter_outline")
+            outline_actions.generate_outline_stage(store, DummyAdapter(), "web-demo", "chapter_outline")
         elif action == "revise":
-            service.revise_outline_stage(store, DummyAdapter(), "web-demo", "chapter_outline", "改稿")
+            outline_actions.revise_outline_stage(store, DummyAdapter(), "web-demo", "chapter_outline", "改稿")
         else:
-            service.lock_outline_stage(store, DummyAdapter(), "web-demo", "chapter_outline")
+            outline_actions.lock_outline_stage(store, DummyAdapter(), "web-demo", "chapter_outline")
 
 
 def test_outline_stage_payload_allows_lock_without_real_pending_questions(tmp_path: Path) -> None:
@@ -461,7 +468,7 @@ def test_outline_stage_payload_allows_lock_without_real_pending_questions(tmp_pa
     }
     store.save_state(state)
 
-    payload = service.outline_stage_payload(store, state, "characters")
+    payload = outline_service.outline_stage_payload(store, state, "characters")
 
     assert payload["action_state"]["can_lock"] is True
     assert payload["action_state"]["lock_reason"] == ""
@@ -520,7 +527,7 @@ def test_chapter_outline_workspace_payload_includes_volume_navigation(tmp_path: 
     )
     store.save_state(state)
 
-    payload = service.chapter_outline_workspace_payload(store, "web-demo", selected_volume_index=2)
+    payload = chapter_outline_actions.chapter_outline_workspace_payload(store, "web-demo", selected_volume_index=2)
 
     assert payload["current_volume_index"] == 2
     assert len(payload["volume_specs"]) == 3
@@ -556,7 +563,7 @@ def test_chapter_outline_workspace_payload_selects_requested_volume(tmp_path: Pa
     store.save_outline_artifact(state, "volume_outline", "## 第一卷：开局\n\n## 第二卷：收束\n")
     store.save_state(state)
 
-    payload = service.chapter_outline_workspace_payload(store, "web-demo", selected_volume_index=1)
+    payload = chapter_outline_actions.chapter_outline_workspace_payload(store, "web-demo", selected_volume_index=1)
 
     assert payload["current_volume_index"] == 2
     assert payload["selected_volume"]["index"] == 1
@@ -571,7 +578,7 @@ def test_chapter_outline_workspace_payload_rejects_invalid_volume(tmp_path: Path
     store.create_project("Web Demo", "web-demo")
 
     with pytest.raises(LocalStoreError, match="Unknown chapter outline volume: 0"):
-        service.chapter_outline_workspace_payload(store, "web-demo", selected_volume_index=0)
+        chapter_outline_actions.chapter_outline_workspace_payload(store, "web-demo", selected_volume_index=0)
 
 
 def test_chapter_outline_workspace_extracts_non_current_volume_from_combined_content(tmp_path: Path) -> None:
@@ -599,7 +606,7 @@ def test_chapter_outline_workspace_extracts_non_current_volume_from_combined_con
     )
     store.save_state(state)
 
-    payload = service.chapter_outline_workspace_payload(store, "web-demo", selected_volume_index=1)
+    payload = chapter_outline_actions.chapter_outline_workspace_payload(store, "web-demo", selected_volume_index=1)
 
     assert "第一卷" in payload["selected_volume"]["content"]
     assert "第二卷" not in payload["selected_volume"]["content"]
@@ -625,8 +632,8 @@ def test_list_chapters_filters_latest_volume_manifest(tmp_path: Path) -> None:
             encoding="utf-8",
         )
 
-    volume_one = service.list_chapters(store, "web-demo", volume=1)
-    volume_two = service.list_chapters(store, "web-demo", volume=2)
+    volume_one = chapter_actions.list_chapters(store, "web-demo", volume=1)
+    volume_two = chapter_actions.list_chapters(store, "web-demo", volume=2)
 
     assert [item["chapter"] for item in volume_one] == [1, 2]
     assert [item["chapter"] for item in volume_two] == [3]
@@ -665,7 +672,7 @@ def test_chapter_batch_workspace_payload_reports_remaining_counts(tmp_path: Path
         state.chapter_draft = f"# 第 {chapter} 章\n\n正文 {chapter}"
         store.save_chapter_draft(state, version=1)
 
-    payload = service.chapter_batch_workspace_payload(store, "web-demo", volume=2)
+    payload = chapter_actions.chapter_batch_workspace_payload(store, "web-demo", volume=2)
 
     assert payload["volume_index"] == 2
     assert payload["volume_label"] == "第二卷"
@@ -717,7 +724,7 @@ def test_generate_chapter_batch_uses_requested_count_and_first_missing_chapter(m
 
     monkeypatch.setattr(chapter_actions, "build_volume_write_graph", lambda adapter, store, progress=None: FakeGraph())
 
-    service.generate_chapter_batch(store, DummyAdapter(), "web-demo", volume=2, requested_count=50)
+    chapter_actions.generate_chapter_batch(store, DummyAdapter(), "web-demo", volume=2, requested_count=50)
 
     assert captured["volume"] == 2
     assert captured["requested_count"] == 17
@@ -726,13 +733,13 @@ def test_generate_chapter_batch_uses_requested_count_and_first_missing_chapter(m
 def test_latest_chapter_outline_review_report_reads_saved_report(tmp_path: Path) -> None:
     store = LocalStore(tmp_path)
     store.create_project("Web Demo", "web-demo")
-    report_path, markdown_path = service.chapter_outline_review_report_paths(store, "web-demo", "run-1")
+    report_path, markdown_path = chapter_outline_actions.chapter_outline_review_report_paths(store, "web-demo", "run-1")
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report = {"project_id": "web-demo", "run_id": "run-1", "summary": "ok"}
     report_path.write_text(json.dumps(report, ensure_ascii=False), encoding="utf-8")
     markdown_path.write_text("# 章节大纲总体审查报告\n", encoding="utf-8")
 
-    latest = service.latest_chapter_outline_review_report(store, "web-demo")
+    latest = chapter_outline_actions.latest_chapter_outline_review_report(store, "web-demo")
 
     assert latest["run_id"] == "run-1"
 
@@ -749,7 +756,7 @@ def test_extract_stage_pending_questions_from_markdown_filters_status_lines() ->
 - 暂无，当前阶段可继续修改或确认进入下一阶段。
 """
 
-    questions = service.extract_pending_questions_from_stage_markdown(markdown)
+    questions = outline_service.extract_pending_questions_from_stage_markdown(markdown)
 
     assert questions == [
         "沈灵儿决裂的3-5章小纲是否需要在章节规划阶段提前完成？——影响R02中期演化强度。",
@@ -770,7 +777,7 @@ def test_outline_stage_pending_payload_prefers_artifact_questions(tmp_path: Path
     store.save_outline_artifact(state, "characters", "## 十三、待确认问题\n1. markdown question?\n")
     store.save_state(state)
 
-    payload = service.outline_stage_pending_payload(store, "web-demo", "characters")
+    payload = outline_actions.outline_stage_pending_payload(store, "web-demo", "characters")
 
     assert payload["project_id"] == "web-demo"
     assert payload["stage"] == "characters"
@@ -780,7 +787,7 @@ def test_outline_stage_pending_payload_prefers_artifact_questions(tmp_path: Path
 
 
 def test_pending_options_show_concrete_recommendation_and_custom_path() -> None:
-    options = service.default_pending_options("主角是否保留灰色动机？", "direction")
+    options = outline_service.default_pending_options("主角是否保留灰色动机？", "direction")
 
     assert options[0]["label"] == "采纳推荐方案"
     assert "主角是否保留灰色动机" in options[0]["answer"]
@@ -791,7 +798,7 @@ def test_pending_options_show_concrete_recommendation_and_custom_path() -> None:
 
 
 def test_pending_options_use_recommendation_embedded_in_question() -> None:
-    options = service.default_pending_options(
+    options = outline_service.default_pending_options(
         "主角是否保留灰色动机？——推荐方案：保留灰色动机，但仅作为秘密揭露的驱动力。",
         "direction",
     )
@@ -809,14 +816,14 @@ def test_outline_stage_pending_payload_separates_embedded_recommendation(tmp_pat
     }
     store.save_state(state)
 
-    payload = service.outline_stage_pending_payload(store, "web-demo", "direction")
+    payload = outline_actions.outline_stage_pending_payload(store, "web-demo", "direction")
 
     assert payload["items"][0]["question"] == "主角是否保留灰色动机？"
     assert payload["items"][0]["options"][0]["answer"] == "保留灰色动机，但仅作为秘密揭露的驱动力。"
 
 
 def test_pending_options_use_actionable_legacy_question_suffix() -> None:
-    options = service.default_pending_options(
+    options = outline_service.default_pending_options(
         "最终战隐藏据点势力是否有具体来源？——若不归渊遗民已覆盖，则无需额外设定。",
         "characters",
     )
@@ -837,7 +844,7 @@ def test_outline_stage_pending_payload_falls_back_to_markdown(tmp_path: Path) ->
     )
     store.save_state(state)
 
-    payload = service.outline_stage_pending_payload(store, "web-demo", "characters")
+    payload = outline_actions.outline_stage_pending_payload(store, "web-demo", "characters")
 
     assert [item["question"] for item in payload["items"]] == ["最终战隐藏据点势力是否有具体来源？"]
     assert payload["items"][0]["id"]
@@ -851,13 +858,13 @@ def test_outline_review_roundtrip_and_apply_updates_outline(tmp_path: Path) -> N
     state.outline = "# 最终锁定总大纲\n\n## 方向定位\n旧稿。"
     store.save_state(state)
 
-    report = service.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
+    report = outline_actions.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
     assert report["decision"] == "revise"
     assert report["score"] == 72
-    latest = service.latest_outline_review_report(store, "web-demo")
+    latest = outline_service.latest_outline_review_report(store, "web-demo")
     assert latest["run_id"] == report["run_id"]
 
-    applied = service.apply_outline_review(store, OutlineReviewAdapter(), "web-demo", report["run_id"])
+    applied = outline_actions.apply_outline_review(store, OutlineReviewAdapter(), "web-demo", report["run_id"])
 
     assert applied["applied"] is True
     assert store.outline_path("web-demo").exists()
@@ -872,9 +879,9 @@ def test_outline_review_apply_marks_latest_report_applied(tmp_path: Path) -> Non
     state.outline = "# 最终锁定总大纲\n\n## 方向定位\n旧稿。"
     store.save_state(state)
 
-    report = service.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
-    applied = service.apply_outline_review(store, OutlineReviewAdapter(), "web-demo", report["run_id"])
-    latest = service.latest_outline_review_report(store, "web-demo")
+    report = outline_actions.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
+    applied = outline_actions.apply_outline_review(store, OutlineReviewAdapter(), "web-demo", report["run_id"])
+    latest = outline_service.latest_outline_review_report(store, "web-demo")
 
     assert applied["applied"] is True
     assert applied["status"] == "applied"
@@ -897,11 +904,11 @@ def test_apply_outline_review_is_idempotent_after_report_applied(tmp_path: Path)
     state.outline = "# 最终锁定总大纲\n\n## 方向定位\n旧稿。"
     store.save_state(state)
 
-    report = service.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
+    report = outline_actions.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
     adapter = CountingOutlineApplyAdapter()
 
-    first = service.apply_outline_review(store, adapter, "web-demo", report["run_id"])
-    second = service.apply_outline_review(store, adapter, "web-demo", report["run_id"])
+    first = outline_actions.apply_outline_review(store, adapter, "web-demo", report["run_id"])
+    second = outline_actions.apply_outline_review(store, adapter, "web-demo", report["run_id"])
 
     assert first["applied"] is True
     assert second["applied"] is True
@@ -920,14 +927,14 @@ def test_apply_outline_review_concurrent_duplicate_waits_for_applied_report(tmp_
     state.outline = "# 最终锁定总大纲\n\n## 方向定位\n旧稿。"
     store.save_state(state)
 
-    report = service.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
+    report = outline_actions.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
     adapter = BlockingOutlineApplyAdapter()
     results: list[dict[str, object]] = []
     errors: list[BaseException] = []
 
     def apply_review() -> None:
         try:
-            results.append(service.apply_outline_review(store, adapter, "web-demo", report["run_id"]))
+            results.append(outline_actions.apply_outline_review(store, adapter, "web-demo", report["run_id"]))
         except BaseException as exc:
             errors.append(exc)
 
@@ -962,8 +969,8 @@ def test_outline_review_apply_persists_new_baseline_for_manual_rereview(monkeypa
     )
     store.save_state(state)
 
-    report = service.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
-    service.apply_outline_review(store, OutlineReviewAdapter(), "web-demo", report["run_id"])
+    report = outline_actions.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
+    outline_actions.apply_outline_review(store, OutlineReviewAdapter(), "web-demo", report["run_id"])
 
     saved = store.load_state("web-demo")
     assert "已补强结尾收束" in saved.outline
@@ -984,7 +991,7 @@ def test_outline_review_apply_persists_new_baseline_for_manual_rereview(monkeypa
 
     monkeypatch.setattr(outline_actions, "review_outline_node", fake_review_outline_node)
 
-    service.review_outline(store, OutlineReviewAdapter(), "web-demo", "再次审查")
+    outline_actions.review_outline(store, OutlineReviewAdapter(), "web-demo", "再次审查")
 
     assert "已补强结尾收束" in captured["outline"]
 
@@ -996,7 +1003,7 @@ def test_outline_review_report_exposes_selectable_suggestions(tmp_path: Path) ->
     state.outline = "# 最终锁定总大纲\n\n## 章节大纲\n旧稿。"
     store.save_state(state)
 
-    report = service.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
+    report = outline_actions.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
 
     suggestions = report["repair_suggestions"]
     assert suggestions
@@ -1011,13 +1018,13 @@ def test_apply_outline_review_uses_only_selected_suggestions(tmp_path: Path) -> 
     state = store.create_project("Web Demo", "web-demo")
     state.outline = "# 最终锁定总大纲\n\n## 章节大纲\n旧稿。"
     store.save_state(state)
-    report = service.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
+    report = outline_actions.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
     suggestions = report["repair_suggestions"]
     selected = next(item for item in suggestions if "补强最后一卷" in item["recommendation"])
     unselected = next(item for item in suggestions if item["id"] != selected["id"])
     adapter = CapturingOutlineReviewAdapter()
 
-    service.apply_outline_review(
+    outline_actions.apply_outline_review(
         store,
         adapter,
         "web-demo",
@@ -1035,7 +1042,7 @@ def test_apply_outline_review_uses_recommended_custom_and_skip_decisions(tmp_pat
     state = store.create_project("Web Demo", "web-demo")
     state.outline = "# 最终锁定总大纲\n\n## 章节大纲\n旧稿。"
     store.save_state(state)
-    report = service.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
+    report = outline_actions.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
     suggestions = report["repair_suggestions"]
     skipped = {
         "id": "skip-test",
@@ -1046,11 +1053,11 @@ def test_apply_outline_review_uses_recommended_custom_and_skip_decisions(tmp_pat
         "selected": True,
     }
     report["repair_suggestions"] = [*suggestions, skipped]
-    service.write_outline_review_report(store, store.load_state("web-demo"), report)
+    outline_service.write_outline_review_report(store, store.load_state("web-demo"), report)
     suggestions = report["repair_suggestions"]
     adapter = CapturingOutlineReviewAdapter()
 
-    service.apply_outline_review(
+    outline_actions.apply_outline_review(
         store,
         adapter,
         "web-demo",
@@ -1073,11 +1080,11 @@ def test_apply_outline_review_rejects_empty_custom_decision(tmp_path: Path) -> N
     state = store.create_project("Web Demo", "web-demo")
     state.outline = "# 最终锁定总大纲\n\n## 章节大纲\n旧稿。"
     store.save_state(state)
-    report = service.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
+    report = outline_actions.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
     suggestion = report["repair_suggestions"][0]
 
     with pytest.raises(LocalStoreError, match="我的意见不能为空"):
-        service.apply_outline_review(
+        outline_actions.apply_outline_review(
             store,
             OutlineReviewAdapter(),
             "web-demo",
@@ -1091,14 +1098,14 @@ def test_apply_outline_review_pass_report_still_applies_user_decisions(tmp_path:
     state = store.create_project("Web Demo", "web-demo")
     state.outline = "# 最终锁定总大纲\n\n## 章节大纲\n旧稿。"
     store.save_state(state)
-    report = service.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
+    report = outline_actions.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
     report["decision"] = "pass"
     report["status"] = "approved"
-    service.write_outline_review_report(store, store.load_state("web-demo"), report)
+    outline_service.write_outline_review_report(store, store.load_state("web-demo"), report)
     suggestion = report["repair_suggestions"][0]
     adapter = CapturingOutlineReviewAdapter()
 
-    service.apply_outline_review(
+    outline_actions.apply_outline_review(
         store,
         adapter,
         "web-demo",
@@ -1136,7 +1143,7 @@ def test_submit_stage_pending_answers_can_return_another_round(monkeypatch, tmp_
 
     patch_run_outline_stage_node(monkeypatch, fake_run)
 
-    result = service.submit_stage_pending_answers(
+    result = outline_actions.submit_stage_pending_answers(
         store,
         DummyAdapter(),
         "web-demo",
@@ -1151,8 +1158,8 @@ def test_submit_stage_pending_answers_can_return_another_round(monkeypatch, tmp_
     )
 
     reloaded = store.load_state("web-demo")
-    pending_payload = service.outline_stage_pending_payload(store, "web-demo", "characters")
-    stage_payload = service.outline_stage_payload(store, reloaded, "characters")
+    pending_payload = outline_actions.outline_stage_pending_payload(store, "web-demo", "characters")
+    stage_payload = outline_service.outline_stage_payload(store, reloaded, "characters")
     assert reloaded.pending_questions == ["林霄是否需要额外的秘密线？"]
     assert pending_payload["items"][0]["question"] == "林霄是否需要额外的秘密线？"
     assert pending_payload["items"][0]["options"][0]["id"] == "accept"
@@ -1186,7 +1193,7 @@ def test_submit_stage_pending_answers_can_clear_remaining_questions(monkeypatch,
 
     patch_run_outline_stage_node(monkeypatch, fake_run)
 
-    result = service.submit_stage_pending_answers(
+    result = outline_actions.submit_stage_pending_answers(
         store,
         DummyAdapter(),
         "web-demo",
@@ -1201,7 +1208,7 @@ def test_submit_stage_pending_answers_can_clear_remaining_questions(monkeypatch,
     )
 
     reloaded = store.load_state("web-demo")
-    payload = service.outline_stage_pending_payload(store, "web-demo", "characters")
+    payload = outline_actions.outline_stage_pending_payload(store, "web-demo", "characters")
     assert reloaded.pending_questions == []
     assert payload["items"] == []
 
@@ -1232,7 +1239,7 @@ def test_submit_stage_pending_answers_builds_revision_instruction(monkeypatch, t
 
     patch_run_outline_stage_node(monkeypatch, fake_run)
 
-    result = service.submit_stage_pending_answers(
+    result = outline_actions.submit_stage_pending_answers(
         store,
         DummyAdapter(),
         "web-demo",
@@ -1260,7 +1267,7 @@ def test_submit_stage_pending_answers_rejects_locked_stage(tmp_path: Path) -> No
     store.save_state(state)
 
     with pytest.raises(LocalStoreError, match="已锁定"):
-        service.submit_stage_pending_answers(
+        outline_actions.submit_stage_pending_answers(
             store,
             DummyAdapter(),
             "web-demo",
@@ -1274,7 +1281,7 @@ def test_submit_stage_pending_answers_rejects_chapter_outline_workspace(tmp_path
     store.create_project("Web Demo", "web-demo")
 
     with pytest.raises(LocalStoreError, match="章节大纲工作区"):
-        service.submit_stage_pending_answers(
+        outline_actions.submit_stage_pending_answers(
             store,
             DummyAdapter(),
             "web-demo",
@@ -1290,7 +1297,7 @@ def test_submit_stage_pending_answers_rejects_missing_content(tmp_path: Path) ->
     store.save_state(state)
 
     with pytest.raises(LocalStoreError, match="没有可修订内容"):
-        service.submit_stage_pending_answers(
+        outline_actions.submit_stage_pending_answers(
             store,
             DummyAdapter(),
             "web-demo",
@@ -1306,7 +1313,7 @@ def test_submit_stage_pending_answers_rejects_incomplete_answer(tmp_path: Path) 
     store.save_state(state)
 
     with pytest.raises(LocalStoreError, match="每条待确认项都需要选择默认方案或填写自定义答案"):
-        service.submit_stage_pending_answers(
+        outline_actions.submit_stage_pending_answers(
             store,
             DummyAdapter(),
             "web-demo",
@@ -1329,7 +1336,7 @@ def test_revise_outline_stage_sets_revision_intent(monkeypatch, tmp_path: Path) 
 
     patch_run_outline_stage_node(monkeypatch, fake_run)
 
-    state = service.revise_outline_stage(store, DummyAdapter(), "web-demo", "characters", "收紧人物关系")
+    state = outline_actions.revise_outline_stage(store, DummyAdapter(), "web-demo", "characters", "收紧人物关系")
 
     assert state.director_intent == "revise"
     assert captured["revision_instruction"] == "收紧人物关系"
@@ -1350,9 +1357,9 @@ def test_revise_outline_stage_completes_save_progress(tmp_path: Path) -> None:
     events: list[dict[str, str]] = []
 
     def progress(stage: str, message: str) -> None:
-        events.append(service.build_progress_event(stage, message))
+        events.append(project_service.build_progress_event(stage, message))
 
-    service.revise_outline_stage(store, DummyAdapter(), "web-demo", "characters", "收紧人物关系", progress=progress)
+    outline_actions.revise_outline_stage(store, DummyAdapter(), "web-demo", "characters", "收紧人物关系", progress=progress)
 
     save_events = [event for event in events if "保存「人物关系」轻修订产物" in event["label"]]
 
@@ -1381,7 +1388,7 @@ def test_lock_outline_stage_rejects_real_pending_questions(tmp_path: Path) -> No
     store.save_state(state)
 
     with pytest.raises(LocalStoreError, match="待确认问题"):
-        service.lock_outline_stage(store, DummyAdapter(), "web-demo", "characters")
+        outline_actions.lock_outline_stage(store, DummyAdapter(), "web-demo", "characters")
 
 
 def test_lock_outline_stage_rejects_already_locked_stage(tmp_path: Path) -> None:
@@ -1391,7 +1398,7 @@ def test_lock_outline_stage_rejects_already_locked_stage(tmp_path: Path) -> None
     store.save_state(state)
 
     with pytest.raises(LocalStoreError, match="已锁定"):
-        service.lock_outline_stage(store, DummyAdapter(), "web-demo", "characters")
+        outline_actions.lock_outline_stage(store, DummyAdapter(), "web-demo", "characters")
 
 
 def test_lock_outline_stage_stays_on_current_stage_without_auto_generation(tmp_path: Path) -> None:
@@ -1407,7 +1414,7 @@ def test_lock_outline_stage_stays_on_current_stage_without_auto_generation(tmp_p
     store.save_outline_artifact(state, "direction", "# 方向定位\n\n已完成方向定位。")
     store.save_state(state)
 
-    result = service.lock_outline_stage(store, DummyAdapter(), "web-demo", "direction")
+    result = outline_actions.lock_outline_stage(store, DummyAdapter(), "web-demo", "direction")
 
     assert result.outline_stage == "direction"
     assert result.current_stage == "direction"
@@ -1439,7 +1446,7 @@ def test_non_current_options_ready_volume_payload_matches_action_refusal(tmp_pat
     store = LocalStore(tmp_path)
     make_selectable_chapter_workspace(store)
 
-    payload = service.chapter_outline_workspace_payload(store, "web-demo", selected_volume_index=1)
+    payload = chapter_outline_actions.chapter_outline_workspace_payload(store, "web-demo", selected_volume_index=1)
     selected = payload["selected_volume"]
 
     assert selected["status"] == "options_ready"
@@ -1449,7 +1456,7 @@ def test_non_current_options_ready_volume_payload_matches_action_refusal(tmp_pat
     assert selected["lock_reason"] == "请先完成当前卷"
 
     with pytest.raises(LocalStoreError, match=selected["lock_reason"]):
-        service.generate_chapter_outline_volume(store, DummyAdapter(), "web-demo", 1)
+        chapter_outline_actions.generate_chapter_outline_volume(store, DummyAdapter(), "web-demo", 1)
 
 
 @pytest.mark.parametrize("action", ["generate", "revise", "lock"])
@@ -1467,11 +1474,11 @@ def test_chapter_outline_volume_actions_reject_non_current_volume(action: str, m
 
     with pytest.raises(LocalStoreError, match="请先完成当前卷"):
         if action == "generate":
-            service.generate_chapter_outline_volume(store, DummyAdapter(), "web-demo", 1)
+            chapter_outline_actions.generate_chapter_outline_volume(store, DummyAdapter(), "web-demo", 1)
         elif action == "revise":
-            service.revise_chapter_outline_volume(store, DummyAdapter(), "web-demo", 1, "细化第一卷")
+            chapter_outline_actions.revise_chapter_outline_volume(store, DummyAdapter(), "web-demo", 1, "细化第一卷")
         else:
-            service.lock_chapter_outline_volume(store, DummyAdapter(), "web-demo", 1)
+            chapter_outline_actions.lock_chapter_outline_volume(store, DummyAdapter(), "web-demo", 1)
 
     assert called["run"] is False
     saved = store.load_state("web-demo")
@@ -1483,7 +1490,7 @@ def test_chapter_outline_locked_current_volume_cannot_be_regenerated(tmp_path: P
     make_selectable_chapter_workspace(store)
 
     with pytest.raises(LocalStoreError, match="已锁定"):
-        service.generate_chapter_outline_volume(store, DummyAdapter(), "web-demo", 2)
+        chapter_outline_actions.generate_chapter_outline_volume(store, DummyAdapter(), "web-demo", 2)
 
 
 def test_lock_chapter_outline_volume_does_not_auto_generate_next_volume(tmp_path: Path) -> None:
@@ -1513,7 +1520,7 @@ def test_lock_chapter_outline_volume_does_not_auto_generate_next_volume(tmp_path
     store.save_outline_artifact(state, "chapter_outline", "### 第一卷\n\n#### 第 1 章：开端\n- 起势。")
     store.save_state(state)
 
-    result = service.lock_chapter_outline_volume(store, DummyAdapter(), "web-demo", 1)
+    result = chapter_outline_actions.lock_chapter_outline_volume(store, DummyAdapter(), "web-demo", 1)
     metadata = result.outline_stage_artifacts["chapter_outline"]["metadata"]
 
     assert result.outline_stage == "chapter_outline"
@@ -1544,7 +1551,7 @@ def test_generate_current_chapter_outline_volume_sets_default_current_index(monk
 
     patch_run_outline_stage_node(monkeypatch, fake_run)
 
-    service.generate_chapter_outline_volume(store, DummyAdapter(), "web-demo", 1)
+    chapter_outline_actions.generate_chapter_outline_volume(store, DummyAdapter(), "web-demo", 1)
 
     assert captured["outline_stage_artifacts"]["chapter_outline"]["metadata"]["current_volume_index"] == 1
 
@@ -1572,7 +1579,7 @@ def test_generate_current_chapter_outline_volume_uses_full_generation_intent_wit
 
     patch_run_outline_stage_node(monkeypatch, fake_run)
 
-    service.generate_chapter_outline_volume(store, DummyAdapter(), "web-demo", 1, "重建第一卷")
+    chapter_outline_actions.generate_chapter_outline_volume(store, DummyAdapter(), "web-demo", 1, "重建第一卷")
 
     assert captured["director_intent"] == "create"
     assert captured["revision_instruction"] == ""
@@ -1602,7 +1609,7 @@ def test_revise_current_chapter_outline_volume_uses_existing_content(monkeypatch
 
     patch_run_outline_stage_node(monkeypatch, fake_run)
 
-    service.revise_chapter_outline_volume(store, DummyAdapter(), "web-demo", 1, "细化第一卷")
+    chapter_outline_actions.revise_chapter_outline_volume(store, DummyAdapter(), "web-demo", 1, "细化第一卷")
 
     assert captured["outline_stage_artifacts"]["chapter_outline"]["metadata"]["current_volume_index"] == 1
     assert captured["director_intent"] == "revise"
@@ -1623,11 +1630,11 @@ def test_revise_current_chapter_outline_volume_rejects_missing_content(tmp_path:
     store.save_outline_artifact(state, "volume_outline", "## 第一卷：开局\n")
     store.save_state(state)
 
-    payload = service.chapter_outline_workspace_payload(store, "web-demo", selected_volume_index=1)
+    payload = chapter_outline_actions.chapter_outline_workspace_payload(store, "web-demo", selected_volume_index=1)
     assert payload["selected_volume"]["can_revise"] is False
 
     with pytest.raises(LocalStoreError, match="没有可修订内容"):
-        service.revise_chapter_outline_volume(store, DummyAdapter(), "web-demo", 1, "细化第一卷")
+        chapter_outline_actions.revise_chapter_outline_volume(store, DummyAdapter(), "web-demo", 1, "细化第一卷")
 
 
 def test_chapter_batch_payload_sets_director_task_args(monkeypatch, tmp_path: Path) -> None:
@@ -1642,7 +1649,7 @@ def test_chapter_batch_payload_sets_director_task_args(monkeypatch, tmp_path: Pa
 
     monkeypatch.setattr(chapter_actions, "build_volume_write_graph", lambda adapter, store, progress=None: FakeGraph())
 
-    service.generate_chapter_batch(store, DummyAdapter(), "web-demo", volume=2, chapters="1-3", max_workers=4)
+    chapter_actions.generate_chapter_batch(store, DummyAdapter(), "web-demo", volume=2, chapters="1-3", max_workers=4)
 
     assert captured == {"volume": 2, "chapters": "1-3"}
 
@@ -1656,7 +1663,7 @@ def test_global_review_and_repair_are_explicit_apply(tmp_path: Path) -> None:
     store.save_chapter_draft(state, version=1)
     original = store.chapter_draft_path("web-demo", 1, 1).read_text(encoding="utf-8")
 
-    report = service.review_all_chapters(store, DummyAdapter(), "web-demo")
+    report = review_actions.review_all_chapters(store, DummyAdapter(), "web-demo")
     assert report["status"] == "needs_repair"
     assert store.chapter_draft_path("web-demo", 1, 1).read_text(encoding="utf-8") == original
     suggestions = report["repair_suggestions"]
@@ -1664,10 +1671,10 @@ def test_global_review_and_repair_are_explicit_apply(tmp_path: Path) -> None:
     assert suggestions[0]["selected"] is True
     assert not store.chapter_draft_path("web-demo", 1, 2).exists()
 
-    proposals = service.generate_repair_proposals(store, DummyAdapter(), "web-demo", report["run_id"])
+    proposals = review_actions.generate_repair_proposals(store, DummyAdapter(), "web-demo", report["run_id"])
     assert proposals["proposals"][0]["recommendation"]
 
-    applied = service.apply_repair(store, DummyAdapter(), "web-demo", 1, report["run_id"], selected_issue_ids=[suggestions[0]["id"]])
+    applied = review_actions.apply_repair(store, DummyAdapter(), "web-demo", 1, report["run_id"], selected_issue_ids=[suggestions[0]["id"]])
     assert applied["version"] == 2
     assert store.chapter_draft_path("web-demo", 1, 2).exists()
 
@@ -1695,7 +1702,7 @@ def test_chapter_list_and_detail_prefer_final_then_highest_draft_then_legacy(tmp
     state.chapter_draft = "# 第 3 章旧路径\n\n只有 legacy chapter_003.md 时也能读取。"
     store.save_chapter(state)
 
-    chapters = service.list_chapters(store, "web-demo")
+    chapters = chapter_actions.list_chapters(store, "web-demo")
 
     assert [item["chapter"] for item in chapters] == [1, 2, 3]
     assert chapters[0]["source"] == "final"
@@ -1704,9 +1711,9 @@ def test_chapter_list_and_detail_prefer_final_then_highest_draft_then_legacy(tmp
     assert chapters[1]["version"] == 12
     assert chapters[2]["source"] == "legacy"
 
-    first = service.load_chapter_payload(store, "web-demo", 1)
-    second = service.load_chapter_payload(store, "web-demo", 2)
-    third = service.load_chapter_payload(store, "web-demo", 3)
+    first = chapter_actions.load_chapter_payload(store, "web-demo", 1)
+    second = chapter_actions.load_chapter_payload(store, "web-demo", 2)
+    third = chapter_actions.load_chapter_payload(store, "web-demo", 3)
 
     assert "定稿正文" in first["content"]
     assert first["path"] == "chapters/chapter_001/final.md"
@@ -1724,7 +1731,7 @@ def test_global_review_uses_model_consistency_report(tmp_path: Path) -> None:
     state.chapter_draft = "# 第 1 章\n\n" + "雨城的夜色压在港口上，主角追踪线索并在钟楼下确认了同伴留下的暗号。" * 4
     store.save_chapter_draft(state, version=1)
 
-    report = service.review_all_chapters(store, ModelReviewAdapter(), "web-demo")
+    report = review_actions.review_all_chapters(store, ModelReviewAdapter(), "web-demo")
 
     assert report["status"] == "needs_repair"
     assert report["review_source"] == "model"
@@ -1732,7 +1739,7 @@ def test_global_review_uses_model_consistency_report(tmp_path: Path) -> None:
     assert any(item["category"] == "timeline" for item in report["issues"])
     assert report["repair_suggestions"][0]["selected"] is True
     assert "前后章节" in report["repair_suggestions"][0]["recommendation"]
-    saved = service.latest_global_review(store, "web-demo")
+    saved = review_actions.latest_global_review(store, "web-demo")
     assert saved["run_id"] == report["run_id"]
 
 
@@ -1744,7 +1751,7 @@ def test_global_review_falls_back_to_local_scan_on_model_error(tmp_path: Path) -
     state.chapter_draft = "# 第 1 章\n\n" + "TODO：这里待补完整正文。" * 6
     store.save_chapter_draft(state, version=1)
 
-    report = service.review_all_chapters(store, FailingReviewAdapter(), "web-demo")
+    report = review_actions.review_all_chapters(store, FailingReviewAdapter(), "web-demo")
 
     assert report["review_source"] == "local"
     assert any(item["category"] == "placeholder" for item in report["issues"])

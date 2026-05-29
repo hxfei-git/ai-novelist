@@ -12,7 +12,12 @@ from ai_novelist.adapters.codex_cli import CodexCLIAdapter
 from ai_novelist.adapters.deepseek import DeepSeekAdapter
 from ai_novelist.config import Settings, load_settings
 from ai_novelist.storage.local_store import LocalStore, LocalStoreError
-from ai_novelist.web import service
+from ai_novelist.web import chapter_actions
+from ai_novelist.web import chapter_outline_actions
+from ai_novelist.web import outline_actions
+from ai_novelist.web import outline_service
+from ai_novelist.web import project_service
+from ai_novelist.web import review_actions
 
 
 def make_app(
@@ -75,7 +80,7 @@ def make_app(
         queue: Queue[tuple[str, dict[str, Any]]] = Queue()
 
         def progress(stage: str, message: str) -> None:
-            queue.put(("progress", service.build_progress_event(stage, message)))
+            queue.put(("progress", project_service.build_progress_event(stage, message)))
 
         def worker() -> None:
             try:
@@ -92,12 +97,12 @@ def make_app(
 
     @app.get("/api/projects")
     def projects():
-        return [item.__dict__ for item in service.list_projects(store)]
+        return [item.__dict__ for item in project_service.list_projects(store)]
 
     @app.post("/api/projects")
     def create_project(payload: dict[str, Any]):
         try:
-            state = service.create_project(store, str(payload.get("title") or ""), payload.get("project_id"), str(payload.get("idea") or ""))
+            state = project_service.create_project(store, str(payload.get("title") or ""), payload.get("project_id"), str(payload.get("idea") or ""))
             return state.to_dict()
         except LocalStoreError as exc:
             raise as_http_error(exc)
@@ -105,14 +110,14 @@ def make_app(
     @app.post("/api/projects/{project_id}/idea")
     def save_project_idea(project_id: str, payload: dict[str, Any]):
         try:
-            return service.save_project_idea(store, project_id, str(payload.get("idea") or "")).to_dict()
+            return project_service.save_project_idea(store, project_id, str(payload.get("idea") or "")).to_dict()
         except LocalStoreError as exc:
             raise as_http_error(exc)
 
     @app.get("/api/projects/{project_id}/progress-log")
     def load_project_progress_log(project_id: str):
         try:
-            return {"items": service.load_project_progress_log(store, project_id)}
+            return {"items": project_service.load_project_progress_log(store, project_id)}
         except LocalStoreError as exc:
             raise as_http_error(exc)
 
@@ -122,7 +127,7 @@ def make_app(
             items = payload.get("items")
             if not isinstance(items, list):
                 items = []
-            return {"items": service.save_project_progress_log(store, project_id, items)}
+            return {"items": project_service.save_project_progress_log(store, project_id, items)}
         except LocalStoreError as exc:
             raise as_http_error(exc)
 
@@ -136,21 +141,21 @@ def make_app(
     @app.get("/api/projects/{project_id}/outline/stages")
     def outline_stages(project_id: str):
         try:
-            return service.outline_stage_list(store, project_id)
+            return outline_service.outline_stage_list(store, project_id)
         except LocalStoreError as exc:
             raise as_http_error(exc)
 
     @app.get("/api/projects/{project_id}/outline/stages/{stage}")
     def outline_stage(project_id: str, stage: str):
         try:
-            return service.load_outline_stage_payload(store, project_id, stage)
+            return outline_actions.load_outline_stage_payload(store, project_id, stage)
         except LocalStoreError as exc:
             raise as_http_error(exc)
 
     @app.get("/api/projects/{project_id}/outline/stages/{stage}/pending")
     def outline_stage_pending(project_id: str, stage: str):
         try:
-            return service.outline_stage_pending_payload(store, project_id, stage)
+            return outline_actions.outline_stage_pending_payload(store, project_id, stage)
         except LocalStoreError as exc:
             raise as_http_error(exc)
 
@@ -158,14 +163,14 @@ def make_app(
     def submit_outline_stage_pending(project_id: str, stage: str, payload: dict[str, Any] | None = None):
         payload = payload or {}
         return StreamingResponse(
-            sse_events(lambda progress: service.submit_stage_pending_answers(store, adapter(payload), project_id, stage, payload.get("answers"), progress).to_dict()),
+            sse_events(lambda progress: outline_actions.submit_stage_pending_answers(store, adapter(payload), project_id, stage, payload.get("answers"), progress).to_dict()),
             media_type="text/event-stream",
         )
 
     @app.get("/api/projects/{project_id}/outline/chapter-workspace")
     def chapter_outline_workspace(project_id: str, selected_volume_index: int | None = None):
         try:
-            return service.chapter_outline_workspace_payload(store, project_id, selected_volume_index)
+            return chapter_outline_actions.chapter_outline_workspace_payload(store, project_id, selected_volume_index)
         except LocalStoreError as exc:
             raise as_http_error(exc)
 
@@ -173,7 +178,7 @@ def make_app(
     def generate_chapter_outline_volume(project_id: str, volume_index: int, payload: dict[str, Any] | None = None):
         payload = payload or {}
         return StreamingResponse(
-            sse_events(lambda progress: service.generate_chapter_outline_volume(store, adapter(payload), project_id, volume_index, str(payload.get("instruction") or ""), progress).to_dict()),
+            sse_events(lambda progress: chapter_outline_actions.generate_chapter_outline_volume(store, adapter(payload), project_id, volume_index, str(payload.get("instruction") or ""), progress).to_dict()),
             media_type="text/event-stream",
         )
 
@@ -181,7 +186,7 @@ def make_app(
     def revise_chapter_outline_volume(project_id: str, volume_index: int, payload: dict[str, Any] | None = None):
         payload = payload or {}
         return StreamingResponse(
-            sse_events(lambda progress: service.revise_chapter_outline_volume(store, adapter(payload), project_id, volume_index, str(payload.get("instruction") or ""), progress).to_dict()),
+            sse_events(lambda progress: chapter_outline_actions.revise_chapter_outline_volume(store, adapter(payload), project_id, volume_index, str(payload.get("instruction") or ""), progress).to_dict()),
             media_type="text/event-stream",
         )
 
@@ -189,14 +194,14 @@ def make_app(
     def lock_chapter_outline_volume(project_id: str, volume_index: int, payload: dict[str, Any] | None = None):
         payload = payload or {}
         return StreamingResponse(
-            sse_events(lambda progress: service.lock_chapter_outline_volume(store, adapter(payload), project_id, volume_index, str(payload.get("instruction") or ""), progress).to_dict()),
+            sse_events(lambda progress: chapter_outline_actions.lock_chapter_outline_volume(store, adapter(payload), project_id, volume_index, str(payload.get("instruction") or ""), progress).to_dict()),
             media_type="text/event-stream",
         )
 
     @app.put("/api/projects/{project_id}/outline/stages/{stage}")
     def save_outline_stage(project_id: str, stage: str, payload: dict[str, Any]):
         try:
-            return service.save_outline_stage_content(store, project_id, stage, str(payload.get("content") or ""))
+            return outline_actions.save_outline_stage_content(store, project_id, stage, str(payload.get("content") or ""))
         except LocalStoreError as exc:
             raise as_http_error(exc)
 
@@ -204,7 +209,7 @@ def make_app(
     def generate_outline_stage(project_id: str, stage: str, payload: dict[str, Any] | None = None):
         payload = payload or {}
         return StreamingResponse(
-            sse_events(lambda progress: service.generate_outline_stage(store, adapter(payload), project_id, stage, str(payload.get("instruction") or ""), progress).to_dict()),
+            sse_events(lambda progress: outline_actions.generate_outline_stage(store, adapter(payload), project_id, stage, str(payload.get("instruction") or ""), progress).to_dict()),
             media_type="text/event-stream",
         )
 
@@ -212,7 +217,7 @@ def make_app(
     def revise_outline_stage(project_id: str, stage: str, payload: dict[str, Any] | None = None):
         payload = payload or {}
         return StreamingResponse(
-            sse_events(lambda progress: service.revise_outline_stage(store, adapter(payload), project_id, stage, str(payload.get("instruction") or ""), progress).to_dict()),
+            sse_events(lambda progress: outline_actions.revise_outline_stage(store, adapter(payload), project_id, stage, str(payload.get("instruction") or ""), progress).to_dict()),
             media_type="text/event-stream",
         )
 
@@ -220,14 +225,14 @@ def make_app(
     def lock_outline_stage(project_id: str, stage: str, payload: dict[str, Any] | None = None):
         payload = payload or {}
         return StreamingResponse(
-            sse_events(lambda progress: service.lock_outline_stage(store, adapter(payload), project_id, stage, str(payload.get("instruction") or ""), progress).to_dict()),
+            sse_events(lambda progress: outline_actions.lock_outline_stage(store, adapter(payload), project_id, stage, str(payload.get("instruction") or ""), progress).to_dict()),
             media_type="text/event-stream",
         )
 
     @app.get("/api/projects/{project_id}/outline/review/latest")
     def latest_outline_review(project_id: str):
         try:
-            return service.latest_outline_review_report(store, project_id)
+            return outline_service.latest_outline_review_report(store, project_id)
         except LocalStoreError as exc:
             raise as_http_error(exc)
 
@@ -236,7 +241,7 @@ def make_app(
         payload = payload or {}
         return StreamingResponse(
             sse_events(
-                lambda progress: service.review_outline(
+                lambda progress: outline_actions.review_outline(
                     store,
                     adapter(payload),
                     project_id,
@@ -260,7 +265,7 @@ def make_app(
             decisions = None
         return StreamingResponse(
             sse_events(
-                lambda progress: service.apply_outline_review(
+                lambda progress: outline_actions.apply_outline_review(
                     store,
                     adapter(payload),
                     project_id,
@@ -277,7 +282,7 @@ def make_app(
     def review_chapter_outline(project_id: str, payload: dict[str, Any] | None = None):
         payload = payload or {}
         return StreamingResponse(
-            sse_events(lambda progress: service.review_chapter_outline(store, adapter(payload), project_id, str(payload.get("instruction") or ""), progress)),
+            sse_events(lambda progress: chapter_outline_actions.review_chapter_outline(store, adapter(payload), project_id, str(payload.get("instruction") or ""), progress)),
             media_type="text/event-stream",
         )
 
@@ -291,7 +296,7 @@ def make_app(
             selected_issue_ids = None
         return StreamingResponse(
             sse_events(
-                lambda progress: service.apply_chapter_outline_review(
+                lambda progress: chapter_outline_actions.apply_chapter_outline_review(
                     store,
                     adapter(payload),
                     project_id,
@@ -306,7 +311,7 @@ def make_app(
     @app.get("/api/projects/{project_id}/outline/chapter-review/latest")
     def latest_chapter_outline_review(project_id: str):
         try:
-            return service.latest_chapter_outline_review_report(store, project_id)
+            return chapter_outline_actions.latest_chapter_outline_review_report(store, project_id)
         except LocalStoreError as exc:
             raise as_http_error(exc)
 
@@ -314,7 +319,7 @@ def make_app(
     def chapter_workspace(project_id: str, volume: int | None = None):
         try:
             selected_volume = int(volume or 1)
-            payload = service.chapter_batch_workspace_payload(store, project_id, selected_volume)
+            payload = chapter_actions.chapter_batch_workspace_payload(store, project_id, selected_volume)
             return payload
         except LocalStoreError as exc:
             raise as_http_error(exc)
@@ -322,14 +327,14 @@ def make_app(
     @app.get("/api/projects/{project_id}/chapters")
     def chapters(project_id: str, volume: int | None = None):
         try:
-            return service.list_chapters(store, project_id, volume=volume)
+            return chapter_actions.list_chapters(store, project_id, volume=volume)
         except LocalStoreError as exc:
             raise as_http_error(exc)
 
     @app.get("/api/projects/{project_id}/chapters/{chapter}")
     def chapter_detail(project_id: str, chapter: int):
         try:
-            return service.load_chapter_payload(store, project_id, chapter)
+            return chapter_actions.load_chapter_payload(store, project_id, chapter)
         except LocalStoreError as exc:
             raise as_http_error(exc)
 
@@ -337,7 +342,7 @@ def make_app(
     def generate_chapter_batch(project_id: str, payload: dict[str, Any]):
         return StreamingResponse(
             sse_events(
-                lambda progress: service.generate_chapter_batch(
+                lambda progress: chapter_actions.generate_chapter_batch(
                     store,
                     adapter(payload),
                     project_id,
@@ -355,21 +360,21 @@ def make_app(
     def review_all(project_id: str, payload: dict[str, Any] | None = None):
         payload = payload or {}
         return StreamingResponse(
-            sse_events(lambda progress: service.review_all_chapters(store, adapter(payload), project_id, progress)),
+            sse_events(lambda progress: review_actions.review_all_chapters(store, adapter(payload), project_id, progress)),
             media_type="text/event-stream",
         )
 
     @app.get("/api/projects/{project_id}/chapters/review-all/latest")
     def latest_review(project_id: str):
         try:
-            return service.latest_global_review(store, project_id)
+            return review_actions.latest_global_review(store, project_id)
         except LocalStoreError as exc:
             raise as_http_error(exc)
 
     @app.post("/api/projects/{project_id}/chapters/review-all/{run_id}/repair-proposals")
     def repair_proposals(project_id: str, run_id: str, payload: dict[str, Any] | None = None):
         try:
-            return service.generate_repair_proposals(store, adapter(payload), project_id, run_id)
+            return review_actions.generate_repair_proposals(store, adapter(payload), project_id, run_id)
         except LocalStoreError as exc:
             raise as_http_error(exc)
 
@@ -381,7 +386,7 @@ def make_app(
                 selected_issue_ids = [str(item) for item in selected_issue_ids if str(item).strip()]
             else:
                 selected_issue_ids = None
-            return service.apply_repair(
+            return review_actions.apply_repair(
                 store,
                 adapter(payload),
                 project_id,

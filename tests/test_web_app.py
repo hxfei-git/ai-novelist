@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import types
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -33,6 +34,14 @@ def test_web_parser_accepts_provider_model_and_timeout() -> None:
     assert args.timeout == 180
 
 
+def test_web_app_imports_focused_action_modules_not_service_facade():
+    source = Path("src/ai_novelist/web/app.py").read_text(encoding="utf-8")
+    assert "from ai_novelist.web import service" not in source
+    assert "from ai_novelist.web import outline_actions" in source
+    assert "from ai_novelist.web import chapter_outline_actions" in source
+    assert "from ai_novelist.web import chapter_actions" in source
+    assert "from ai_novelist.web import review_actions" in source
+    assert "from ai_novelist.web import project_service" in source
 
 
 def test_web_app_exposes_outline_action_and_workspace_routes(tmp_path) -> None:
@@ -83,8 +92,8 @@ def test_outline_review_apply_route_accepts_decisions(tmp_path) -> None:
         captured["decisions"] = decisions
         return {"applied": True}
 
-    original = web_app.service.apply_outline_review
-    web_app.service.apply_outline_review = fake_apply_outline_review
+    original = web_app.outline_actions.apply_outline_review
+    web_app.outline_actions.apply_outline_review = fake_apply_outline_review
     try:
         response = client.post(
             "/api/projects/web-demo/outline/review/run-1/apply",
@@ -96,7 +105,7 @@ def test_outline_review_apply_route_accepts_decisions(tmp_path) -> None:
             },
         )
     finally:
-        web_app.service.apply_outline_review = original
+        web_app.outline_actions.apply_outline_review = original
 
     assert response.status_code == 200
     assert captured["project_id"] == "web-demo"
@@ -136,7 +145,7 @@ def test_sse_progress_returns_metric_event_not_raw_message(monkeypatch, tmp_path
         progress("OutlineStage", "世界观汇总（12.4s/ctx=4K/258K/tok≈8.1K）")
         return store.load_state(project_id)
 
-    monkeypatch.setattr(web_app.service, "generate_outline_stage", fake_generate)
+    monkeypatch.setattr(web_app.outline_actions, "generate_outline_stage", fake_generate)
 
     response = client.post("/api/projects/web-demo/outline/stages/worldbuilding/generate", json={})
 
@@ -153,9 +162,9 @@ def test_sse_route_returns_error_event_when_service_raises(monkeypatch, tmp_path
     assert created.status_code == 200
 
     def fake_generate(store, adapter, project_id, stage, instruction="", progress=None):
-        raise web_app.service.LocalStoreError("阶段不可执行")
+        raise web_app.LocalStoreError("阶段不可执行")
 
-    monkeypatch.setattr(web_app.service, "generate_outline_stage", fake_generate)
+    monkeypatch.setattr(web_app.outline_actions, "generate_outline_stage", fake_generate)
 
     response = client.post("/api/projects/web-demo/outline/stages/worldbuilding/generate", json={})
 

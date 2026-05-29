@@ -31,18 +31,16 @@ FastAPI app: src/ai_novelist/web/app.py
   `-- static frontend mount when web/frontend/dist exists
   |
   v
-Web service layer: src/ai_novelist/web/service.py
-  |-- delegates outline helper behavior to src/ai_novelist/web/outline_service.py
-  |-- delegates ordinary outline actions to src/ai_novelist/web/outline_actions.py
-  |-- delegates chapter-outline actions to src/ai_novelist/web/chapter_outline_actions.py
-  |-- delegates chapter review prompt/source helpers to src/ai_novelist/web/chapter_service.py
-  |-- LocalStore-backed project operations
-  |-- outline stage payloads and pending-question submission
-  |-- explicit outline stage generate/revise/lock calls
-  |-- outline and chapter-outline review report persistence
-  |-- volume chapter batch generation
-  |-- global chapter review and repair application
-  |-- shared Web JSON parsing helpers in web/json_utils.py
+Focused Web modules
+  |-- src/ai_novelist/web/project_service.py for project and progress-log operations
+  |-- src/ai_novelist/web/outline_service.py for outline payload/report helpers
+  |-- src/ai_novelist/web/outline_actions.py for ordinary outline actions
+  |-- src/ai_novelist/web/chapter_outline_actions.py for chapter-outline actions
+  |-- src/ai_novelist/web/chapter_actions.py for chapter batch/list/detail actions
+  |-- src/ai_novelist/web/review_actions.py for global review and repair actions
+  |-- src/ai_novelist/web/chapter_service.py for chapter review prompt/source helpers
+  |-- src/ai_novelist/web/json_utils.py for shared Web JSON parsing helpers
+  `-- src/ai_novelist/web/service.py is compatibility-only and no longer a route facade
   |
   v
 Workflow helpers
@@ -126,10 +124,9 @@ Search and corpus settings still exist in configuration because some craft helpe
 - `NovelState` retains fields from deleted flows and needs compatibility-aware trimming.
 - Large modules concentrate unrelated responsibilities:
   - `graph_outline.py`
-  - `web/service.py`, reduced by moving project/progress helpers and outline/chapter-outline actions but still large
   - `web/frontend/src/main.tsx`, reduced by moving shared types and API helpers into `web/frontend/src/types.ts` and `web/frontend/src/api.ts`
   - `adapters/mock_codex.py` as a large deterministic fixture isolated from the real adapter
-  - `tests/test_web_service.py`
+  - `tests/test_web_service.py`, which still concentrates cross-workflow Web coverage
 
 ## Cleanup Roadmap
 
@@ -173,6 +170,7 @@ Search and corpus settings still exist in configuration because some craft helpe
 - 2026-05-29: Project and progress-log Web operations moved into `src/ai_novelist/web/project_service.py`; `web/service.py` re-exports the helpers as a compatibility facade while later outline, chapter, and review splits proceed.
 - 2026-05-29: Ordinary outline and chapter-outline Web actions moved into `src/ai_novelist/web/outline_actions.py` and `src/ai_novelist/web/chapter_outline_actions.py`; `web/service.py` re-exports the action entry points as a compatibility facade.
 - 2026-05-29: Chapter batch/list/detail and global review/repair Web actions moved into `src/ai_novelist/web/chapter_actions.py` and `src/ai_novelist/web/review_actions.py`; `web/service.py` re-exports the action entry points as a compatibility facade.
+- 2026-05-29: Task 5 routed FastAPI directly through focused Web modules and slimmed `web/service.py` to a compatibility-only module with no action re-exports.
 - 2026-05-29: Completed the architecture/Web/context remediation batch. Web actions have stronger running/error guards, context profiles record source manifests and deduplicate sources, Web services and outline graph helpers are split behind compatibility facades, and frontend workspace components are split from the entry file.
 
 ### Phase 4b: Outline Web Action Split
@@ -190,6 +188,13 @@ Search and corpus settings still exist in configuration because some craft helpe
 - Remaining risk: FastAPI routes still call through the facade in places where direct module imports can be cleaned later.
 - Next entry point: split outline graph helpers.
 - Continuation note: resume at Task 9; keep route behavior unchanged and avoid deleting facade exports until final full tests pass.
+
+### Task 5: Direct Web Route Imports and Facade Prune
+- Files changed: Web app imports, service compatibility module, Web route/service tests, docs.
+- Behavior changed: FastAPI routes call focused Web modules directly instead of the `web/service.py` facade; public route payload behavior remains unchanged.
+- Verification: RED import-guard run failed as expected before implementation; `.venv/bin/python -m pytest tests/test_web_app.py tests/test_web_service.py -q` passed with 90 passed in 1.47s.
+- Remaining risk: `tests/test_web_service.py` is still broad and can be split by focused module later.
+- Continuation note: new Web route code should import focused modules directly; do not add action re-exports back to `web/service.py`.
 
 ### Phase 5a: Outline Graph Routing and Review Lock Split
 - Files changed: `src/ai_novelist/outline_graph/routing.py`, `src/ai_novelist/outline_graph/review_lock.py`, `graph_outline.py`, tests, docs.

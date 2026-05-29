@@ -112,7 +112,8 @@ git check-ignore -v .superpowers
 - Prompt/branch evidence was recorded in `docs/web_only_reference_matrix.md`; strict Web-only pruning remains the rule for unused prompts and unreachable branches.
 - Legacy mock adapter branches were removed for deleted non-Web agents, stale DeepSeek categories were pruned including `retrieval_context_synthesizer`, and deleted first-line mock agents are denied before body substring routing. Active retained mock fallback is preserved for Web mock mode. Verification: `.venv/bin/python -m pytest tests/test_mock_codex_adapter.py tests/test_deepseek_adapter.py -q` and `.venv/bin/python -m pytest tests/test_web_service.py -q` passed during Task 3 review.
 - Unreachable outline Director prompt/parser helpers, show/status nodes, and Director-only routing helpers were removed from the active graph surface. Verification: `.venv/bin/python -m pytest tests/test_outline_graph_modules.py tests/test_web_outline_service.py tests/test_web_service.py::test_outline_stage_list_hides_review_lock -q` passed during Task 4 review.
-- Remaining risk: later tasks still need to prune the Web service facade and prove chapter-outline/body context consistency.
+- Web service facade prune is complete for FastAPI routes: routes now import focused modules directly, and `web/service.py` is compatibility-only.
+- Remaining risk: later tasks still need to prove chapter-outline/body context consistency.
 
 ## Completed in This Cleanup Batch
 
@@ -250,6 +251,14 @@ Completed implementation commits before this final verification record:
 - Remaining risk: FastAPI routes still call through the facade in places where direct module imports can be cleaned later.
 - Next entry point: split outline graph helpers.
 - Continuation note: resume at Task 9; keep route behavior unchanged and avoid deleting facade exports until final full tests pass.
+
+### Task 5: Direct Web Route Imports and Facade Prune
+
+- Files changed: `src/ai_novelist/web/app.py`, `src/ai_novelist/web/service.py`, Web app/service tests, docs.
+- Behavior changed: FastAPI routes now call `project_service`, `outline_service`, `outline_actions`, `chapter_outline_actions`, `chapter_actions`, and `review_actions` directly; `web/service.py` no longer re-exports action functions.
+- Verification: RED run `.venv/bin/python -m pytest tests/test_web_app.py::test_web_app_imports_focused_action_modules_not_service_facade tests/test_web_service.py::test_project_service_exports_project_and_progress_helpers -q` failed as expected with the app import guard; green run `.venv/bin/python -m pytest tests/test_web_app.py tests/test_web_service.py -q` passed with 90 passed in 1.47s.
+- Facade scan: requested `rg -n "web import service|web\.service|service\." src tests` was run after edits; it reports the import-guard test plus `_service` module-name false positives such as `project_service` and `outline_service`, with no route facade imports. A precise facade scan with `rg -n "from ai_novelist\.web import service|web\.service|\bservice\." src tests` reports only the import-guard assertion.
+- Remaining risk: `tests/test_web_service.py` still groups many focused-module integration checks in one file.
 
 ### Phase 5a: Outline Graph Routing and Review Lock Split
 - Files changed: `src/ai_novelist/outline_graph/routing.py`, `src/ai_novelist/outline_graph/review_lock.py`, `graph_outline.py`, tests, docs.
