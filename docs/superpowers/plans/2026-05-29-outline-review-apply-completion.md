@@ -559,3 +559,10 @@ git status --short
 ```
 
 Expected: no output.
+
+### Final Review Fix: Concurrent Duplicate Apply Guard
+- [x] Added `test_apply_outline_review_concurrent_duplicate_waits_for_applied_report` to reproduce concurrent duplicate apply calls entering `outline_reviser` twice before persisted applied metadata exists.
+- [x] Added a process-local apply lock keyed by `(project_id, run_id)` around report load, applied check, revision, state write, and report mark-applied write.
+- [x] RED result: focused concurrency test failed with `assert 2 == 1` for `adapter.reviser_calls` before the lock.
+- [x] GREEN result: focused server-side duplicate-apply tests passed with `.venv/bin/python -m pytest tests/test_web_service.py::test_apply_outline_review_concurrent_duplicate_waits_for_applied_report tests/test_web_service.py::test_apply_outline_review_is_idempotent_after_report_applied tests/test_web_service.py::test_outline_review_apply_marks_latest_report_applied -q`.
+

@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from datetime import UTC, datetime
+from threading import Lock
 from typing import Any
 from uuid import uuid4
 
@@ -41,6 +42,18 @@ from ai_novelist.web.outline_service import (
 
 ProgressFunc = Callable[[str, str], None]
 
+_OUTLINE_REVIEW_APPLY_LOCKS_LOCK = Lock()
+_OUTLINE_REVIEW_APPLY_LOCKS: dict[tuple[str, str], Lock] = {}
+
+
+def outline_review_apply_lock(project_id: str, run_id: str) -> Lock:
+    key = (project_id, run_id)
+    with _OUTLINE_REVIEW_APPLY_LOCKS_LOCK:
+        lock = _OUTLINE_REVIEW_APPLY_LOCKS.get(key)
+        if lock is None:
+            lock = Lock()
+            _OUTLINE_REVIEW_APPLY_LOCKS[key] = lock
+        return lock
 
 
 def load_outline_stage_payload(store: LocalStore, project_id: str, stage: str) -> dict[str, Any]:
@@ -152,6 +165,27 @@ def apply_outline_review(
     decisions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     emit = progress or (lambda _stage, _message: None)
+    with outline_review_apply_lock(project_id, run_id):
+        return _apply_outline_review_locked(
+            store,
+            adapter,
+            project_id,
+            run_id,
+            emit,
+            selected_issue_ids,
+            decisions,
+        )
+
+
+def _apply_outline_review_locked(
+    store: LocalStore,
+    adapter: AgentAdapter,
+    project_id: str,
+    run_id: str,
+    emit: ProgressFunc,
+    selected_issue_ids: list[str] | None = None,
+    decisions: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     report = load_outline_review_report(store, project_id, run_id)
     state = store.load_state(project_id)
     if report.get("applied") is True or str(report.get("status") or "").strip().lower() == "applied":

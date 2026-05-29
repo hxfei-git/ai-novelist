@@ -5,6 +5,7 @@ import json
 import pytest
 
 from pathlib import Path
+from threading import Event, Thread
 
 from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError, AgentCallOptions
 from ai_novelist.storage.local_store import LocalStore, LocalStoreError
@@ -82,6 +83,21 @@ class CountingOutlineApplyAdapter(AgentAdapter):
         if "outline_reviser" in prompt:
             self.reviser_calls += 1
             return "# 最终锁定总大纲\n\n## 方向定位\n幂等采纳后的大纲。"
+        return "{}"
+
+
+class BlockingOutlineApplyAdapter(AgentAdapter):
+    def __init__(self) -> None:
+        self.reviser_calls = 0
+        self.reviser_started = Event()
+        self.release_reviser = Event()
+
+    def complete(self, prompt: str, workspace: Path, options: AgentCallOptions | None = None) -> str:
+        if "outline_reviser" in prompt:
+            self.reviser_calls += 1
+            self.reviser_started.set()
+            assert self.release_reviser.wait(timeout=5), "timed out waiting to release reviser"
+            return "# 最终锁定总大纲\n\n## 方向定位\n并发采纳只应用一次。"
         return "{}"
 
 
@@ -896,6 +912,44 @@ def test_apply_outline_review_is_idempotent_after_report_applied(tmp_path: Path)
     assert second["updated_stages"] == first["updated_stages"]
     assert second["skipped_stages"] == first["skipped_stages"]
     assert adapter.reviser_calls == 1
+
+
+def test_apply_outline_review_concurrent_duplicate_waits_for_applied_report(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+    state.outline = "# 最终锁定总大纲\n\n## 方向定位\n旧稿。"
+    store.save_state(state)
+
+    report = service.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
+    adapter = BlockingOutlineApplyAdapter()
+    results: list[dict[str, object]] = []
+    errors: list[BaseException] = []
+
+    def apply_review() -> None:
+        try:
+            results.append(service.apply_outline_review(store, adapter, "web-demo", report["run_id"]))
+        except BaseException as exc:
+            errors.append(exc)
+
+    first_thread = Thread(target=apply_review)
+    second_thread = Thread(target=apply_review)
+
+    first_thread.start()
+    assert adapter.reviser_started.wait(timeout=5)
+    second_thread.start()
+    adapter.release_reviser.set()
+    first_thread.join(timeout=5)
+    second_thread.join(timeout=5)
+
+    assert not first_thread.is_alive()
+    assert not second_thread.is_alive()
+    assert errors == []
+    assert adapter.reviser_calls == 1
+    assert len(results) == 2
+    assert sum(1 for item in results if item.get("already_applied") is True) == 1
+    assert all(item["applied"] is True for item in results)
+    assert all(item["applied_path"] == "outline.md" for item in results)
+    assert results[0]["updated_stages"] == results[1]["updated_stages"]
 
 
 def test_outline_review_apply_persists_new_baseline_for_manual_rereview(monkeypatch, tmp_path: Path) -> None:
