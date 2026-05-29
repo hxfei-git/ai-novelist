@@ -238,6 +238,14 @@ Search and corpus settings still exist in configuration because some craft helpe
 - Remaining risk: coverage is source/build level, not a live browser network-drop run. Current `demo-web` generated progress log was locally cleaned of the stale `error: Failed to fetch` row; other generated project logs may retain old rows until cleaned or overwritten.
 - Next entry point: add browser-level SSE refresh coverage if post-stream refresh failures recur.
 
+### Phase 6f: Outline Review Apply Completion
+- Files changed so far: `tests/test_web_service.py`, `src/ai_novelist/web/outline_service.py`, `src/ai_novelist/web/outline_actions.py`, docs, and the outline review apply completion plan.
+- Behavior changed: applying an outline overall-review report now rewrites the persisted report with `status: applied`, `applied: true`, applied timestamp/path, and updated/skipped stage metadata; latest-review reads expose that applied state after refresh; duplicate apply for the same applied `run_id` returns idempotent success with `already_applied: true` without rerunning revision or comparison.
+- Backend implementation note: this checkout's shared comparison node uses a local comparison fallback, so outline-review apply now performs the scoped `version_comparator` prompt call before persisting applied metadata and falls back to the existing comparison if that prompt fails.
+- Verification: backend RED command `.venv/bin/python -m pytest tests/test_web_service.py::test_outline_review_apply_marks_latest_report_applied tests/test_web_service.py::test_apply_outline_review_is_idempotent_after_report_applied -q` first failed with `latest["status"] == "revision_requested"` instead of `applied` and missing `second["already_applied"]`; targeted backend/API verification passed with `.venv/bin/python -m pytest tests/test_web_service.py::test_outline_review_apply_marks_latest_report_applied tests/test_web_service.py::test_apply_outline_review_is_idempotent_after_report_applied tests/test_web_service.py::test_apply_outline_review_uses_recommended_custom_and_skip_decisions tests/test_web_service.py::test_apply_outline_review_rejects_empty_custom_decision tests/test_web_app.py::test_outline_review_apply_route_accepts_decisions -q` -> 5 passed in 0.47s.
+- Remaining risk: frontend completion-state work and final browser/build verification remain for Task 2; this backend task did not change frontend navigation or rendering.
+- Next entry point: implement frontend applied-state handling from `docs/superpowers/plans/2026-05-29-outline-review-apply-completion.md` Task 2.
+
 ## Verification Policy
 
 Use the smallest relevant test set during implementation. Run full pytest when a change touches state, persistence, graph contracts, adapters, prompts, or shared workflow helpers.
@@ -268,3 +276,4 @@ npm --prefix web/frontend run build
 - `docs/superpowers/plans/2026-05-29-progress-order-and-model-metrics.md`
 - `docs/superpowers/plans/2026-05-29-outline-save-progress-completion.md`
 - `docs/superpowers/plans/2026-05-29-stage-refresh-fallback.md`
+- `docs/superpowers/plans/2026-05-29-outline-review-apply-completion.md`

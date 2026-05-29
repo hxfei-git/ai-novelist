@@ -29,7 +29,7 @@
 - Modify: `src/ai_novelist/web/outline_service.py`
 - Modify: `src/ai_novelist/web/outline_actions.py`
 
-- [ ] **Step 1: Add backend RED tests**
+- [x] **Step 1: Add backend RED tests**
 
 In `tests/test_web_service.py`, add this adapter below `CapturingOutlineReviewAdapter`:
 
@@ -92,7 +92,7 @@ def test_apply_outline_review_is_idempotent_after_report_applied(tmp_path: Path)
     assert adapter.comparator_calls == 1
 ```
 
-- [ ] **Step 2: Run backend RED tests**
+- [x] **Step 2: Run backend RED tests**
 
 Run:
 
@@ -102,7 +102,7 @@ Run:
 
 Expected: both tests fail because latest reports are not marked `applied`, `already_applied` is absent, and the second apply still invokes the revision flow.
 
-- [ ] **Step 3: Add report file rewrite helpers**
+- [x] **Step 3: Add report file rewrite helpers**
 
 In `src/ai_novelist/web/outline_service.py`, replace the body of `write_outline_review_report()` with a call to a new file-only helper, and add `mark_outline_review_applied()` immediately below it:
 
@@ -163,7 +163,7 @@ def mark_outline_review_applied(
     return applied_report
 ```
 
-- [ ] **Step 4: Make outline review apply idempotent**
+- [x] **Step 4: Make outline review apply idempotent**
 
 In `src/ai_novelist/web/outline_actions.py`, add `mark_outline_review_applied` to the existing `ai_novelist.web.outline_service` import list.
 
@@ -226,7 +226,7 @@ Then include the applied status in the final return payload:
         "status": applied_report.get("status"),
 ```
 
-- [ ] **Step 5: Run backend target tests**
+- [x] **Step 5: Run backend target tests**
 
 Run:
 
@@ -236,14 +236,17 @@ Run:
 
 Expected: all selected backend/API tests pass.
 
-- [ ] **Step 6: Commit backend change**
+- [x] **Step 6: Update backend docs and commit backend change**
 
 Run:
 
 ```bash
-git add src/ai_novelist/web/outline_service.py src/ai_novelist/web/outline_actions.py tests/test_web_service.py
+git add src/ai_novelist/web/outline_service.py src/ai_novelist/web/outline_actions.py tests/test_web_service.py docs/IMPLEMENTATION_PLAN.md docs/SESSION_SUMMARY.md docs/superpowers/plans/2026-05-29-outline-review-apply-completion.md
 git commit -m "fix: mark outline review apply complete"
 ```
+
+
+Backend Task 1 status: completed on 2026-05-29. RED failed for missing persisted `applied` status and duplicate `already_applied`; target backend/API verification passed with 5 selected tests. The backend commit includes code, tests, and docs per repository policy.
 
 ## Task 2: Frontend Review Completion State
 

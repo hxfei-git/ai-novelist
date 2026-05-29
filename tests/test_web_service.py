@@ -74,6 +74,21 @@ class CapturingOutlineReviewAdapter(AgentAdapter):
         return "{}"
 
 
+class CountingOutlineApplyAdapter(AgentAdapter):
+    def __init__(self) -> None:
+        self.reviser_calls = 0
+        self.comparator_calls = 0
+
+    def complete(self, prompt: str, workspace: Path, options: AgentCallOptions | None = None) -> str:
+        if "outline_reviser" in prompt:
+            self.reviser_calls += 1
+            return "# 最终锁定总大纲\n\n## 方向定位\n幂等采纳后的大纲。"
+        if "version_comparator" in prompt:
+            self.comparator_calls += 1
+            return "# 大纲版本比较\n\n幂等采纳只运行一次。"
+        return "{}"
+
+
 def test_project_service_exports_project_and_progress_helpers() -> None:
     from ai_novelist.web import project_service
 
@@ -837,6 +852,47 @@ def test_outline_review_roundtrip_and_apply_updates_outline(tmp_path: Path) -> N
     saved = store.load_state("web-demo")
     assert saved.outline_review_applied_run_id == report["run_id"]
     assert saved.outline_review_run_id == report["run_id"]
+
+
+def test_outline_review_apply_marks_latest_report_applied(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+    state.outline = "# 最终锁定总大纲\n\n## 方向定位\n旧稿。"
+    store.save_state(state)
+
+    report = service.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
+    applied = service.apply_outline_review(store, OutlineReviewAdapter(), "web-demo", report["run_id"])
+    latest = service.latest_outline_review_report(store, "web-demo")
+
+    assert applied["applied"] is True
+    assert latest["run_id"] == report["run_id"]
+    assert latest["status"] == "applied"
+    assert latest["applied"] is True
+    assert latest["applied_at"]
+    assert latest["applied_path"] == "outline.md"
+    assert "direction" in latest["updated_stages"]
+    assert isinstance(latest["skipped_stages"], list)
+
+
+def test_apply_outline_review_is_idempotent_after_report_applied(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+    state.outline = "# 最终锁定总大纲\n\n## 方向定位\n旧稿。"
+    store.save_state(state)
+
+    report = service.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
+    adapter = CountingOutlineApplyAdapter()
+
+    first = service.apply_outline_review(store, adapter, "web-demo", report["run_id"])
+    second = service.apply_outline_review(store, adapter, "web-demo", report["run_id"])
+
+    assert first["applied"] is True
+    assert second["applied"] is True
+    assert second["already_applied"] is True
+    assert second["updated_stages"] == first["updated_stages"]
+    assert adapter.reviser_calls == 1
+    assert adapter.comparator_calls == 1
+
 
 def test_outline_review_apply_persists_new_baseline_for_manual_rereview(monkeypatch, tmp_path: Path) -> None:
     store = LocalStore(tmp_path)

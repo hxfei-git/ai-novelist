@@ -438,14 +438,19 @@ def selected_outline_revision_instruction(
             return "仅采纳以下选中的大纲审查建议：\n" + "\n".join(lines)
     return str(report.get("revision_instruction") or report.get("summary") or report.get("notes") or "").strip()
 
-def write_outline_review_report(store: LocalStore, state: NovelState, report: dict[str, Any]) -> tuple[Path, Path]:
+def _write_outline_review_report_files(store: LocalStore, project_id: str, report: dict[str, Any]) -> tuple[Path, Path]:
     run_id = str(report.get("run_id") or "").strip()
     if not run_id:
         raise LocalStoreError("Outline review run_id is required")
-    report_path, markdown_path = outline_review_report_paths(store, state.project_id, run_id)
+    report_path, markdown_path = outline_review_report_paths(store, project_id, run_id)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     markdown_path.write_text(render_outline_review_markdown(report), encoding="utf-8")
+    return report_path, markdown_path
+
+
+def write_outline_review_report(store: LocalStore, state: NovelState, report: dict[str, Any]) -> tuple[Path, Path]:
+    report_path, markdown_path = _write_outline_review_report_files(store, state.project_id, report)
     register_artifact(
         store.project_dir(state.project_id),
         ArtifactRecord(
@@ -463,6 +468,30 @@ def write_outline_review_report(store: LocalStore, state: NovelState, report: di
         ),
     )
     return report_path, markdown_path
+
+
+def mark_outline_review_applied(
+    store: LocalStore,
+    state: NovelState,
+    report: dict[str, Any],
+    *,
+    path: Path,
+    updated_stages: list[str] | None = None,
+    skipped_stages: list[str] | None = None,
+) -> dict[str, Any]:
+    applied_report = dict(report)
+    applied_report.update(
+        {
+            "status": "applied",
+            "applied": True,
+            "applied_at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "applied_path": path.relative_to(store.project_dir(state.project_id)).as_posix(),
+            "updated_stages": list(updated_stages or []),
+            "skipped_stages": list(skipped_stages or []),
+        }
+    )
+    _write_outline_review_report_files(store, state.project_id, applied_report)
+    return applied_report
 
 def ensure_valid_stage(stage: str) -> None:
     if stage not in OUTLINE_STAGES:
