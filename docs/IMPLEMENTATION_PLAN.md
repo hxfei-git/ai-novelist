@@ -156,6 +156,7 @@ Search and corpus settings still exist in configuration because some craft helpe
 - 2026-05-29: Added an explicit prompt registry for retained Web prompt files and prompt-loader tests that reject missing registry entries, orphan prompt files, and stale author-craft policy prompt names.
 - 2026-05-29: Pruned legacy mock adapter branches and stale DeepSeek agent category names for deleted non-Web agents; deleted first-line mock agents now return `UNSUPPORTED_AGENT: <agent>` before any body substring routing, while active retained mock agents keep fallback behavior for Web mock mode.
 - 2026-05-29: Removed unreachable outline Director prompt/parser helpers, show/status nodes, and Director-only routing helpers from the active outline graph surface; tests now guard against reintroducing those deleted names.
+- 2026-05-29: Final completion audit removed the remaining legacy outline view helper node and view-request routing helpers after confirming no active Web route references.
 - 2026-05-29: FastAPI routes now call focused Web action modules directly; `web/service.py` is compatibility-only and no active route uses the old facade.
 - 2026-05-29: Chapter-outline review apply now persists applied report state and is idempotent for `applied` reports.
 - 2026-05-29: Verified outline-to-body context consistency for chapter-specific slices across context builder, volume batch, direct chapter write, and Arabic/Chinese Markdown/plain chapter headings.
