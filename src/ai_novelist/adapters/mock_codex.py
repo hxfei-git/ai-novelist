@@ -95,8 +95,16 @@ class MockCodexAdapter(AgentAdapter):
             return self._mock_chapter(revised=self._is_revised_prompt(prompt))
         if "AGENT: editor" in prompt:
             return self._mock_editor_review(revised=self._is_revised_prompt(prompt))
+        unsupported_agent = self._explicit_agent_name(prompt)
+        if unsupported_agent:
+            return f"UNSUPPORTED_AGENT: {unsupported_agent}"
         return self._mock_outline(prompt)
 
+
+    def _explicit_agent_name(self, prompt: str) -> str:
+        first_line = prompt.splitlines()[0] if prompt.splitlines() else ""
+        match = re.match(r"^AGENT:\s*([A-Za-z0-9_\-]+)\s*$", first_line.strip())
+        return match.group(1) if match else ""
 
     def _mock_outline_stage_role(self, prompt: str) -> str:
         stage = self._extract_prompt_field(prompt, "STAGE") or "direction"

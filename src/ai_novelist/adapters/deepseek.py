@@ -41,7 +41,6 @@ THINKING_DISABLED_MEDIUM_AGENTS = frozenset(
 
 THINKING_ENABLED_MEDIUM_AGENTS = frozenset(
     {
-        "retrieval_context_synthesizer",
         "outline_stage_synthesizer",
         "outline_planner",
         "outline_reviser",
@@ -54,9 +53,6 @@ THINKING_ENABLED_MEDIUM_AGENTS = frozenset(
 )
 
 THINKING_ENABLED_HIGH_AGENTS = frozenset()
-
-FAST_AGENT_NAMES = THINKING_DISABLED_MEDIUM_AGENTS
-SLOW_AGENT_NAMES = THINKING_ENABLED_MEDIUM_AGENTS | THINKING_ENABLED_HIGH_AGENTS
 
 _AGENT_HEADER_RE = re.compile(r"^AGENT:\s*([A-Za-z0-9_\-]+)\s*$")
 

@@ -40,6 +40,5 @@ def test_mock_adapter_does_not_expose_deleted_legacy_agents(tmp_path):
     ]
     for agent in deleted_agents:
         output = adapter.complete(f"AGENT: {agent}\n写作任务", tmp_path)
-        assert "mock" not in output.lower()
-        assert "action" not in output.lower()
+        assert output == f"UNSUPPORTED_AGENT: {agent}"
 

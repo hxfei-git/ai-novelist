@@ -158,7 +158,11 @@ def test_deepseek_adapter_wraps_ssl_read_errors(monkeypatch, tmp_path):
 
 
 def test_deepseek_agent_categories_do_not_include_deleted_legacy_agents():
-    from ai_novelist.adapters.deepseek import FAST_AGENT_NAMES, SLOW_AGENT_NAMES
+    from ai_novelist.adapters.deepseek import (
+        THINKING_DISABLED_MEDIUM_AGENTS,
+        THINKING_ENABLED_HIGH_AGENTS,
+        THINKING_ENABLED_MEDIUM_AGENTS,
+    )
 
     deleted_agents = {
         "continuity_editor",
@@ -167,7 +171,9 @@ def test_deepseek_agent_categories_do_not_include_deleted_legacy_agents():
         "style_editor",
         "simulated_reader",
         "pacing_guard_editor",
+        "retrieval_context_synthesizer",
     }
-    assert deleted_agents.isdisjoint(FAST_AGENT_NAMES)
-    assert deleted_agents.isdisjoint(SLOW_AGENT_NAMES)
+    assert deleted_agents.isdisjoint(THINKING_DISABLED_MEDIUM_AGENTS)
+    assert deleted_agents.isdisjoint(THINKING_ENABLED_MEDIUM_AGENTS)
+    assert deleted_agents.isdisjoint(THINKING_ENABLED_HIGH_AGENTS)
 
