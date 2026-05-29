@@ -291,7 +291,30 @@ def test_direct_chapter_context_manifest_marks_fallback_outline(tmp_path: Path) 
     state = store.create_project("web-demo", "Web Demo")
     state.current_chapter = 7
     state.active_chapter = 7
+    outline = """## 第一卷
+
+### 第 6 章：只给第六章
+第六章相邻大纲内容。
+
+### 第 8 章：只给第八章
+第八章相邻大纲内容。
+"""
+    save_markdown_artifact(
+        store.project_dir(state.project_id),
+        "outline/chapter_outline.md",
+        outline,
+        "chapter_outline",
+        stage="chapter_outline",
+    )
+    store.save_state(state)
+
     bundle = build_context_bundle(state, store, "direct_chapter_drafting", chapter=7)
     manifest = build_context_manifest(bundle)
+
     assert any(item["section"] == "章节大纲切片" for item in manifest)
-    assert "暂无" in bundle.text or "缺失" in bundle.text
+    assert any(item["source_type"] == "chapter_outline_slice" for item in manifest)
+    assert "章节大纲切片缺失" in bundle.text
+    assert "只给第六章" not in bundle.text
+    assert "第六章相邻大纲内容" not in bundle.text
+    assert "只给第八章" not in bundle.text
+    assert "第八章相邻大纲内容" not in bundle.text

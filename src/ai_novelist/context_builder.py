@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Literal
 
 from ai_novelist.agent_metrics import estimate_tokens
 from ai_novelist.artifacts import get_latest_artifact, load_artifact_text
-from ai_novelist.outline.chapter_outline_structure import extract_chapter_outline_slice
+from ai_novelist.outline.chapter_outline_structure import chinese_number_to_int, extract_chapter_outline_slice
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
 
@@ -625,8 +626,30 @@ def build_chapter_outline_slice_section(state: NovelState, store: LocalStore, ch
     if not text:
         text = state.chapter_plan.strip() or state.outline.strip()
     if not text:
-        return "暂无"
-    return extract_chapter_outline_slice(text, selected)
+        return missing_chapter_outline_slice(selected)
+    if not chapter_outline_contains_chapter(text, selected):
+        return missing_chapter_outline_slice(selected)
+    outline_slice = extract_chapter_outline_slice(text, selected).strip()
+    if not outline_slice or outline_slice == "暂无":
+        return missing_chapter_outline_slice(selected)
+    return outline_slice
+
+
+def missing_chapter_outline_slice(chapter: int | None) -> str:
+    return f"第 {chapter or '未知'} 章：章节大纲切片缺失。"
+
+
+def chapter_outline_contains_chapter(text: str, chapter: int) -> bool:
+    for match in re.finditer(
+        r"^\s*(?:#{1,6}\s*)?第\s*(?P<head>[一二两三四五六七八九十\d]+)\s*章(?:[：:\s]|$)|"
+        r"^\s*\|\s*第\s*(?P<row>[一二两三四五六七八九十\d]+)\s*章\s*\|",
+        str(text or ""),
+        re.MULTILINE,
+    ):
+        raw_number = match.group("head") or match.group("row")
+        if chinese_number_to_int(raw_number) == chapter:
+            return True
+    return False
 
 
 def build_state_artifact_fallback_records(state: NovelState, purpose: str) -> list[SectionRecord]:

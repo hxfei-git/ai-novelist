@@ -297,6 +297,6 @@ npm --prefix web/frontend run build
 
 ### Task 7: Chapter Batch Selection And Context Slice Proof
 - Files changed: context builder manifest source tagging, volume-write/context-builder regression tests, docs.
-- Behavior changed: chapter_outline_slice context sections now carry an explicit manifest source_type, so selected-volume chapter drafting manifests prove the direct chapter outline slice was included while preserving the existing per-chapter slice selection.
+- Behavior changed: chapter_outline_slice context sections now carry an explicit manifest source_type, selected-volume chapter drafting manifests prove the direct chapter outline slice was included, and direct chapter context now returns an explicit missing-slice fallback instead of adjacent outline content when the selected chapter heading is absent.
 - Verification plan: focused RED/green run for the two new Task 7 tests, then affected suites tests/test_context_builder.py and tests/test_graph_volume_write.py, plus git diff --check.
 - Remaining risk: coverage is graph/context unit level; no live multi-agent drafting run was performed.
