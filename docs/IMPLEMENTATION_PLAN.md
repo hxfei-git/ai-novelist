@@ -300,3 +300,9 @@ npm --prefix web/frontend run build
 - Behavior changed: chapter_outline_slice context sections now carry an explicit manifest source_type, selected-volume chapter drafting manifests prove the direct chapter outline slice was included, and direct chapter context, direct chapter write preparation, and volume batch preparation now return explicit missing-slice fallbacks instead of adjacent outline content when the selected chapter heading is absent; shared chapter outline slicing now supports Arabic and Chinese-number chapter headings, including plain non-Markdown headings that stop at the next chapter marker.
 - Verification plan: focused RED/green run for the two new Task 7 tests, then affected suites tests/test_context_builder.py, tests/test_graph_volume_write.py, and tests/test_graph_chapter_write.py, tests/test_chapter_outline_structure.py, plus git diff --check.
 - Remaining risk: coverage is graph/context unit level; no live multi-agent drafting run was performed.
+
+### Task 8: Web Long-Running Action Guard Audit
+- Files changed: frontend structure guards, Web app SSE regression tests, docs.
+- Behavior changed: no production source changes were required; existing Web long-running handlers already release running/applying flags in `finally`, surface caught errors through `showError(error)`, and background post-stream refresh errors use `showBackgroundError`. Existing SSE streaming routes already convert service exceptions into `event: error` payloads.
+- Verification: focused frontend guard and SSE regressions passed; final requested verification passed with `.venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py tests/test_web_app.py -q` (49 passed in 0.95s), `npm --prefix web/frontend run build` (passed with the known Vite CJS deprecation warning), and `git diff --check`.
+- Remaining risk: coverage is source-structure and TestClient stream-level; no browser-level click or network-interruption run was performed.

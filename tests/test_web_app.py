@@ -173,6 +173,21 @@ def test_sse_route_returns_error_event_when_service_raises(monkeypatch, tmp_path
     assert "阶段不可执行" in response.text
 
 
+def test_sse_streaming_route_returns_error_event(monkeypatch, tmp_path) -> None:
+    app = web_app.make_app(Settings(projects_dir=tmp_path), mock=True)
+    client = TestClient(app)
+
+    def fail(*args, **kwargs):
+        raise web_app.LocalStoreError("boom")
+
+    monkeypatch.setattr(web_app.outline_actions, "generate_outline_stage", fail)
+    response = client.post("/api/projects/missing/outline/stages/direction/generate", json={})
+
+    assert response.status_code == 200
+    assert "event: error" in response.text
+    assert "boom" in response.text
+
+
 def test_outline_stage_pending_api_returns_recommended_options(tmp_path) -> None:
     client = TestClient(web_app.make_app(Settings(projects_dir=tmp_path), mock=True))
     created = client.post("/api/projects", json={"title": "Web Demo", "project_id": "web-demo"})

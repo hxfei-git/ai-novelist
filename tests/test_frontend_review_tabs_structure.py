@@ -6,6 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MAIN_TSX = ROOT / "web" / "frontend" / "src" / "main.tsx"
+FRONTEND_MAIN = MAIN_TSX
 TYPES_TS = ROOT / "web" / "frontend" / "src" / "types.ts"
 API_TS = ROOT / "web" / "frontend" / "src" / "api.ts"
 STYLES_CSS = ROOT / "web" / "frontend" / "src" / "styles.css"
@@ -56,6 +57,23 @@ def assert_union_type_includes(source: str, type_name: str, *values: str) -> Non
 
 def read_styles() -> str:
     return STYLES_CSS.read_text(encoding="utf-8")
+
+
+def extract_function_block(source: str, function_name: str) -> str:
+    signature = re.search(rf"\basync function {re.escape(function_name)}\b[^\{{]*\{{", source)
+    assert signature is not None, function_name
+    start = signature.start()
+    index = signature.end()
+    depth = 1
+    while index < len(source) and depth > 0:
+        char = source[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+        index += 1
+    assert depth == 0, function_name
+    return source[start:index]
 
 
 def test_review_entries_move_into_sidebar_navigation() -> None:
@@ -271,6 +289,26 @@ def test_streaming_workspace_actions_report_errors() -> None:
         assert block is not None, function_name
         assert "} catch (error) {" in block.group(0), function_name
         assert "showError(error)" in block.group(0), function_name
+
+
+def test_long_running_actions_release_flags_in_finally() -> None:
+    source = FRONTEND_MAIN.read_text(encoding="utf-8")
+    for function_name, setter in [
+        ("runStage", "setStageRunning(false)"),
+        ("runChapterOutlineVolume", "setChapterOutlineRunning(false)"),
+        ("generateBatch", "setChapterBatchRunning(false)"),
+        ("runOutlineReview", "setOutlineReviewRunning(false)"),
+        ("applyOutlineReview", "setOutlineReviewApplying(false)"),
+        ("runChapterOutlineReview", "setChapterOutlineReviewRunning(false)"),
+        ("applyChapterOutlineReview", "setChapterOutlineReviewApplying(false)"),
+        ("reviewAll", "setReviewRunning(false)"),
+        ("applyRepair", "setApplyingChapter(null)"),
+    ]:
+        block = extract_function_block(source, function_name)
+        assert "catch (error)" in block
+        assert "showError(error)" in block
+        assert "finally" in block
+        assert setter in block
 
 
 def test_chapter_outline_volume_action_releases_running_flag_in_finally() -> None:
