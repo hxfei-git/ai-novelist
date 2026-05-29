@@ -174,3 +174,34 @@ def test_volume_batch_context_manifest_uses_chapter_specific_outline_slice(tmp_p
     assert "只给第三章" not in item["outline"]
     manifest_text = json.dumps(result.director_task_args["batch_context_manifests"], ensure_ascii=False)
     assert "chapter_outline_slice" in manifest_text
+
+
+def test_volume_batch_missing_requested_chapter_uses_explicit_outline_fallback(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("web-demo", "Web Demo")
+    state.director_task_args = {"volume": 1, "chapters": "7"}
+    outline = """## 第一卷
+
+### 第 6 章：只给第六章
+第六章相邻大纲内容。
+
+### 第 8 章：只给第八章
+第八章相邻大纲内容。
+"""
+    store.save_outline_artifact(state, "chapter_outline", outline)
+    store.save_state(state)
+
+    result = NovelState.from_dict(prepare_volume_batch_node(state.to_dict(), store))
+    item = result.director_task_args["batch_items"][0]
+
+    assert item["chapter"] == 7
+    assert "章节大纲切片缺失" in item["outline"]
+    assert "只给第六章" not in item["outline"]
+    assert "第六章相邻大纲内容" not in item["outline"]
+    assert "只给第八章" not in item["outline"]
+    assert "第八章相邻大纲内容" not in item["outline"]
+    assert "章节大纲切片缺失" in item["context"]
+    assert "只给第六章" not in item["context"]
+    assert "第六章相邻大纲内容" not in item["context"]
+    assert "只给第八章" not in item["context"]
+    assert "第八章相邻大纲内容" not in item["context"]

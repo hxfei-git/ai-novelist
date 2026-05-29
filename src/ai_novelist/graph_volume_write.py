@@ -13,7 +13,7 @@ from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
 from ai_novelist.agent_parallel import AgentJob, run_agent_jobs
 from ai_novelist.artifacts import ArtifactRecord, load_artifacts, register_artifact
 from ai_novelist.corpus.craft_resolver import resolve_author_craft
-from ai_novelist.context_builder import build_context_manifest
+from ai_novelist.context_builder import build_context_manifest, chapter_outline_contains_chapter
 from ai_novelist.corpus.similarity_guard import save_similarity_report_for_state
 from ai_novelist.graph_chapter_write import (
     append_agent_report,
@@ -167,6 +167,12 @@ def prepare_volume_batch_node(data: dict, store: LocalStore) -> dict:
         chapter_state.active_chapter = chapter
         chapter_state.current_chapter = chapter
         outline_slice = extract_chapter_outline_slice(full_outline, chapter)
+        if (
+            not chapter_outline_contains_chapter(full_outline, chapter)
+            or not outline_slice.strip()
+            or outline_slice.strip() == "暂无"
+        ):
+            outline_slice = f"第 {chapter} 章：章节大纲切片缺失，来源为第 {volume} 卷完整章纲。"
         chapter_state.director_task_args["selected_chapter_outline"] = outline_slice
         chapter_state = resolve_author_craft(chapter_state, store, "drafting", chapter=chapter)
         bundle = build_direct_chapter_context_bundle(chapter_state, store)
