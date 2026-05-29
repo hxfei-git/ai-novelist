@@ -35,9 +35,6 @@ THINKING_DISABLED_MEDIUM_AGENTS = frozenset(
         "chapter_hook_agent",
         "scene_breakdown_agent",
         "scene_conflict_check_agent",
-        "style_editor",
-        "simulated_reader",
-        "pacing_guard_editor",
         "bible_update_extractor",
     }
 )
@@ -51,15 +48,15 @@ THINKING_ENABLED_MEDIUM_AGENTS = frozenset(
         "chapter_card_synthesizer",
         "scene_synthesizer",
         "chapter_writer",
-        "continuity_editor",
-        "structure_editor",
-        "character_arc_editor",
         "bible_conflict_checker",
         "bible_update_synthesizer",
     }
 )
 
 THINKING_ENABLED_HIGH_AGENTS = frozenset()
+
+FAST_AGENT_NAMES = THINKING_DISABLED_MEDIUM_AGENTS
+SLOW_AGENT_NAMES = THINKING_ENABLED_MEDIUM_AGENTS | THINKING_ENABLED_HIGH_AGENTS
 
 _AGENT_HEADER_RE = re.compile(r"^AGENT:\s*([A-Za-z0-9_\-]+)\s*$")
 

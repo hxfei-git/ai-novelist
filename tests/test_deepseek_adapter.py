@@ -156,3 +156,18 @@ def test_deepseek_adapter_wraps_ssl_read_errors(monkeypatch, tmp_path):
     with pytest.raises(DeepSeekAPIError, match="connection failed"):
         adapter.complete("prompt", tmp_path)
 
+
+def test_deepseek_agent_categories_do_not_include_deleted_legacy_agents():
+    from ai_novelist.adapters.deepseek import FAST_AGENT_NAMES, SLOW_AGENT_NAMES
+
+    deleted_agents = {
+        "continuity_editor",
+        "structure_editor",
+        "character_arc_editor",
+        "style_editor",
+        "simulated_reader",
+        "pacing_guard_editor",
+    }
+    assert deleted_agents.isdisjoint(FAST_AGENT_NAMES)
+    assert deleted_agents.isdisjoint(SLOW_AGENT_NAMES)
+

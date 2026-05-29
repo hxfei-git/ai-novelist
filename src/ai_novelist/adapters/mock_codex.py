@@ -39,12 +39,6 @@ class MockCodexAdapter(AgentAdapter):
             return '{"conflicts": []}'
         if "AGENT: bible_update_synthesizer" in prompt:
             return "## 已写入\n- 小说圣经已吸收当前稳定设定。\n\n## 未写入\n- 暂无。\n\n## 待确认\n- open_questions 和冲突项仍需人工确认。"
-        if "AGENT: director" in prompt:
-            return self._mock_director(prompt)
-        if "AGENT: retrieval_context_synthesizer" in prompt:
-            return self._mock_retrieval_context()
-        if "AGENT: direction_proposer" in prompt:
-            return self._mock_directions()
         if "AGENT: outline_reviser" in prompt:
             return self._mock_outline_revised()
         if "AGENT: outline_editor" in prompt:
@@ -99,39 +93,6 @@ class MockCodexAdapter(AgentAdapter):
             return self._mock_chapter(revised=self._is_revised_prompt(prompt))
         if "AGENT: style_normalizer" in prompt:
             return self._mock_chapter(revised=self._is_revised_prompt(prompt))
-        if "AGENT: continuity_editor" in prompt:
-            return self._mock_review_role("连续性", revised=self._is_revised_prompt(prompt))
-        if "AGENT: structure_editor" in prompt:
-            return self._mock_review_role("结构", revised=self._is_revised_prompt(prompt))
-        if "AGENT: character_arc_editor" in prompt:
-            return self._mock_review_role("人物弧光", revised=self._is_revised_prompt(prompt))
-        if "AGENT: style_editor" in prompt:
-            return self._mock_review_role("风格", revised=self._is_revised_prompt(prompt))
-        if "AGENT: simulated_reader" in prompt:
-            return self._mock_review_role("模拟读者", revised=self._is_revised_prompt(prompt))
-        if "AGENT: pacing_guard_editor" in prompt:
-            return self._mock_review_role("节奏守门", revised=self._is_revised_prompt(prompt))
-        if "AGENT: revision_planner" in prompt:
-            return self._mock_revision_plan()
-        if "AGENT: targeted_reviser" in prompt:
-            return self._mock_chapter(revised=True)
-        if "AGENT: revision_self_check" in prompt:
-            return json.dumps(
-                {
-                    "tasks_status": [
-                        {"task": "补强维修站异常记录。", "status": "done", "evidence": "醒来场景已出现审计编号异常。"},
-                        {"task": "补明纸质文本禁忌。", "status": "done", "evidence": "手稿场景已说明纸质文本不可即时追踪。"},
-                        {"task": "强化东七气闸倒计时。", "status": "done", "evidence": "结尾场景已强化倒计时压力。"},
-                    ],
-                    "new_risks": [],
-                    "decision": "pass",
-                },
-                ensure_ascii=False,
-            )
-        if "AGENT: chapter_summarizer" in prompt:
-            return self._mock_chapter_summary()
-        if "AGENT: final_bible_update_extractor" in prompt:
-            return self._mock_final_bible_updates()
         if "AGENT: editor" in prompt:
             return self._mock_editor_review(revised=self._is_revised_prompt(prompt))
         return self._mock_outline(prompt)
@@ -760,232 +721,6 @@ class MockCodexAdapter(AgentAdapter):
             return True
         return "修订次数：0" not in prompt and "REVISION_COUNT: 0" not in prompt
 
-    def _mock_research_intent(self, prompt: str) -> str:
-        request = self._extract_director_request(prompt)
-        query = ""
-        quote_match = re.search(r"[《\"]([^》\"]+)[》\"]", request)
-        if quote_match:
-            query = quote_match.group(1).strip()
-        elif "苟在初圣" in request:
-            query = "苟在初圣"
-        else:
-            query = request.strip()
-        author = "初圣" if "作者是初圣" in request or "作者：初圣" in request else ""
-        need = "yes" if any(word in request for word in ("同人", "原作", "查一下", "调研", "research", "/research", "苟在初圣")) else "no"
-        intent = "fanfic" if "同人" in request else "web_research" if need == "yes" else "original"
-        return (
-            f"NEED_RESEARCH: {need}\n"
-            f"QUERY: {query}\n"
-            f"WORK_TITLE: {query if need == 'yes' else ''}\n"
-            f"AUTHOR: {author}\n"
-            f"INTENT: {intent}\n"
-            "REASON: mock research intent"
-        )
-
-
-    def _mock_retrieval_context(self) -> str:
-        return (
-            "# 检索上下文\n\n"
-            "## 查询意图\n- 整理目标作品或题材的可用公开信息。\n\n"
-            "## 可用事实\n- [source_id: 1] 搜索结果显示该题材包含低调求生、资源积累、身份隐藏等关键词。\n\n"
-            "## 创作相关线索\n- 可作为素材参考：低调求生、资源积累、身份隐藏，不写成 stable canon。\n\n"
-            "## 不确定点\n- 角色名、完整世界观和关键剧情节点仍需用户确认。\n\n"
-            "## 来源索引\n- [source_id: 1] 见 research_sources.json。\n\n"
-            "## 使用边界\n- 不得把搜索摘要直接当作原作正史、硬设定或 stable canon。"
-        )
-
-
-    def _mock_director(self, prompt: str) -> str:
-        request = self._extract_director_request(prompt).lower()
-        chapter = self._extract_chapter(request)
-
-        def response(action: str, target: str, intent: str, message: str, instruction: str = "", locks: str = "", styles: str = "", chapter_value: str = "") -> str:
-            return (
-                f"ACTION: {action}\n"
-                f"TARGET: {target}\n"
-                f"INTENT: {intent}\n"
-                f"MESSAGE: {message}\n"
-                f"INSTRUCTION: {instruction}\n"
-                f"LOCKED_CONSTRAINTS: {locks}\n"
-                f"STYLE_PREFERENCES: {styles}\n"
-                f"CHAPTER: {chapter_value}"
-            )
-
-        if any(word in request for word in ("退出", "结束", "quit", "exit", "stop")):
-            return response("stop", "project", "stop", "已结束本次创作对话。")
-        if any(word in request for word in ("查看小说圣经", "展示小说圣经", "show bible", "view bible")):
-            return response("show_bible", "novel_bible", "status", "我会展示当前小说圣经。")
-        if any(word in request for word in ("初始化小说圣经", "生成小说圣经", "更新小说圣经", "init bible", "generate bible", "update bible")):
-            action = "init_bible" if any(word in request for word in ("初始化", "生成", "init", "generate")) else "update_bible"
-            return response(action, "novel_bible", "update", "我会基于当前稳定产物更新小说圣经。")
-        if "active_workflow：outline" in prompt and any(word in request for word in ("查看", "展示", "看一下", "看下", "显示")):
-            task_args = {}
-            if "方向" in request:
-                task_args["stage"] = "direction"
-            elif "世界观" in request:
-                task_args["stage"] = "worldbuilding"
-            elif "人物" in request or "角色" in request:
-                task_args["stage"] = "characters"
-            elif "故事流程" in request or "流程" in request:
-                task_args["stage"] = "story_flow"
-            elif "分卷" in request:
-                task_args["stage"] = "volume_outline"
-            elif "章节" in request:
-                task_args["stage"] = "chapter_outline"
-            return json.dumps({
-                "action": "show_outline",
-                "requires_confirmation": False,
-                "confidence": 95,
-                "target": "outline",
-                "intent": "status",
-                "user_message": "我会展示当前大纲阶段内容。",
-                "task_args": task_args,
-            }, ensure_ascii=False)
-        if "active_workflow：outline" in prompt and any(word in request for word in ("这个设定别改", "别改", "不要改", "保留")):
-            return response("revise_outline", "outline", "lock", "已记录锁定约束，我会按该约束重跑当前大纲阶段。", request, request)
-        if "active_workflow：outline" in prompt and "outline_stage_status：options_ready" in prompt:
-            if any(word in request for word in ("查看", "展示", "看一下", "看下", "显示")):
-                task_args = {}
-                if "方向" in request:
-                    task_args["stage"] = "direction"
-                elif "世界观" in request:
-                    task_args["stage"] = "worldbuilding"
-                elif "人物" in request or "角色" in request:
-                    task_args["stage"] = "characters"
-                elif "故事流程" in request or "流程" in request:
-                    task_args["stage"] = "story_flow"
-                elif "分卷" in request:
-                    task_args["stage"] = "volume_outline"
-                elif "章节" in request:
-                    task_args["stage"] = "chapter_outline"
-                return json.dumps({
-                    "action": "show_outline",
-                    "requires_confirmation": False,
-                    "confidence": 95,
-                    "target": "outline",
-                    "intent": "status",
-                    "user_message": "我会展示当前大纲阶段内容。",
-                    "task_args": task_args,
-                }, ensure_ascii=False)
-            compact_request = request.replace(" ", "")
-            if any(word in compact_request for word in ("接下来", "下一步", "怎么办", "现在怎么办")) and not any(word in request for word in ("进入下一阶段", "推进到下一阶段")):
-                return json.dumps({
-                    "action": "ask_user",
-                    "requires_confirmation": False,
-                    "confidence": 92,
-                    "target": "outline",
-                    "intent": "status",
-                    "user_message": "当前阶段：审稿锁定 options_ready\n未决问题：2 项。是否需要补一个失败代价？；终局拒绝是否保留一次？\n可选下一步：\n1. 直接回答上述问题，系统会吸收回答并重跑当前阶段。\n2. 明确说确认进入下一阶段，系统会先请求你确认。\n3. 说查看当前阶段产物，我会展示当前阶段内容。",
-                }, ensure_ascii=False)
-            if __import__("re").search(r"(^|[\s，,；;])\d+(?:[.、)]|(?=\D))", request):
-                return response("revise_outline", "outline", "answer_pending_questions", "我会吸收你的补充回答，并重跑当前大纲阶段。", request, request)
-            negated = any(word in request for word in ("不要进入下一阶段", "不进入下一阶段", "先不进入下一阶段", "暂不进入下一阶段", "别进入下一阶段", "不要推进", "先不推进", "暂不推进"))
-            transition = any(word in request for word in ("下一阶段", "进入下一阶段", "推进到下一阶段", "进入后续阶段", "推进后续阶段"))
-            lock_and_continue = any(word in request for word in ("锁定当前阶段", "锁定本阶段", "通过当前阶段", "通过本阶段")) and any(word in request for word in ("继续", "进入", "推进", "下一阶段"))
-            delegated = any(word in request for word in ("你决定", "由你决定", "交给你", "默认处理", "你来定")) and any(word in request for word in ("继续", "进入", "推进", "下一阶段"))
-            if not negated and (transition or lock_and_continue or delegated):
-                task_args = {}
-                if "世界观" in request:
-                    task_args["stage"] = "worldbuilding"
-                elif "人物" in request or "角色" in request:
-                    task_args["stage"] = "characters"
-                elif "故事流程" in request or "流程" in request:
-                    task_args["stage"] = "story_flow"
-                elif "分卷" in request:
-                    task_args["stage"] = "volume_outline"
-                elif "章节" in request:
-                    task_args["stage"] = "chapter_outline"
-                return json.dumps({
-                    "action": "advance_current_stage",
-                    "requires_confirmation": True,
-                    "confidence": 95,
-                    "target": "outline",
-                    "intent": "approve",
-                    "user_message": "我会先让模型回答当前阶段未决问题，再锁定并进入下一阶段。",
-                    "task_args": task_args,
-                }, ensure_ascii=False)
-            if any(word in request for word in ("加入", "增加", "补充", "强化", "削弱", "修改", "调整", "改成", "改为", "设为", "设定", "选择", "采用", "接受", "接收", "同意", "保留", "不要", "别", "更", "太")):
-                return response("revise_outline", "outline", "revise", "我会把你的新意见合入当前阶段，并重跑阶段产物。", request)
-        if any(word in request for word in ("保存大纲", "确认大纲", "approve")):
-            return response("persist_outline", "outline", "approve", "我会保存当前大纲。")
-        if any(word in request for word in ("保存", "落盘", "写入文件")):
-            return response("persist_outputs", "project", "save", "我会保存当前已经生成的产物。")
-        if any(word in request for word in ("当前获取的信息", "获取的信息", "搜集到的信息", "搜索的信息", "检索信息", "调研信息", "参考简报", "参考信息", "来源列表", "当前信息", "信息或大纲")):
-            return response("show_reference", "project", "status", "我会展示当前已获取的调研信息和大纲状态。")
-        if any(word in request for word in ("查看大纲", "当前大纲", "看一下大纲", "展示大纲", "show outline")):
-            return response("show_outline", "outline", "status", "我会展示当前大纲正文。")
-        if any(word in request for word in ("查看状态", "项目状态", "状态", "进度", "status", "哪里", "在哪", "路径", "位置")):
-            return response("show_status", "project", "status", "我会展示当前项目状态和已有产物。")
-        if any(word in request for word in ("多个方向", "三个方向", "不同方向", "variant", "备选", "讨论大纲", "敲定大纲", "聊大纲")):
-            return response("propose_directions", "outline", "variant", "我会给出三个不同的创作方向供你选择。")
-        if any(word in request for word in ("同人", "原作", "参考网络", "查一下", "调研", "research", "/research", "小说名", "苟在初圣")):
-            return response("research", "project", "web_research", "我会先调研原作资料，再进入同人创作。")
-        if any(word in request for word in ("这个设定别改", "别改", "不要改", "保留")):
-            return response("show_status", "outline", "lock", "我已记录锁定约束，后续修订会遵守。", request, request)
-        if any(word in request for word in ("审查大纲", "审稿大纲", "review outline", "看看大纲问题")):
-            return response("review_outline", "outline", "review", "我会调用大纲编辑审查当前大纲。")
-        if any(word in request for word in ("大纲", "主线", "罪感", "人物弧光", "更黑暗", "偏悬疑", "少点设定解释", "太普通")):
-            styles = []
-            if "黑暗" in request:
-                styles.append("更黑暗")
-            if "悬疑" in request:
-                styles.append("偏悬疑")
-            if "少点设定" in request:
-                styles.append("少设定解释")
-            action = "revise_outline" if any(word in request for word in ("太", "强化", "增强", "更", "修改", "调整", "少点")) else "generate_outline"
-            intent = "revise" if action == "revise_outline" else "create"
-            instruction = request if intent == "revise" else ""
-            return response(action, "outline", intent, "我会处理大纲，并把你的要求转成可执行修订。", instruction, styles="，".join(styles))
-        if any(word in request for word in ("场景卡", "规划场景", "拆场景", "场景规划", "场景")) and "章" in request:
-            return response("plan_scenes", "scene_cards", "create", f"我会为第 {chapter or 1} 章规划场景卡。", chapter_value=chapter or "1")
-        if any(word in request for word in ("章节卡", "规划第", "章规划")) and "章" in request:
-            return response("plan_chapter", "chapter_card", "create", f"我会为第 {chapter or 1} 章生成章节卡。", chapter_value=chapter or "1")
-        if any(word in request for word in ("世界观", "设定", "背景")):
-            return response("worldbuilding", "worldbuilding", "create", "我会先进入 outline 的 worldbuilding 阶段，建立可持续写作的规则、冲突和素材。")
-        if any(word in request for word in ("细纲", "章节规划", "章节计划")):
-            return response("plan_chapters", "outline", "create", "我会调度章节细纲 Agent，把大纲拆成可执行章节。")
-        if any(word in request for word in ("导出小说", "导出全文", "导出手稿", "export")):
-            return response("export_project", "export", "export", "我会导出当前已定稿章节。")
-        if any(word in request for word in ("定稿", "最终稿", "finalize")) and ("章" in request or chapter):
-            return response("finalize_chapter", "final_chapter", "approve", f"我会定稿第 {chapter or 1} 章并更新小说圣经。", chapter_value=chapter or "1")
-        if any(word in request for word in ("审稿", "编辑", "检查")):
-            return response("review_chapter", "chapter", "review", "我会调度编辑 Agent 检查当前章节。", chapter_value=chapter)
-        if any(word in request for word in ("重写", "修改章节", "改写", "修订章节")) or ("修订" in request and ("章" in request or chapter)):
-            return response("revise_chapter", "chapter", "revise", "我会根据编辑意见调度章节写手重写当前章节。", request, chapter_value=chapter)
-        if "写" in request and "章" in request:
-            return response("write_chapter", "chapter", "create", f"我会调度章节写手生成第 {chapter or 1} 章。", chapter_value=chapter or "1")
-        if any(word in request for word in ("想写", "创意", "小说", "故事")):
-            return response("propose_directions", "outline", "variant", "我先把这个创意拆成几个可选方向，再由你决定大纲路线。")
-        if any(word in request for word in ("聊聊", "你觉得", "怎么样", "好不好", "有意思", "感觉")):
-            return response("chat", "project", "answer", "可以，我们先聊这个方向；如果你要我改产物，请明确说修改哪里。")
-        return response("ask_user", "unknown", "answer", "你想让我下一步做什么？可以说：生成大纲、给三个方向、修改大纲、审查大纲或保存。")
-
-    def _extract_director_request(self, prompt: str) -> str:
-        for line in reversed(prompt.splitlines()):
-            if line.startswith("最新用户输入："):
-                return line.split("：", 1)[1].strip()
-        return prompt.strip().splitlines()[-1] if prompt.strip() else ""
-
-    def _extract_chapter(self, text: str) -> str:
-        import re
-
-        match = re.search(r"第\s*(\d+)\s*章", text)
-        if match:
-            return match.group(1)
-        match = re.search(r"chapter\s*(\d+)", text, re.IGNORECASE)
-        if match:
-            return match.group(1)
-        return ""
-
-    def _mock_directions(self) -> str:
-        return (
-            "# 创作方向提案\n\n"
-            "## 方向 1：记忆罪案\n- 核心概念：主角追查手稿预言案件，逐步发现自己曾是记忆篡改执行者。\n- 主角压力：真相越清晰，罪感越强。\n- 主要冲突：自我救赎与城市稳定。\n- 风格气质：黑暗悬疑。\n- 优点：人物弧光强。\n- 风险：需要控制信息密度。\n\n"
-            "## 方向 2：月背冷库\n- 核心概念：手稿来自保存删除记忆的月背冷库。\n- 主角压力：找回记忆会伤害盟友。\n- 主要冲突：私人真相与公共秩序。\n- 风格气质：科幻调查。\n- 优点：世界观纵深强。\n- 风险：设定解释可能过多。\n\n"
-            "## 方向 3：纸上叛乱\n- 核心概念：地下写作者用纸质小说绕过预测系统发动叛乱。\n- 主角压力：必须决定是否公开自己的罪证。\n- 主要冲突：叙事自由与安全系统。\n- 风格气质：群像悬疑。\n- 优点：适合长篇扩展。\n- 风险：主线可能分散。\n\n"
-            "## 建议选择\n建议选择方向 1，因为它最能强化主角罪感和悬疑推进。"
-        )
-
     def _mock_outline_revised(self) -> str:
         return (
             "# 修订版总大纲\n\n"
@@ -1175,32 +910,6 @@ class MockCodexAdapter(AgentAdapter):
 
 
 
-    def _mock_chapter_summary(self) -> str:
-        return "林澈在银湾城第三维修站醒来，发现纸质手稿预告东七气闸事故，并确认审计编号失效指向自己。修订稿补强了纸质文本禁忌、身份异常和事故倒计时，章末他带着手稿冲向东七气闸，决定违规追查。"
-
-    def _mock_final_bible_updates(self) -> str:
-        data = {
-            "chapter_summaries": {
-                "1": "林澈在银湾城第三维修站醒来，发现纸质手稿预告东七气闸事故，并确认审计编号失效指向自己。他带着手稿冲向东七气闸，决定违规追查。"
-            },
-            "timeline": [
-                {"id": "chapter-001-final", "order": 1, "chapter": 1, "event": "林澈发现纸质手稿、失效审计编号和东七气闸事故预告。", "characters": ["林澈"], "location": "银湾城第三维修站", "source_hint": "final_chapter: 第1章定稿"}
-            ],
-            "foreshadowing": [
-                {"id": "CH001-HOOK", "setup_chapter": 1, "setup_text": "手稿第二页预告东七气闸事故坐标。", "payoff_text": "后续验证手稿来源和月背冷库线索。", "status": "setup", "source_hint": "final_chapter: 手稿第二页预告"}
-            ],
-            "plot_threads": [
-                {"name": "手稿预言", "description": "第一章确认手稿能预告真实事故。", "status": "active", "related_chapters": [1], "source_hint": "chapter_summary: 第1章摘要"}
-            ],
-            "open_questions": ["手稿为何能预告东七气闸事故仍待解释。"],
-        }
-        return json.dumps(data, ensure_ascii=False)
-
-    def _mock_review_role(self, role: str, revised: bool) -> str:
-        if revised:
-            return f"## {role}审稿\n- 通过点：修订稿已经补足关键细节。\n- 风险：后续章节继续铺垫许岚即可。"
-        return f"## {role}审稿\n- 问题：初稿需要补强维修站异常记录、纸质文本禁忌和事故倒计时。\n- 建议：进入定向修订。"
-
     def _mock_review_synthesizer(self, revised: bool) -> str:
         if revised:
             data = {
@@ -1222,21 +931,6 @@ class MockCodexAdapter(AgentAdapter):
                 "issues": ["[P1] 主角醒来的环境压力不足。", "[P1] 纸质手稿为什么危险还不够清楚。", "[P2] 事故倒计时可以更强。"],
                 "rewrite_tasks": ["增加审计编号查询失败。", "补明纸质文本禁忌。", "强化东七气闸倒计时。"],
             }
-        return json.dumps(data, ensure_ascii=False)
-
-    def _mock_revision_plan(self) -> str:
-        data = {
-            "revision_plan_v1": {
-                "tasks": [
-                    {"task": "补强维修站异常记录。", "target_scene": "醒来场景", "source": "review_v1.json.rewrite_tasks: 增加审计编号查询失败。"},
-                    {"task": "补明纸质文本禁忌。", "target_scene": "手稿场景", "source": "review_v1.json.rewrite_tasks: 补明纸质文本禁忌。"},
-                    {"task": "强化东七气闸倒计时。", "target_scene": "结尾场景", "source": "review_v1.json.rewrite_tasks: 强化东七气闸倒计时。"},
-                ],
-                "keep": ["不提前揭露月背冷库真相。"],
-                "do_not_touch": ["不改变既有章节顺序。"],
-                "open_questions": [],
-            }
-        }
         return json.dumps(data, ensure_ascii=False)
 
     def _mock_chapter_plan(self) -> str:
