@@ -1,7 +1,41 @@
+from importlib import resources
+
 import pytest
 
 from ai_novelist.prompts import PromptNotFoundError, load_prompt
+from ai_novelist.prompts.registry import (
+    INLINE_AGENT_NAMES,
+    PROMPT_REGISTRY,
+    validate_prompt_registry,
+)
 from ai_novelist.outline.renderers import build_stage_output_rule
+
+
+def prompt_file_names() -> set[str]:
+    return {
+        path.name.removesuffix(".md")
+        for path in resources.files("ai_novelist.prompts").iterdir()
+        if path.name.endswith(".md")
+    }
+
+
+def test_prompt_registry_has_no_missing_files():
+    problems = validate_prompt_registry()
+    assert problems.missing_files == []
+
+
+def test_prompt_directory_has_no_orphan_files():
+    assert sorted(prompt_file_names() - set(PROMPT_REGISTRY)) == []
+
+
+def test_author_craft_policy_prompt_names_are_registered():
+    from ai_novelist.prompts import AUTHOR_CRAFT_POLICY_PROMPTS
+
+    assert sorted(set(AUTHOR_CRAFT_POLICY_PROMPTS) - set(PROMPT_REGISTRY)) == []
+
+
+def test_inline_agent_names_are_not_prompt_files():
+    assert sorted(set(INLINE_AGENT_NAMES) & prompt_file_names()) == []
 
 
 def test_load_prompt_from_package():

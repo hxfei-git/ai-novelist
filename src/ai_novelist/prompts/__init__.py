@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from importlib import resources
 
+from ai_novelist.prompts.registry import PROMPT_REGISTRY
+
 
 class PromptNotFoundError(RuntimeError):
     """Raised when a prompt template is missing."""
@@ -29,18 +31,14 @@ AUTHOR_CRAFT_POLICY_PROMPTS = {
     "atmosphere_enhancer",
     "hook_enhancer",
     "style_normalizer",
-    "continuity_editor",
-    "structure_editor",
-    "character_arc_editor",
-    "style_editor",
-    "simulated_reader",
-    "pacing_guard_editor",
     "restraint_polisher",
     "emotional_resonance_polisher",
 }
 
 
 def load_prompt(name: str) -> str:
+    if name not in PROMPT_REGISTRY:
+        raise PromptNotFoundError(f"Prompt is not registered: {name}.md")
     prompt_file = f"{name}.md"
     try:
         text = resources.files(__package__).joinpath(prompt_file).read_text(encoding="utf-8")
