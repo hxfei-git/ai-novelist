@@ -364,10 +364,16 @@ def extract_chapter_outline_slice(text: str, chapter: int) -> str:
     if not content or chapter < 1:
         return content
     chapter_pattern = re.compile(
-        rf"^\s*(?P<heading>#{{1,6}}\s*)?第\s*{chapter}\s*章[：:\s].*$|^\s*\|\s*第\s*{chapter}\s*章\s*\|.*$",
+        r"^\s*(?P<heading>#{1,6}\s*)?第\s*(?P<heading_num>[一二两三四五六七八九十\d]+)\s*章[：:\s].*$|"
+        r"^\s*\|\s*第\s*(?P<row_num>[一二两三四五六七八九十\d]+)\s*章\s*\|.*$",
         re.MULTILINE,
     )
-    match = chapter_pattern.search(content)
+    match = None
+    for candidate in chapter_pattern.finditer(content):
+        raw_number = candidate.group("heading_num") or candidate.group("row_num")
+        if chinese_number_to_int(raw_number) == chapter:
+            match = candidate
+            break
     if not match:
         return legacy_chapter_outline_slice(content, chapter)
     start = match.start()
@@ -376,15 +382,23 @@ def extract_chapter_outline_slice(text: str, chapter: int) -> str:
         heading_level = len(match.group("heading").strip())
     end = len(content)
     if heading_level:
-        next_heading = re.compile(rf"^\s*#{{1,{heading_level}}}\s+第\s*(?!{chapter}\b).+章", re.MULTILINE)
-        next_match = next_heading.search(content, match.end())
-        if next_match:
-            end = next_match.start()
+        next_heading = re.compile(
+            rf"^\s*#{{1,{heading_level}}}\s+第\s*(?P<num>[一二两三四五六七八九十\d]+)\s*章",
+            re.MULTILINE,
+        )
+        for next_match in next_heading.finditer(content, match.end()):
+            if chinese_number_to_int(next_match.group("num")) != chapter:
+                end = next_match.start()
+                break
     else:
-        next_row = re.compile(rf"^\s*\|\s*第\s*(?!{chapter}\s*章)\d+\s*章\s*\|", re.MULTILINE)
-        next_match = next_row.search(content, match.end())
-        if next_match:
-            end = next_match.start()
+        next_row = re.compile(
+            r"^\s*\|\s*第\s*(?P<num>[一二两三四五六七八九十\d]+)\s*章\s*\|",
+            re.MULTILINE,
+        )
+        for next_match in next_row.finditer(content, match.end()):
+            if chinese_number_to_int(next_match.group("num")) != chapter:
+                end = next_match.start()
+                break
     volume_context = nearest_volume_context(content, start)
     chapter_text = content[start:end].strip()
     return "\n\n".join(part for part in (volume_context, chapter_text) if part).strip()

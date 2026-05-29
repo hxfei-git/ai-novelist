@@ -296,7 +296,7 @@ npm --prefix web/frontend run build
 - `docs/superpowers/plans/2026-05-29-outline-review-apply-completion.md`
 
 ### Task 7: Chapter Batch Selection And Context Slice Proof
-- Files changed: context builder manifest source tagging, direct chapter write and volume-write outline-slice guards, context-builder/graph regression tests, docs.
-- Behavior changed: chapter_outline_slice context sections now carry an explicit manifest source_type, selected-volume chapter drafting manifests prove the direct chapter outline slice was included, and direct chapter context, direct chapter write preparation, and volume batch preparation now return explicit missing-slice fallbacks instead of adjacent outline content when the selected chapter heading is absent.
+- Files changed: context builder manifest source tagging, shared chapter outline extraction, direct chapter write and volume-write outline-slice guards, context-builder/graph regression tests, docs.
+- Behavior changed: chapter_outline_slice context sections now carry an explicit manifest source_type, selected-volume chapter drafting manifests prove the direct chapter outline slice was included, and direct chapter context, direct chapter write preparation, and volume batch preparation now return explicit missing-slice fallbacks instead of adjacent outline content when the selected chapter heading is absent; shared chapter outline slicing now supports Arabic and Chinese-number chapter headings.
 - Verification plan: focused RED/green run for the two new Task 7 tests, then affected suites tests/test_context_builder.py, tests/test_graph_volume_write.py, and tests/test_graph_chapter_write.py, plus git diff --check.
 - Remaining risk: coverage is graph/context unit level; no live multi-agent drafting run was performed.

@@ -318,3 +318,69 @@ def test_direct_chapter_context_manifest_marks_fallback_outline(tmp_path: Path) 
     assert "第六章相邻大纲内容" not in bundle.text
     assert "只给第八章" not in bundle.text
     assert "第八章相邻大纲内容" not in bundle.text
+
+
+def test_direct_chapter_context_missing_chinese_number_outline_slice_does_not_leak_adjacent_chapters(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("web-demo", "Web Demo")
+    state.current_chapter = 7
+    state.active_chapter = 7
+    outline = """## 第一卷
+
+### 第六章：只给第六章
+第六章中文相邻大纲内容。
+
+### 第八章：只给第八章
+第八章中文相邻大纲内容。
+"""
+    save_markdown_artifact(
+        store.project_dir(state.project_id),
+        "outline/chapter_outline.md",
+        outline,
+        "chapter_outline",
+        stage="chapter_outline",
+    )
+    store.save_state(state)
+
+    bundle = build_context_bundle(state, store, "direct_chapter_drafting", chapter=7)
+
+    assert "章节大纲切片缺失" in bundle.text
+    assert "只给第六章" not in bundle.text
+    assert "第六章中文相邻大纲内容" not in bundle.text
+    assert "只给第八章" not in bundle.text
+    assert "第八章中文相邻大纲内容" not in bundle.text
+
+
+def test_direct_chapter_context_uses_present_chinese_number_outline_slice(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("web-demo", "Web Demo")
+    state.current_chapter = 7
+    state.active_chapter = 7
+    outline = """## 第一卷
+
+### 第六章：只给第六章
+第六章中文相邻大纲内容。
+
+### 第七章：只给第七章
+第七章中文专属大纲内容。
+
+### 第八章：只给第八章
+第八章中文相邻大纲内容。
+"""
+    save_markdown_artifact(
+        store.project_dir(state.project_id),
+        "outline/chapter_outline.md",
+        outline,
+        "chapter_outline",
+        stage="chapter_outline",
+    )
+    store.save_state(state)
+
+    bundle = build_context_bundle(state, store, "direct_chapter_drafting", chapter=7)
+
+    assert "只给第七章" in bundle.text
+    assert "第七章中文专属大纲内容" in bundle.text
+    assert "只给第六章" not in bundle.text
+    assert "第六章中文相邻大纲内容" not in bundle.text
+    assert "只给第八章" not in bundle.text
+    assert "第八章中文相邻大纲内容" not in bundle.text
