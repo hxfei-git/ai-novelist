@@ -156,6 +156,7 @@ Search and corpus settings still exist in configuration because some craft helpe
 
 ## Architecture Web Context Remediation Notes
 
+- 2026-05-29: Stage refresh after successful outline generation now preserves existing editor content during pending fetches and treats transient post-stream `Failed to fetch` refresh failures as background noise instead of progress-log errors.
 - 2026-05-29: Outline-stage save steps now emit completed progress events after artifacts and state are written, preventing right-side save rows from remaining `running` after successful generation or light revision.
 - 2026-05-29: Web progress events now preserve a `model` field, parse elapsed time from both slash-separated and pipe-separated metadata, and render the right-side progress panel newest-first without changing persisted chronological order.
 - 2026-05-29: Saving an onboarding idea no longer pre-fills the outline-stage instruction input, and transient browser `Failed to fetch` errors from background project/stage refreshes are filtered out of the persisted progress log.
@@ -230,6 +231,13 @@ Search and corpus settings still exist in configuration because some craft helpe
 - Remaining risk: coverage is service/graph-level; no live browser SSE run was performed. Existing generated project logs can still contain stale `running` rows until refreshed or cleaned.
 - Next entry point: browser-level SSE progress coverage if more long-running status drift appears.
 
+### Phase 6e: Stage Refresh Fallback
+- Files changed: frontend stage loading/orchestration, frontend source regression tests, docs, and the Superpowers implementation plan.
+- Behavior changed: `loadStage()` no longer clears the current outline editor content before a refresh response arrives; after a successful outline generation stream, `refreshStages()` and `loadStage(activeStage)` run in a nested refresh guard so transient browser `TypeError: Failed to fetch` errors do not append `error: Failed to fetch` to the project progress log.
+- Verification: RED targeted run first failed because `loadStage()` called `setContent('')` before fetching and `runStage()` lacked the nested `showBackgroundError(refreshError)` guard. Target tests passed with `.venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py::test_stage_load_preserves_existing_content_while_refreshing tests/test_frontend_review_tabs_structure.py::test_run_stage_does_not_log_transient_post_stream_refresh_failure -q` -> 2 passed in 0.02s; full frontend structure suite passed with `.venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py -q` -> 33 passed in 0.17s; `npm --prefix web/frontend run build` passed with the known Vite CJS Node API deprecation warning.
+- Remaining risk: coverage is source/build level, not a live browser network-drop run. Current `demo-web` generated progress log was locally cleaned of the stale `error: Failed to fetch` row; other generated project logs may retain old rows until cleaned or overwritten.
+- Next entry point: add browser-level SSE refresh coverage if post-stream refresh failures recur.
+
 ## Verification Policy
 
 Use the smallest relevant test set during implementation. Run full pytest when a change touches state, persistence, graph contracts, adapters, prompts, or shared workflow helpers.
@@ -259,3 +267,4 @@ npm --prefix web/frontend run build
 - `docs/superpowers/plans/2026-05-28-web-structural-refactor.md`
 - `docs/superpowers/plans/2026-05-29-progress-order-and-model-metrics.md`
 - `docs/superpowers/plans/2026-05-29-outline-save-progress-completion.md`
+- `docs/superpowers/plans/2026-05-29-stage-refresh-fallback.md`

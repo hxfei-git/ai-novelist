@@ -257,10 +257,6 @@ function App() {
   async function loadStage(stage: string) {
     const token = ++stageRequestRef.current;
     setLoadingStage(true);
-    setContent('');
-    setPendingQuestions(null);
-    setPendingAnswerSelection({});
-    setPendingCustomAnswers({});
     try {
       const [item, pending] = await Promise.all([
         api<Stage>(`/api/projects/${projectId}/outline/stages/${stage}`),
@@ -308,8 +304,12 @@ function App() {
         (line) => pushLog(line),
       );
       setInstruction('');
-      await refreshStages();
-      await loadStage(activeStage);
+      try {
+        await refreshStages();
+        await loadStage(activeStage);
+      } catch (refreshError) {
+        showBackgroundError(refreshError);
+      }
     } catch (error) {
       showError(error);
     } finally {

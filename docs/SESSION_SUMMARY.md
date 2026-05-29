@@ -297,6 +297,13 @@ Completed implementation commits before this final verification record:
 - Verification: targeted RED first failed because the save progress label was still `正在保存「人物关系」轻修订产物...` with `status=running`; after wrapping saves with `run_with_progress`, `.venv/bin/python -m pytest tests/test_web_service.py::test_revise_outline_stage_completes_save_progress -q` passed with 1 passed in 0.17s. Affected-suite verification passed with `.venv/bin/python -m pytest tests/test_web_service.py tests/test_web_app.py tests/test_outline_graph_modules.py -q` -> 93 passed in 1.17s.
 - Remaining risk: this was not exercised through a live browser stream; old generated project logs outside `demo-web` may still have stale rows until those projects receive a new progress update.
 
+### Follow-up: Stage Refresh Fallback
+- Files changed: `web/frontend/src/main.tsx`, `tests/test_frontend_review_tabs_structure.py`, `docs/IMPLEMENTATION_PLAN.md`, `docs/SESSION_SUMMARY.md`, and `docs/superpowers/plans/2026-05-29-stage-refresh-fallback.md`.
+- Behavior changed: outline-stage refreshes preserve the current editor content until a new payload arrives, and successful generation streams no longer persist transient post-stream `Failed to fetch` refresh errors into the progress log.
+- Evidence from `demo-web`: `outline/volume_outline.md` and `outline_stages/volume_outline.md` both contain the generated 分卷大纲, and the Web service payload returns `status=options_ready` with non-empty content; the visible empty editor was caused by frontend pre-refresh clearing plus a transient refresh fetch failure. The stale generated `projects/demo-web/web_progress_log.json` `error: Failed to fetch` row was removed locally.
+- Verification: targeted RED first failed for pre-request `setContent('')` and missing `showBackgroundError(refreshError)` in `runStage()`; after the fix, `.venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py::test_stage_load_preserves_existing_content_while_refreshing tests/test_frontend_review_tabs_structure.py::test_run_stage_does_not_log_transient_post_stream_refresh_failure -q` passed with 2 passed in 0.02s. Broader frontend structure suite passed with 33 passed in 0.17s; `npm --prefix web/frontend run build` passed with the known Vite CJS Node API deprecation warning.
+- Remaining risk: no live browser network interruption test was added; old generated logs in projects other than `demo-web` may still contain historical `error: Failed to fetch` rows.
+
 ## Remaining Risk
 
 One verified dead module has been removed. The main remaining risk is stale compatibility code that appears unused but may still be reached through dynamic prompt names, old project state, or retained Web workflow helpers.

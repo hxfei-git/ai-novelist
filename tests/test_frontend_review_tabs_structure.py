@@ -426,6 +426,28 @@ def test_progress_panel_merges_rows_by_key_and_renders_completion_metrics() -> N
     assert "void saveProjectProgressLog(next)" in source
 
 
+def test_stage_load_preserves_existing_content_while_refreshing() -> None:
+    source = read_main()
+    match = re.search(r"async function loadStage\(stage: string\) \{(?P<body>.*?)\n  async function saveStage", source, re.S)
+    assert match is not None
+
+    before_request = match.group("body").split("try {", 1)[0]
+
+    assert "setLoadingStage(true)" in before_request
+    assert "setContent('')" not in before_request
+
+
+def test_run_stage_does_not_log_transient_post_stream_refresh_failure() -> None:
+    source = read_main()
+    match = re.search(r"async function runStage\(action: 'generate' \| 'revise' \| 'lock'\) \{(?P<body>.*?)\n  async function loadChapterOutlineWorkspace", source, re.S)
+    assert match is not None
+    body = match.group("body")
+
+    assert "await streamAction(" in body
+    assert "try {\n        await refreshStages();\n        await loadStage(activeStage);\n      } catch (refreshError) {\n        showBackgroundError(refreshError);\n      }" in body
+    assert "showError(error);" in body
+
+
 def test_frontend_progress_log_uses_project_directory_api_not_local_storage() -> None:
     source = read_main()
 
