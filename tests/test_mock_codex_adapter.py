@@ -65,4 +65,3 @@ def test_mock_adapter_keeps_active_agent_fallbacks(tmp_path):
         output = adapter.complete(f"AGENT: {agent}\n写作任务", tmp_path)
         assert output != f"UNSUPPORTED_AGENT: {agent}"
         assert "小说大纲" in output
-
