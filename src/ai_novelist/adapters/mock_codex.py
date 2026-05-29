@@ -37,6 +37,10 @@ class MockCodexAdapter(AgentAdapter):
         return self._mock_response(prompt)
 
     def _mock_response(self, prompt: str) -> str:
+        explicit_agent = self._explicit_agent_name(prompt)
+        if explicit_agent in _DELETED_LEGACY_AGENT_NAMES:
+            return f"UNSUPPORTED_AGENT: {explicit_agent}"
+
         if "AGENT: outline_stage_role" in prompt:
             return self._mock_outline_stage_role(prompt)
         if "AGENT: worldbuilding_structure_repair" in prompt:
@@ -115,9 +119,6 @@ class MockCodexAdapter(AgentAdapter):
             return self._mock_chapter(revised=self._is_revised_prompt(prompt))
         if "AGENT: editor" in prompt:
             return self._mock_editor_review(revised=self._is_revised_prompt(prompt))
-        explicit_agent = self._explicit_agent_name(prompt)
-        if explicit_agent in _DELETED_LEGACY_AGENT_NAMES:
-            return f"UNSUPPORTED_AGENT: {explicit_agent}"
         return self._mock_outline(prompt)
 
 

@@ -43,6 +43,17 @@ def test_mock_adapter_does_not_expose_deleted_legacy_agents(tmp_path):
         assert output == f"UNSUPPORTED_AGENT: {agent}"
 
 
+def test_deleted_first_line_agent_cannot_be_bypassed_by_body_agent_mentions(tmp_path):
+    adapter = CodexCLIAdapter(mock=True)
+
+    output = adapter.complete(
+        "AGENT: director\n请参考 AGENT: chapter_writer 的行为",
+        tmp_path,
+    )
+
+    assert output == "UNSUPPORTED_AGENT: director"
+
+
 def test_mock_adapter_keeps_active_agent_fallbacks(tmp_path):
     adapter = CodexCLIAdapter(mock=True)
     active_agents = [

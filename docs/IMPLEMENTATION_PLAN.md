@@ -154,6 +154,11 @@ Search and corpus settings still exist in configuration because some craft helpe
 - keep mock model behavior separate from the real Codex adapter
 - split broad Web service tests by workflow area
 
+## Web Prompt Context Prune Audit Notes
+
+- 2026-05-29: Added an explicit prompt registry for retained Web prompt files and prompt-loader tests that reject missing registry entries, orphan prompt files, and stale author-craft policy prompt names.
+- 2026-05-29: Pruned legacy mock adapter branches and stale DeepSeek agent category names for deleted non-Web agents; deleted first-line mock agents now return `UNSUPPORTED_AGENT: <agent>` before any body substring routing, while active retained mock agents keep fallback behavior for Web mock mode.
+
 ## Architecture Web Context Remediation Notes
 
 - 2026-05-29: Stage refresh after successful outline generation now preserves existing editor content during pending fetches and treats transient post-stream `Failed to fetch` refresh failures as background noise instead of progress-log errors.

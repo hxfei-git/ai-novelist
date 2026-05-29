@@ -106,6 +106,13 @@ git check-ignore -v .superpowers
 # .gitignore:16:.superpowers/ .superpowers
 ```
 
+## Web Prompt Context Prune Audit Progress
+
+- Prompt registry cleanup added a retained Web prompt manifest, loader gating, orphan detection, inline-agent separation, and author-craft policy consistency checks. Verification: `.venv/bin/python -m pytest tests/test_prompt_loader.py -q` passed with 12 tests.
+- Prompt/branch evidence was recorded in `docs/web_only_reference_matrix.md`; strict Web-only pruning remains the rule for unused prompts and unreachable branches.
+- Legacy mock adapter branches were removed for deleted non-Web agents, stale DeepSeek categories were pruned including `retrieval_context_synthesizer`, and deleted first-line mock agents are denied before body substring routing. Active retained mock fallback is preserved for Web mock mode. Verification: `.venv/bin/python -m pytest tests/test_mock_codex_adapter.py tests/test_deepseek_adapter.py -q` and `.venv/bin/python -m pytest tests/test_web_service.py -q` passed during Task 3 review.
+- Remaining risk: later tasks still need to remove unreachable outline Director helpers, prune the Web service facade, and prove chapter-outline/body context consistency.
+
 ## Completed in This Cleanup Batch
 
 Implementation plan:
