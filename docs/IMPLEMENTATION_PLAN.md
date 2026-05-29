@@ -260,7 +260,7 @@ Search and corpus settings still exist in configuration because some craft helpe
 ### Task 6: Chapter-Outline Review Apply Persistence
 - Files changed: chapter-outline Web actions, Web service regression tests, docs.
 - Behavior changed: applying a chapter-outline review now marks the saved report JSON/Markdown as applied, persists revised `chapter_outline` artifact content when the outline-stage node returns `synthesis`, and returns idempotent success for duplicate apply calls when a report is already applied.
-- Verification: RED `.venv/bin/python -m pytest tests/test_web_service.py::test_apply_chapter_outline_review_marks_report_applied_and_updates_artifact -q` first failed because the report remained `reviewed`; focused green verification passed with `.venv/bin/python -m pytest tests/test_web_service.py::test_apply_chapter_outline_review_marks_report_applied_and_updates_artifact tests/test_web_service.py::test_latest_chapter_outline_review_report_reads_saved_report tests/test_web_service.py::test_apply_chapter_outline_review_is_idempotent_after_report_applied -q`.
+- Verification: RED `.venv/bin/python -m pytest tests/test_web_service.py::test_apply_chapter_outline_review_marks_report_applied_and_updates_artifact -q` first failed because the report remained `reviewed`; follow-up coverage confirmed a report with `status=applied` and no `applied` flag returns idempotent success without model work; focused green verification passed with the Task 6 chapter-outline apply tests.
 - Remaining risk: coverage is service-level; no browser/SSE apply interaction test was added for chapter-outline review apply.
 
 ## Verification Policy

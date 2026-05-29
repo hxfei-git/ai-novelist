@@ -836,6 +836,45 @@ def test_apply_chapter_outline_review_is_idempotent_after_report_applied(monkeyp
     assert result["applied_path"] == "outline/chapter_outline.md"
 
 
+def test_apply_chapter_outline_review_is_idempotent_when_status_applied_without_flag(
+    monkeypatch, tmp_path: Path
+) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+    state.outline_stage_artifacts["chapter_outline"] = {
+        "stage": "chapter_outline",
+        "status": "options_ready",
+        "metadata": {"total_volumes": 1, "current_volume_index": 1, "completed_volumes": []},
+    }
+    store.save_outline_artifact(state, "chapter_outline", "## 第一卷\n\n### 第 1 章：已应用\n")
+    store.save_state(state)
+    report_path, markdown_path = chapter_outline_actions.chapter_outline_review_report_paths(store, "web-demo", "run-1")
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report = {
+        "project_id": "web-demo",
+        "run_id": "run-1",
+        "status": "applied",
+        "applied_at": "2026-05-29T00:00:00+00:00",
+        "applied_path": "outline/chapter_outline.md",
+        "decision": "revise",
+        "source_outline": "## 第一卷\n\n### 第 1 章：已应用\n",
+    }
+    report_path.write_text(json.dumps(report, ensure_ascii=False), encoding="utf-8")
+    markdown_path.write_text(chapter_outline_actions.render_chapter_outline_review_markdown(report), encoding="utf-8")
+
+    def fail_run(data: dict, adapter: AgentAdapter, local_store: LocalStore, progress=None) -> dict:
+        raise AssertionError("status-applied report should not invoke model work")
+
+    monkeypatch.setattr(chapter_outline_actions, "run_outline_stage_node", fail_run)
+    result = chapter_outline_actions.apply_chapter_outline_review(store, DummyAdapter(), "web-demo", "run-1")
+
+    assert result["applied"] is True
+    assert result["already_applied"] is True
+    assert result["status"] == "applied"
+    assert result["applied_at"] == "2026-05-29T00:00:00+00:00"
+    assert result["applied_path"] == "outline/chapter_outline.md"
+
+
 def test_extract_stage_pending_questions_from_markdown_filters_status_lines() -> None:
     markdown = """# 人物关系
 
