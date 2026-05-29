@@ -10,7 +10,12 @@ from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
 from ai_novelist.artifacts import ArtifactRecord, load_artifacts, register_artifact
 from ai_novelist.bible import load_bible, render_bible_markdown
 from ai_novelist.corpus.craft_resolver import resolve_author_craft
-from ai_novelist.context_builder import build_context_bundle, build_context_manifest
+from ai_novelist.context_builder import (
+    build_context_bundle,
+    build_context_manifest,
+    chapter_outline_contains_chapter,
+    missing_chapter_outline_slice,
+)
 from ai_novelist.corpus.similarity_guard import save_similarity_report_for_state
 from ai_novelist.graph_chapter_plan import collect_chapter_outline
 from ai_novelist.progress import ProgressFunc, emit_progress, noop_progress, run_with_progress, with_agent_metadata
@@ -92,8 +97,12 @@ def load_direct_write_context_node(data: dict, store: LocalStore) -> dict:
     state.current_chapter_card = ""
     state.current_scene_cards = ""
     chapter_outline = collect_chapter_outline(state, store)
-    if not chapter_outline.strip() or chapter_outline.strip() == "暂无":
-        chapter_outline = f"第 {state.active_chapter} 章：章节大纲缺失，按小说圣经、锁定约束和用户请求生成兼容草稿。"
+    if (
+        not chapter_outline_contains_chapter(chapter_outline, state.active_chapter)
+        or not chapter_outline.strip()
+        or chapter_outline.strip() == "暂无"
+    ):
+        chapter_outline = missing_chapter_outline_slice(state.active_chapter)
     set_task_arg(state, "selected_chapter_outline", chapter_outline)
     state = resolve_author_craft(state, store, "drafting", chapter=state.active_chapter)
     bundle = build_context_bundle(state, store, "direct_chapter_drafting", chapter=state.active_chapter)
