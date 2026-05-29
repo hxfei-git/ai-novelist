@@ -42,3 +42,16 @@ def test_mock_adapter_does_not_expose_deleted_legacy_agents(tmp_path):
         output = adapter.complete(f"AGENT: {agent}\n写作任务", tmp_path)
         assert output == f"UNSUPPORTED_AGENT: {agent}"
 
+
+def test_mock_adapter_keeps_active_agent_fallbacks(tmp_path):
+    adapter = CodexCLIAdapter(mock=True)
+    active_agents = [
+        "outline_stage_reviser",
+        "global_consistency_reviewer",
+        "global_consistency_repair",
+    ]
+    for agent in active_agents:
+        output = adapter.complete(f"AGENT: {agent}\n写作任务", tmp_path)
+        assert output != f"UNSUPPORTED_AGENT: {agent}"
+        assert "小说大纲" in output
+

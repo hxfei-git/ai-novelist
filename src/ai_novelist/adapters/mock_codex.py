@@ -10,6 +10,26 @@ from pathlib import Path
 from ai_novelist.adapters.base import AgentAdapter, AgentCallOptions
 
 
+_DELETED_LEGACY_AGENT_NAMES = frozenset(
+    {
+        "director",
+        "retrieval_context_synthesizer",
+        "direction_proposer",
+        "continuity_editor",
+        "structure_editor",
+        "character_arc_editor",
+        "style_editor",
+        "simulated_reader",
+        "pacing_guard_editor",
+        "revision_planner",
+        "targeted_reviser",
+        "revision_self_check",
+        "chapter_summarizer",
+        "final_bible_update_extractor",
+    }
+)
+
+
 @dataclass
 class MockCodexAdapter(AgentAdapter):
     def complete(self, prompt: str, workspace: Path, options: AgentCallOptions | None = None) -> str:
@@ -95,9 +115,9 @@ class MockCodexAdapter(AgentAdapter):
             return self._mock_chapter(revised=self._is_revised_prompt(prompt))
         if "AGENT: editor" in prompt:
             return self._mock_editor_review(revised=self._is_revised_prompt(prompt))
-        unsupported_agent = self._explicit_agent_name(prompt)
-        if unsupported_agent:
-            return f"UNSUPPORTED_AGENT: {unsupported_agent}"
+        explicit_agent = self._explicit_agent_name(prompt)
+        if explicit_agent in _DELETED_LEGACY_AGENT_NAMES:
+            return f"UNSUPPORTED_AGENT: {explicit_agent}"
         return self._mock_outline(prompt)
 
 
