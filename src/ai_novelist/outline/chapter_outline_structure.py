@@ -391,11 +391,11 @@ def extract_chapter_outline_slice(text: str, chapter: int) -> str:
                 end = next_match.start()
                 break
     else:
-        next_row = re.compile(
-            r"^\s*\|\s*第\s*(?P<num>[一二两三四五六七八九十\d]+)\s*章\s*\|",
+        next_plain_heading = re.compile(
+            r"^\s*(?:\|\s*)?第\s*(?P<num>[一二两三四五六七八九十\d]+)\s*章(?:[：:\s]|\s*\|)",
             re.MULTILINE,
         )
-        for next_match in next_row.finditer(content, match.end()):
+        for next_match in next_plain_heading.finditer(content, match.end()):
             if chinese_number_to_int(next_match.group("num")) != chapter:
                 end = next_match.start()
                 break
