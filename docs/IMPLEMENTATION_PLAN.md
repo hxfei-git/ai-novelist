@@ -156,6 +156,7 @@ Search and corpus settings still exist in configuration because some craft helpe
 
 ## Architecture Web Context Remediation Notes
 
+- 2026-05-29: Saving an onboarding idea no longer pre-fills the outline-stage instruction input, and transient browser `Failed to fetch` errors from background project/stage refreshes are filtered out of the persisted progress log.
 - 2026-05-29: Hardened SSE/Web error behavior by adding source-level guards that require streaming workspace actions to call `showError(error)` and release running flags in `finally`; added a Web app regression for service exceptions surfacing as SSE `event: error` payloads.
 - 2026-05-29: Context profiles now record source paths and suppress duplicate artifact/state fallback content by digest before rendering.
 - 2026-05-29: Direct chapter drafting now uses the shared `direct_chapter_drafting` `ContextBundle` profile and records a context manifest for direct and volume write paths.
@@ -205,6 +206,13 @@ Search and corpus settings still exist in configuration because some craft helpe
 - Remaining risk: action handlers still live in `main.tsx`; a future phase can split hooks once component boundaries settle.
 - Next entry point: final verification and cleanup.
 - Continuation note: resume at Task 12; frontend split is accepted only when `main.tsx` is below 900 lines and build passes.
+
+### Phase 6b: Onboarding Instruction and Progress Noise Guard
+- Files changed: frontend state orchestration and frontend source regression tests.
+- Behavior changed: saving the initial novel idea clears the shared stage instruction field instead of copying the full idea into the direction-stage input; background project/stage/chapter loaders ignore transient browser `TypeError: Failed to fetch` errors so those network interruptions are not persisted as progress-log entries.
+- Verification: RED targeted runs first failed for the missing `setInstruction('')` guard and missing `showBackgroundError`; `.venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py -q` passed with 31 passed in 0.06s; `npm --prefix web/frontend run build` passed with the known Vite CJS Node API deprecation warning.
+- Remaining risk: this is source/build coverage, not browser-level interaction coverage; user-triggered action failures still persist to the progress log through `showError`.
+- Next entry point: add browser interaction coverage if more UI state leakage appears.
 
 ## Verification Policy
 

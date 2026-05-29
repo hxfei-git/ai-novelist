@@ -197,6 +197,30 @@ def test_create_project_clears_progress_for_new_project_id() -> None:
     assert "await saveProjectProgressLog([])" not in create_block.group(0)
 
 
+def test_onboarding_save_does_not_prefill_outline_instruction() -> None:
+    source = read_main()
+    submit_block = re.search(r"async function submitOnboardingIdea\(\).*?\n  }", source, re.DOTALL)
+    assert submit_block is not None
+    block = submit_block.group(0)
+
+    assert "setInstruction('')" in block
+    assert "setInstruction(onboardingIdea.trim())" not in block
+
+
+def test_background_transient_fetch_errors_are_not_persisted_to_progress_log() -> None:
+    source = read_main()
+    project_effect = re.search(r"useEffect\(\(\) => \{\n    if \(!projectId\) return;.*?\n  \}, \[projectId\]\);", source, re.DOTALL)
+    stage_effect = re.search(r"useEffect\(\(\) => \{\n    if \(!projectId \|\| !activeStage\) return;.*?\n  \}, \[projectId, activeStage\]\);", source, re.DOTALL)
+
+    assert "function showBackgroundError(error: unknown)" in source
+    assert "isTransientFetchError(error)" in source
+    assert project_effect is not None
+    assert stage_effect is not None
+    assert ".catch(showBackgroundError)" in project_effect.group(0)
+    assert ".catch(showError)" not in project_effect.group(0)
+    assert "loadStage(activeStage).catch(showBackgroundError)" in stage_effect.group(0)
+
+
 def test_chapter_batch_generation_has_running_guard_and_disabled_button() -> None:
     source = read_main() + read_workspace("chapters.tsx")
     generate_block = re.search(r"async function generateBatch\(\).*?\n  }", source, re.DOTALL)

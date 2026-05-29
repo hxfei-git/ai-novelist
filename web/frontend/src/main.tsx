@@ -165,24 +165,24 @@ function App() {
     setOutlineStageView('edit');
     setChapterOutlineView('volume');
     setChapterView('batch');
-    loadProjectState().catch(showError);
-    loadProjectProgressLog().catch(showError);
-    refreshStages().catch(showError);
-    refreshChapters(false, 1).catch(showError);
+    loadProjectState().catch(showBackgroundError);
+    loadProjectProgressLog().catch(showBackgroundError);
+    refreshStages().catch(showBackgroundError);
+    refreshChapters(false, 1).catch(showBackgroundError);
     loadLatestReview().catch(() => setReview(null));
     loadLatestOutlineReview().catch(() => setOutlineReview(null));
     loadLatestChapterOutlineReview().catch(() => setChapterOutlineReview(null));
-    loadChapterOutlineWorkspace().catch(showError);
+    loadChapterOutlineWorkspace().catch(showBackgroundError);
   }, [projectId]);
 
   useEffect(() => {
     if (!projectId || !activeStage) return;
-    loadStage(activeStage).catch(showError);
+    loadStage(activeStage).catch(showBackgroundError);
   }, [projectId, activeStage]);
 
   useEffect(() => {
     if (!projectId || !selectedChapter) return;
-    loadChapter(selectedChapter).catch(showError);
+    loadChapter(selectedChapter).catch(showBackgroundError);
   }, [projectId, selectedChapter]);
 
   function pushLog(message: ProgressItem) {
@@ -195,6 +195,15 @@ function App() {
 
   function showError(error: unknown) {
     pushLog(`error: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  function isTransientFetchError(error: unknown) {
+    return error instanceof TypeError && error.message === 'Failed to fetch';
+  }
+
+  function showBackgroundError(error: unknown) {
+    if (isTransientFetchError(error)) return;
+    showError(error);
   }
 
   async function loadProjectState() {
@@ -284,7 +293,7 @@ function App() {
     });
     setProjectState(state);
     setOnboardingIdea(state.idea || onboardingIdea.trim());
-    setInstruction(onboardingIdea.trim());
+    setInstruction('');
     pushLog('已保存小说创意');
   }
 

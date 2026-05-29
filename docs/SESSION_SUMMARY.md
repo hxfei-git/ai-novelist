@@ -278,6 +278,12 @@ Completed implementation commits before this final verification record:
 - Next recommended work: add browser-level interaction tests if a real UI runtime issue appears after these source and service-level guards.
 - Continuation note: this remediation batch is complete when full pytest, frontend build, and residual scans match the recorded outputs.
 
+### Follow-up: Onboarding Instruction and Progress Noise Guard
+- Files changed: `web/frontend/src/main.tsx`, `tests/test_frontend_review_tabs_structure.py`, and docs.
+- Behavior changed: saving the initial novel idea no longer copies the idea into the outline-stage instruction input; transient browser `Failed to fetch` errors from background project/stage/chapter refreshes are ignored instead of being persisted to the project progress log.
+- Verification: targeted RED runs first failed for the current code (`setInstruction('')` absent; `showBackgroundError` absent); focused regression tests passed with `.venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py::test_onboarding_save_does_not_prefill_outline_instruction tests/test_frontend_review_tabs_structure.py::test_background_transient_fetch_errors_are_not_persisted_to_progress_log -q` -> 2 passed in 0.04s; broader frontend structure suite passed with 31 passed in 0.06s; `npm --prefix web/frontend run build` passed with the known Vite CJS Node API deprecation warning.
+- Remaining risk: coverage is source-structure plus TypeScript/build validation; no Playwright browser click test was added for the onboarding handoff.
+
 ## Remaining Risk
 
 One verified dead module has been removed. The main remaining risk is stale compatibility code that appears unused but may still be reached through dynamic prompt names, old project state, or retained Web workflow helpers.
