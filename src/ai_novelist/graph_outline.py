@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from datetime import UTC, datetime
 from typing import Protocol
@@ -40,7 +39,6 @@ from ai_novelist.outline_graph.review_lock import (
     review_lock_pending_question_text,
 )
 from ai_novelist.outline_graph.routing import (
-    OUTLINE_ACTIONS,
     answers_stage_pending_questions,
     delegates_stage_decision,
     detect_stage_reference,
@@ -55,10 +53,7 @@ from ai_novelist.outline_graph.routing import (
     negates_stage_advance,
     next_outline_stage,
     route_after_human_feedback,
-    route_after_outline_director,
-    should_defer_stage_confirmation_to_director,
     should_run_outline_stage,
-    stage_action_from_director,
     stage_number,
 )
 from ai_novelist.outline_graph.artifact_io import (
@@ -792,8 +787,6 @@ def filter_stage_questions_by_history(artifact: object, questions: list[str]) ->
     return filtered
 
 
-
-
 def stage_question_fingerprint(question: str) -> str:
     normalized = normalize_stage_question_text(question)
     return sha256_text(normalized) if normalized else ""
@@ -1072,8 +1065,6 @@ def advance_outline_stage_node(data: dict, adapter: AgentAdapter, store: LocalSt
     return state.to_dict()
 
 
-
-
 def stage_unresolved_questions(state: NovelState, artifact: dict) -> list[str]:
     questions = []
     raw_artifact_questions = artifact.get("pending_questions")
@@ -1177,8 +1168,6 @@ def show_outline_stage_node(data: dict, store: LocalStore) -> dict:
 
 
 
-
-
 def build_stage_pending_answer_instruction(state: NovelState, text: str) -> str:
     questions = [item.strip() for item in state.pending_questions if item.strip()]
     numbered_answers = parse_compact_numbered_answers(text)
@@ -1207,7 +1196,6 @@ def build_stage_default_discretion_summary(state: NovelState, text: str) -> str:
     if questions:
         return f"用户将待确认问题交由模型按当前阶段产物逐项回答并推进；待裁量问题：{'；'.join(questions[:10])}；用户原话：{text}"
     return f"用户认可当前阶段产物，并将细节交由系统按当前建议由模型回答后推进；用户原话：{text}"
-
 
 
 def record_stage_history(state: NovelState, event: str, stage: str, user_text: str) -> None:
@@ -1256,8 +1244,6 @@ def prepare_chapter_outline_metadata(state: NovelState, store: LocalStore) -> di
 
 
 
-
-
 def clear_chapter_outline_generation_directives(state: NovelState) -> None:
     state.director_task_args.pop(CHAPTER_OUTLINE_FORCE_FULL_KEY, None)
     state.director_task_args.pop(CHAPTER_OUTLINE_INTERNAL_REQUEST_KEY, None)
@@ -1269,8 +1255,6 @@ def set_next_chapter_outline_volume_generation_directive(state: NovelState, next
         f"完整生成第 {next_volume_index} 卷章节大纲，不要轻修订已确认卷，"
         "不要只回复确认状态。"
     )
-
-
 
 
 
@@ -1397,8 +1381,6 @@ def extract_stage_confirmation_questions(markdown: str) -> list[str]:
 
 
 
-
-
 def human_feedback_node(data: dict, store: LocalStore) -> dict:
     state = NovelState.from_dict(data)
     intent = state.director_intent
@@ -1499,66 +1481,6 @@ def compare_outline_versions_node(data: dict, adapter: AgentAdapter, store: Loca
     return state.to_dict()
 
 
-def outline_show_outline_node(data: dict, store: LocalStore) -> dict:
-    state = NovelState.from_dict(data)
-    if state.outline.strip():
-        state.director_message = "当前大纲：\n" + state.outline
-    else:
-        state.director_message = "当前还没有大纲草案。你可以先说：给我几个方向，或生成大纲。"
-    store.save_state(state)
-    return state.to_dict()
-
-
-def outline_show_status_node(data: dict, store: LocalStore) -> dict:
-    state = NovelState.from_dict(data)
-    state.director_message = (
-        f"项目：{state.project_id}\n"
-        f"创意：{state.idea or '暂无'}\n"
-        f"大纲版本数：{len(state.outline_versions)}\n"
-        f"锁定约束：{', '.join(state.locked_constraints) or '暂无'}\n"
-        f"风格偏好：{', '.join(state.style_preferences) or '暂无'}\n"
-        f"当前审稿：{state.editor_decision} / {state.quality_score}\n"
-        f"大纲：{'已有' if state.outline else '暂无'} -> {store.outline_path(state.project_id)}"
-    )
-    store.save_state(state)
-    return state.to_dict()
-
-
-
-
-def build_outline_director_prompt(state: NovelState) -> str:
-    template = load_prompt("director")
-    history = "\n".join(f"{msg['role']}: {msg['content']}" for msg in state.messages[-12:])
-    return (
-        f"{template.rstrip()}\n\n"
-        "## 输出格式\n"
-        "优先输出 JSON：action, intent, target, user_message, instruction, task_args, locked_constraints。大纲阶段动作可用 run_current_stage、advance_current_stage、answer_pending_questions、show_stage、ask_user。\n"
-        "请明确区分：新增修改意见、回答待确认问题、把剩余问题交给系统裁量并推进、仅查看状态。待确认问题不是必须逐项回答的阻塞项。只有用户明确要求进入/推进下一阶段，或明确锁定当前阶段并继续，才选择 advance_current_stage；不要因为句子里出现‘确定/确认/同意’就推进。\n\n"
-        "## 当前大纲共创状态\n"
-        f"项目：{state.project_id}\n"
-        f"标题：{state.title}\n"
-        f"创意：{state.idea or '暂无'}\n"
-        f"当前大纲：{'已有' if state.outline else '暂无'}\n"
-        f"大纲版本数：{len(state.outline_versions)}\n"
-        f"锁定约束：{', '.join(state.locked_constraints) or '暂无'}\n"
-        f"风格偏好：{', '.join(state.style_preferences) or '暂无'}\n"
-        f"参考简报：{'已有' if state.reference_brief else '暂无'}\n"
-        f"检索上下文：{'已有' if state.retrieval_context else '暂无'}\n"
-        f"检索查询：{state.retrieval_query or '暂无'}\n"
-        f"原作不确定点：{', '.join(state.research_uncertainties) or '暂无'}\n"
-        f"修订要求：{state.revision_instruction or '暂无'}\n"
-        f"编辑结论：{state.editor_decision}\n"
-        f"质量分：{state.quality_score}\n"
-        f"active_workflow：{state.active_workflow or 'none'}\n"
-        f"outline_stage：{state.outline_stage}\n"
-        f"outline_stage_status：{state.outline_stage_status}\n"
-        f"pending_questions：{json.dumps(state.pending_questions, ensure_ascii=False)}\n"
-        f"pending_question：{state.pending_question or '暂无'}\n\n"
-        f"## 最近对话\n{history or '暂无'}\n\n"
-        f"最新用户输入：{state.user_request}\n"
-    )
-
-
 def build_outline_prompt(state: NovelState, prompt_name: str) -> str:
     template = load_prompt(prompt_name)
     versions = "\n\n".join(
@@ -1599,100 +1521,9 @@ def format_retrieval_sources(sources: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def parse_outline_director_output(output: str) -> dict:
-    parsed = parse_outline_json_object(output)
-    if parsed:
-        action = str(parsed.get("action") or "ask_user").strip().lower()
-        action = normalize_outline_director_action(action)
-        task_args = parsed.get("task_args") if isinstance(parsed.get("task_args"), dict) else {}
-        return {
-            "action": action,
-            "target": str(parsed.get("target") or "outline").strip().lower(),
-            "intent": str(parsed.get("intent") or "answer").strip().lower(),
-            "message": str(parsed.get("user_message") or parsed.get("message") or "我会继续推进大纲共创。").strip(),
-            "instruction": str(parsed.get("instruction") or task_args.get("instruction") or "").strip(),
-            "locked_constraints": normalize_outline_str_list(parsed.get("locked_constraints", [])),
-            "style_preferences": normalize_outline_str_list(parsed.get("style_preferences", [])),
-            "chapter": None,
-        }
-
-    action = field_value(output, "ACTION").lower() or "ask_user"
-    action = normalize_outline_director_action(action)
-    intent = field_value(output, "INTENT").lower() or "answer"
-    target = field_value(output, "TARGET").lower() or "unknown"
-    chapter = None
-    chapter_text = field_value(output, "CHAPTER")
-    if chapter_text:
-        match = re.search(r"\d+", chapter_text)
-        if match:
-            chapter = max(1, int(match.group(0)))
-    return {
-        "action": action,
-        "target": target,
-        "intent": intent,
-        "message": field_value(output, "MESSAGE") or "我会继续推进大纲共创。",
-        "instruction": field_value(output, "INSTRUCTION"),
-        "locked_constraints": split_csv(field_value(output, "LOCKED_CONSTRAINTS")),
-        "style_preferences": split_csv(field_value(output, "STYLE_PREFERENCES")),
-        "chapter": chapter,
-    }
-
-
-def normalize_outline_director_action(action: str) -> str:
-    if action == "plan_outline":
-        action = "generate_outline"
-    if action in {"run_current_stage", "answer_pending_questions"}:
-        action = "revise_outline"
-    if action == "advance_current_stage":
-        action = "advance_outline_stage"
-    if action == "show_stage":
-        action = "show_outline_stage"
-    return action if action in OUTLINE_ACTIONS else "ask_user"
-
-
-def parse_outline_json_object(output: str) -> dict:
-    text = output.strip()
-    if text.startswith("```"):
-        text = text.strip("`")
-        if text.lower().startswith("json"):
-            text = text[4:].strip()
-    try:
-        value = json.loads(text)
-    except json.JSONDecodeError:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start < 0 or end <= start:
-            return {}
-        try:
-            value = json.loads(text[start : end + 1])
-        except json.JSONDecodeError:
-            return {}
-    return value if isinstance(value, dict) else {}
-
-
-def normalize_outline_str_list(value) -> list[str]:
-    if isinstance(value, str):
-        return split_csv(value)
-    if not isinstance(value, list):
-        return []
-    return [str(item).strip() for item in value if str(item).strip()]
-
-
 def field_value(output: str, name: str) -> str:
     match = re.search(rf"^{name}:[ \t]*(.*)$", output, re.IGNORECASE | re.MULTILINE)
     return match.group(1).strip() if match else ""
-
-
-def split_csv(value: str) -> list[str]:
-    return [item.strip() for item in re.split(r"[,，]", value) if item.strip()]
-
-
-def add_unique_items(target: list[str], items: list[str]) -> None:
-    for item in items:
-        if item and item not in target:
-            target.append(item)
-
-
 
 
 def parse_status_score(text: str) -> tuple[str, int]:

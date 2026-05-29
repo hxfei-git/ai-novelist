@@ -8,24 +8,6 @@ from ai_novelist.outline.stage_contracts import OUTLINE_STAGES
 from ai_novelist.state import NovelState
 
 
-OUTLINE_ACTIONS = {
-    "ask_user",
-    "propose_directions",
-    "worldbuilding",
-    "generate_outline",
-    "review_outline",
-    "revise_outline",
-    "compare_versions",
-    "persist_outline",
-    "show_status",
-    "show_outline",
-    "run_outline_stage",
-    "advance_outline_stage",
-    "show_outline_stage",
-    "stop",
-}
-
-
 def _parse_compact_numbered_answers(text: str) -> dict[int, str]:
     matches = list(re.finditer(r"(?<!\d)(?P<index>\d+)(?:[.、)]\s*|(?=\D))", text))
     answers: dict[int, str] = {}
@@ -40,21 +22,6 @@ def _parse_compact_numbered_answers(text: str) -> dict[int, str]:
 
 def negates_stage_advance(text: str) -> bool:
     return any(marker in text for marker in ("不要进入下一阶段", "不进入下一阶段", "先不进入下一阶段", "暂不进入下一阶段", "别进入下一阶段", "不要推进", "先不推进", "暂不推进"))
-
-
-def should_defer_stage_confirmation_to_director(text: str, state: NovelState) -> bool:
-    if state.active_workflow != "outline" or state.outline_stage_status != "options_ready":
-        return False
-    if _parse_compact_numbered_answers(text):
-        return False
-    if any(marker in text for marker in ("查看", "展示", "看一下", "看下", "显示")):
-        return False
-    if negates_stage_advance(text):
-        return False
-    transition_markers = ("下一阶段", "进入下一阶段", "推进到下一阶段", "进入后续阶段", "推进后续阶段")
-    lock_and_continue = any(marker in text for marker in ("锁定当前阶段", "锁定本阶段", "通过当前阶段", "通过本阶段")) and any(marker in text for marker in ("继续", "进入", "推进", "下一阶段"))
-    delegated_advance = any(marker in text for marker in ("你决定", "由你决定", "交给你", "默认处理", "你来定")) and any(marker in text for marker in ("继续", "进入", "推进", "下一阶段"))
-    return any(marker in text for marker in transition_markers) or lock_and_continue or delegated_advance
 
 
 def should_run_outline_stage(text: str, state: NovelState) -> bool:
@@ -142,22 +109,6 @@ def detect_stage_reference(text: str) -> str | None:
     return None
 
 
-def stage_action_from_director(action: str, user_text: str, state: NovelState) -> str:
-    if action in {"propose_directions", "worldbuilding", "generate_outline", "review_outline", "revise_outline", "compare_versions"}:
-        if action == "worldbuilding":
-            state.outline_stage = "worldbuilding"
-        elif action == "review_outline":
-            state.outline_stage = "review_lock"
-        return "run_outline_stage"
-    if action == "persist_outline":
-        return "advance_outline_stage" if state.outline_stage != "done" else "persist_outline"
-    if action == "show_outline":
-        return "show_outline_stage" if state.active_workflow == "outline" and not state.outline.strip() else "show_outline"
-    if is_short_stage_confirmation(user_text) or delegates_stage_decision(user_text):
-        return "advance_outline_stage"
-    return action
-
-
 def stage_number(stage: str) -> int:
     return OUTLINE_STAGES.index(stage) + 1 if stage in OUTLINE_STAGES else len(OUTLINE_STAGES)
 
@@ -171,15 +122,6 @@ def next_outline_stage(stage: str) -> str | None:
     if index + 1 >= len(OUTLINE_STAGES):
         return None
     return OUTLINE_STAGES[index + 1]
-
-
-def route_after_outline_director(data: dict) -> str:
-    action = data.get("director_action", "")
-    if action in OUTLINE_ACTIONS:
-        return action if action != "stop" else "end"
-    if action in {"plan_outline", "generate_outline"}:
-        return "generate_outline"
-    return "ask_user"
 
 
 def route_after_human_feedback(data: dict) -> str:

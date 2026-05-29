@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from ai_novelist import graph_outline
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore
@@ -85,3 +87,16 @@ def test_graph_outline_chapter_volume_helpers_remain_runtime_globals() -> None:
     assert graph_outline.chapter_outline_has_next_volume({"current_volume_index": 1, "total_volumes": 2})
     assert callable(graph_outline.normalize_generated_volume_outline)
     assert callable(graph_outline.merge_chapter_outline_volumes)
+
+
+def test_outline_graph_no_longer_loads_deleted_director_prompt():
+    source = Path("src/ai_novelist/graph_outline.py").read_text(encoding="utf-8")
+    assert 'load_prompt("director")' not in source
+    assert "def build_outline_director_prompt" not in source
+
+
+def test_outline_routing_no_longer_exports_director_only_routes():
+    source = Path("src/ai_novelist/outline_graph/routing.py").read_text(encoding="utf-8")
+    assert "route_after_outline_director" not in source
+    assert "stage_action_from_director" not in source
+    assert "should_defer_stage_confirmation_to_director" not in source
