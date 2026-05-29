@@ -43,13 +43,11 @@ from ai_novelist.outline_graph.routing import (
     delegates_stage_decision,
     detect_stage_reference,
     is_final_outline_save_request,
-    is_final_outline_view_request,
     is_lock_request,
     is_revision_request,
     is_short_stage_confirmation,
     is_stage_confirmation,
     is_stage_switch_request,
-    is_stage_view_request,
     negates_stage_advance,
     next_outline_stage,
     route_after_human_feedback,
@@ -1148,24 +1146,6 @@ def lock_previous_stage_artifacts(state: NovelState, stage: str) -> None:
             artifact["status"] = "locked"
             artifact.setdefault("locked_at", datetime.now(UTC).isoformat(timespec="seconds"))
             state.outline_stage_artifacts[previous_stage] = artifact
-
-def show_outline_stage_node(data: dict, store: LocalStore) -> dict:
-    state = NovelState.from_dict(data)
-    stage = str(state.director_task_args.get("stage") or detect_stage_reference(state.user_request) or state.outline_stage)
-    artifact = state.outline_stage_artifacts.get(stage)
-    if artifact and str(artifact.get("synthesis", "")).strip():
-        state.director_message = format_stage_markdown(artifact)
-    else:
-        saved = store.load_outline_artifact(state.project_id, stage) or store.load_outline_stage(state.project_id, stage)
-        if saved:
-            state.director_message = saved
-        elif stage == "worldbuilding" and state.worldbuilding.strip():
-            state.director_message = "# 世界观设定\n\n" + state.worldbuilding.strip()
-        else:
-            state.director_message = f"{STAGE_LABELS.get(stage, stage)}阶段还没有产物。"
-    store.save_state(state)
-    return state.to_dict()
-
 
 
 def build_stage_pending_answer_instruction(state: NovelState, text: str) -> str:

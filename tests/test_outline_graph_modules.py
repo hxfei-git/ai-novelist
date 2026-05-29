@@ -98,6 +98,7 @@ def test_outline_graph_no_longer_loads_deleted_director_prompt():
         "def normalize_outline_director_action",
         "def outline_show_outline_node",
         "def outline_show_status_node",
+        "def show_outline_stage_node",
     ]
     for helper in deleted_helpers:
         assert helper not in source
@@ -108,3 +109,5 @@ def test_outline_routing_no_longer_exports_director_only_routes():
     assert "route_after_outline_director" not in source
     assert "stage_action_from_director" not in source
     assert "should_defer_stage_confirmation_to_director" not in source
+    assert "is_final_outline_view_request" not in source
+    assert "is_stage_view_request" not in source

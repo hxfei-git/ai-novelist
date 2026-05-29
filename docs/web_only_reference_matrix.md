@@ -80,5 +80,5 @@ The `output_contracts` candidate has been removed after verification. Remaining 
 | Prompt registry | `tests/test_prompt_loader.py` verifies registered files, missing files, and orphan files | retain | registry is the allowed prompt boundary |
 | `AUTHOR_CRAFT_POLICY_PROMPTS` stale names | missing prompt names were removed from the policy set | delete | keep policy set subset of registry |
 | Inline outline agents | emitted from `outline_graph/prompts.py`, `outline_graph/repair.py`, and `graph_outline.py` | retain | not prompt files; covered by `INLINE_AGENT_NAMES` |
-| Old Director agent | legacy scan still finds `load_prompt("director")` and mock Director handling, but current Web action tests and focused route modules do not call the old Director route | delete | remove mock branch and unused prompt builder |
-| Old research/export/finalize/show mock branches | legacy scan finds research/export/finalize/show branches in the mock adapter and old outline helper names, not active Web route calls | delete | remove mock branches and old routing helpers |
+| Old Director agent | current scans find only deletion guards/tests and the explicit mock denylist; no prompt load or active branch remains | deleted | keep guard tests and denylist only to prevent reintroduction |
+| Old research/export/finalize/show branches | current scans find old show/view helper names only in deletion guards; no active route or mock branch remains | deleted | keep deletion guards; do not restore compatibility branches |

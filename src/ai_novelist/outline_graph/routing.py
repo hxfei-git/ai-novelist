@@ -31,10 +31,6 @@ def should_run_outline_stage(text: str, state: NovelState) -> bool:
     return any(marker in text for marker in markers)
 
 
-def is_final_outline_view_request(text: str) -> bool:
-    lowered = text.strip().lower()
-    return lowered in {"show outline", "查看大纲", "当前大纲"} or any(marker in text for marker in ("查看大纲", "当前大纲", "看一下大纲", "展示大纲"))
-
 
 def is_final_outline_save_request(text: str) -> bool:
     lowered = text.strip().lower()
@@ -84,9 +80,6 @@ def answers_stage_pending_questions(text: str) -> bool:
 def is_revision_request(text: str) -> bool:
     return any(marker in text for marker in ("修改", "调整", "重做", "重新", "不要", "更", "太", "强化", "补充"))
 
-
-def is_stage_view_request(text: str) -> bool:
-    return any(marker in text for marker in ("查看", "看一下", "展示", "显示"))
 
 
 def is_stage_switch_request(text: str) -> bool:
