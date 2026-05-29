@@ -296,7 +296,7 @@ def test_outline_review_uses_three_choice_decision_board() -> None:
     assert "selected_issue_ids" not in apply_block
 
 
-def test_outline_review_apply_refreshes_updated_stage_after_success() -> None:
+def test_outline_review_apply_stays_on_review_after_success() -> None:
     source = read_main()
     api_source = read_api()
     stream_block = api_source[api_source.index("async function streamAction"):]
@@ -305,13 +305,51 @@ def test_outline_review_apply_refreshes_updated_stage_after_success() -> None:
     assert "let donePayload" in stream_block
     assert "eventLine?.slice(7) === 'done'" in stream_block
     assert "return donePayload" in stream_block
-    assert "const applyResult = await streamAction" in apply_block
-    assert "updated_stages" in apply_block
-    assert "setTopSection('outline')" in apply_block
-    assert "setActiveStage(targetStage)" in apply_block
-    assert "targetStage === activeStage" in apply_block
-    assert "await loadStage(targetStage)" in apply_block
-    assert "setOutlineStageView('edit')" in apply_block
+    assert "await streamAction" in apply_block
+    assert "setOutlineReview((currentReview)" in apply_block
+    assert "status: 'applied'" in apply_block
+    assert "applied: true" in apply_block
+    assert "await loadProjectState()" in apply_block
+    assert "await refreshStages()" in apply_block
+    assert "await loadLatestOutlineReview()" in apply_block
+    assert "showBackgroundError(refreshError)" in apply_block
+    assert "setOutlineStageView('edit')" not in apply_block
+    assert "setActiveStage(targetStage)" not in apply_block
+    assert "setTopSection('outline')" not in apply_block
+
+
+def test_outline_review_type_exposes_applied_metadata() -> None:
+    source = read_types()
+
+    assert "applied?: boolean" in source
+    assert "applied_at?: string" in source
+    assert "applied_path?: string" in source
+    assert "updated_stages?: string[]" in source
+    assert "skipped_stages?: string[]" in source
+
+
+def test_outline_review_workspace_renders_apply_completion_state() -> None:
+    source = read_workspace("review.tsx")
+
+    assert "LoaderCircle" in source
+    assert "const reviewApplied" in source
+    assert "review?.applied === true" in source
+    assert "review?.status === 'applied'" in source
+    assert "采纳完成" in source
+    assert "正在采纳" in source
+    assert "spin-icon" in source
+    assert "review-complete" in source
+    assert "!reviewApplied && (review?.repair_suggestions || []).length > 0" in source
+    assert "disabled={running || applying || reviewApplied || review?.decision === 'stop'}" in source
+
+
+def test_outline_review_apply_spinner_styles_exist() -> None:
+    styles = read_styles()
+
+    assert "@keyframes review-spin" in styles
+    assert ".spin-icon" in styles
+    assert ".review-complete" in styles
+    assert ".apply-loading" in styles
 
 
 def test_right_progress_has_fixed_scroll_area() -> None:

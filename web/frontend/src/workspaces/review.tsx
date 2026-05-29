@@ -1,4 +1,4 @@
-import { Check, ListChecks, X } from 'lucide-react';
+import { Check, ListChecks, LoaderCircle, X } from 'lucide-react';
 import type {
   OutlineRepairDecision,
   OutlineRepairDecisionValue,
@@ -52,6 +52,7 @@ export function OutlineReviewWorkspace({
   onDismiss: () => void;
 }) {
   const hasReview = Boolean(review);
+  const reviewApplied = review?.applied === true || review?.status === 'applied';
   return (
     <section className="review-workspace outline-review-panel">
       <header className="toolbar">
@@ -72,13 +73,22 @@ export function OutlineReviewWorkspace({
               <small>{review?.status || 'reviewed'} · {review?.decision || 'revise'} · {review?.score ?? 0}</small>
             </div>
             <div className="review-buttons">
-              <button onClick={onDismiss} disabled={running || applying}><X size={16} />不采纳</button>
-              <button onClick={onApply} disabled={running || applying || review?.decision === 'stop'}><Check size={16} />采纳选中项</button>
+              <button onClick={onDismiss} disabled={running || applying || reviewApplied}><X size={16} />不采纳</button>
+              <button onClick={onApply} disabled={running || applying || reviewApplied || review?.decision === 'stop'}>
+                {applying ? <LoaderCircle className="spin-icon" size={16} /> : <Check size={16} />}
+                {applying ? '正在采纳' : reviewApplied ? '采纳完成' : '采纳选中项'}
+              </button>
             </div>
           </div>
           <p>{review?.notes}</p>
           <small>参考大纲：{review?.source_outline_summary}</small>
-          {(review?.repair_suggestions || []).length > 0 && (
+          {reviewApplied && (
+            <div className="review-complete">
+              <Check size={16} />
+              <span>采纳完成</span>
+            </div>
+          )}
+          {!reviewApplied && (review?.repair_suggestions || []).length > 0 && (
             <OutlineRepairDecisionBoard
               suggestions={review?.repair_suggestions || []}
               decisions={outlineRepairDecisions}
@@ -92,7 +102,7 @@ export function OutlineReviewWorkspace({
           <p>点击“开始审查”生成大纲审查意见。</p>
         </div>
       )}
-      {applying && <div className="loading">大纲审查建议正在应用...</div>}
+      {applying && <div className="loading apply-loading"><LoaderCircle className="spin-icon" size={16} />正在采纳...</div>}
     </section>
   );
 }

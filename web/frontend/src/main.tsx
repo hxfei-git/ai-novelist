@@ -458,22 +458,21 @@ function App() {
     setOutlineReviewApplying(true);
     pushLog({ label: '大纲审查应用', model: '', elapsed: '', tokens: '', context: '', status: 'started' });
     try {
-      const applyResult = await streamAction(
+      await streamAction(
         `/api/projects/${projectId}/outline/review/${outlineReview.run_id}/apply`,
         { decisions },
         (line) => pushLog(line),
       );
-      await loadLatestOutlineReview();
-      await loadProjectState();
-      await refreshStages();
-      const updatedStages = Array.isArray((applyResult as { updated_stages?: unknown })?.updated_stages)
-        ? (applyResult as { updated_stages: unknown[] }).updated_stages.filter((stage): stage is string => typeof stage === 'string')
-        : [];
-      const targetStage = updatedStages.find((stage) => visibleStages.some((item) => item.stage === stage)) || activeStage;
-      setTopSection('outline');
-      setActiveStage(targetStage);
-      setOutlineStageView('edit');
-      if (targetStage === activeStage) await loadStage(targetStage);
+      setOutlineReview((currentReview) => (
+        currentReview?.run_id === outlineReview.run_id ? { ...currentReview, status: 'applied', applied: true } : currentReview
+      ));
+      try {
+        await loadProjectState();
+        await refreshStages();
+        await loadLatestOutlineReview();
+      } catch (refreshError) {
+        showBackgroundError(refreshError);
+      }
       pushLog({ label: '大纲审查应用', model: '', elapsed: '', tokens: '', context: '', status: 'completed' });
     } catch (error) {
       showError(error);

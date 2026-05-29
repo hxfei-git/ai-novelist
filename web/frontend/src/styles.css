@@ -130,6 +130,13 @@ nav small { color: #5c6f7c; font-size: 11px; }
 .outline-review-report { gap: 6px; }
 .outline-review-report strong { line-height: 1.45; }
 .outline-review-report small { color: #647582; line-height: 1.45; }
+.apply-loading { display: inline-flex; align-items: center; gap: 8px; }
+.review-complete { display: inline-flex; align-items: center; gap: 8px; width: fit-content; padding: 8px 10px; border: 1px solid #bbf7d0; border-radius: 6px; background: #f0fdf4; color: #166534; font-weight: 700; }
+.spin-icon { animation: review-spin 1s linear infinite; }
+@keyframes review-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
 .outline-repair-table { display: flex; flex-direction: column; gap: 0; border: 1px solid #d9e0e7; border-radius: 6px; overflow: hidden; }
 .outline-repair-row { display: grid; grid-template-columns: 64px minmax(180px, 0.9fr) minmax(220px, 1.1fr); gap: 10px; align-items: start; padding: 9px 10px; border-top: 1px solid #e5ebf0; background: #ffffff; }
 .outline-repair-row:first-child { border-top: 0; }

@@ -255,7 +255,7 @@ Backend Task 1 status: completed on 2026-05-29 with a follow-up spec correction.
 - Modify: `web/frontend/src/workspaces/review.tsx`
 - Modify: `web/frontend/src/styles.css`
 
-- [ ] **Step 1: Add frontend RED tests**
+- [x] **Step 1: Add frontend RED tests**
 
 In `tests/test_frontend_review_tabs_structure.py`, replace `test_outline_review_apply_refreshes_updated_stage_after_success()` with:
 
@@ -319,7 +319,7 @@ def test_outline_review_apply_spinner_styles_exist() -> None:
     assert ".apply-loading" in styles
 ```
 
-- [ ] **Step 2: Run frontend RED tests**
+- [x] **Step 2: Run frontend RED tests**
 
 Run:
 
@@ -329,7 +329,7 @@ Run:
 
 Expected: tests fail because the frontend still navigates to edit view, `OutlineReview` lacks applied metadata, and the workspace has no terminal completion UI.
 
-- [ ] **Step 3: Extend the OutlineReview type**
+- [x] **Step 3: Extend the OutlineReview type**
 
 In `web/frontend/src/types.ts`, update `OutlineReview` to include optional applied metadata:
 
@@ -355,7 +355,7 @@ export type OutlineReview = {
 };
 ```
 
-- [ ] **Step 4: Keep apply flow on the review view**
+- [x] **Step 4: Keep apply flow on the review view**
 
 In `web/frontend/src/main.tsx`, replace the success body inside `applyOutlineReview()` with this logic:
 
@@ -380,7 +380,7 @@ In `web/frontend/src/main.tsx`, replace the success body inside `applyOutlineRev
 
 Remove the old `applyResult`, `updatedStages`, `targetStage`, `setTopSection('outline')`, `setActiveStage(targetStage)`, `setOutlineStageView('edit')`, and `loadStage(targetStage)` logic from this function.
 
-- [ ] **Step 5: Render applying and applied states**
+- [x] **Step 5: Render applying and applied states**
 
 In `web/frontend/src/workspaces/review.tsx`, change the import line to:
 
@@ -429,7 +429,7 @@ Change the applying loading line at the bottom of the component to:
       {applying && <div className="loading apply-loading"><LoaderCircle className="spin-icon" size={16} />正在采纳...</div>}
 ```
 
-- [ ] **Step 6: Add spinner and completion styles**
+- [x] **Step 6: Add spinner and completion styles**
 
 In `web/frontend/src/styles.css`, add these rules near the existing review styles:
 
@@ -443,7 +443,7 @@ In `web/frontend/src/styles.css`, add these rules near the existing review style
 }
 ```
 
-- [ ] **Step 7: Run frontend target tests and build**
+- [x] **Step 7: Run frontend target tests and build**
 
 Run:
 
@@ -454,12 +454,12 @@ npm --prefix web/frontend run build
 
 Expected: the selected frontend structure tests pass, and the Vite build passes with only the known Vite CJS Node API deprecation warning if that warning appears.
 
-- [ ] **Step 8: Commit frontend change**
+- [x] **Step 8: Commit frontend change with docs**
 
 Run:
 
 ```bash
-git add web/frontend/src/types.ts web/frontend/src/main.tsx web/frontend/src/workspaces/review.tsx web/frontend/src/styles.css tests/test_frontend_review_tabs_structure.py
+git add web/frontend/src/types.ts web/frontend/src/main.tsx web/frontend/src/workspaces/review.tsx web/frontend/src/styles.css tests/test_frontend_review_tabs_structure.py docs/IMPLEMENTATION_PLAN.md docs/SESSION_SUMMARY.md docs/superpowers/plans/2026-05-29-outline-review-apply-completion.md
 git commit -m "fix: keep outline review apply in place"
 ```
 

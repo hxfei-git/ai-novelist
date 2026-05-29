@@ -113,6 +113,11 @@ export type OutlineReview = {
   run_id: string;
   created_at: string;
   status: string;
+  applied?: boolean;
+  applied_at?: string;
+  applied_path?: string;
+  updated_stages?: string[];
+  skipped_stages?: string[];
   decision: string;
   score: number;
   summary: string;
