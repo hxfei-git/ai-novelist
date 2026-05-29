@@ -83,6 +83,17 @@ def render_chapter_outline_review_markdown(report: dict[str, Any]) -> str:
     ]
     return '\n'.join(lines).rstrip() + '\n'
 
+def mark_chapter_outline_review_applied(store: LocalStore, project_id: str, report: dict[str, Any], path: Path) -> dict[str, Any]:
+    updated = dict(report)
+    updated["status"] = "applied"
+    updated["applied"] = True
+    updated["applied_at"] = datetime.now(UTC).isoformat(timespec="seconds")
+    updated["applied_path"] = path.relative_to(store.project_dir(project_id)).as_posix()
+    report_path, markdown_path = chapter_outline_review_report_paths(store, project_id, str(updated.get("run_id") or ""))
+    report_path.write_text(json.dumps(updated, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    markdown_path.write_text(render_chapter_outline_review_markdown(updated), encoding="utf-8")
+    return updated
+
 def chapter_outline_workspace_payload(
     store: LocalStore,
     project_id: str,
@@ -278,6 +289,22 @@ def apply_chapter_outline_review(store: LocalStore, adapter: AgentAdapter, proje
     emit = progress or (lambda _stage, _message: None)
     report = load_chapter_outline_review_report(store, project_id, run_id)
     state = store.load_state(project_id)
+    artifact_path = store.outline_artifact_path(project_id, 'chapter_outline')
+    default_applied_path = artifact_path.relative_to(store.project_dir(project_id)).as_posix()
+    if report.get('applied') is True or str(report.get('status') or '').strip().lower() == 'applied':
+        applied_path = str(report.get('applied_path') or default_applied_path)
+        return {
+            'project_id': project_id,
+            'run_id': run_id,
+            'status': str(report.get('status') or 'applied'),
+            'applied': True,
+            'already_applied': True,
+            'applied_at': str(report.get('applied_at') or ''),
+            'applied_path': applied_path,
+            'path': applied_path,
+            'report': report,
+            'version_count': len(state.outline_versions),
+        }
     source_outline = str(report.get('source_outline') or '').strip() or chapter_outline_review_source_text(state, store)
     if not source_outline:
         raise LocalStoreError('当前没有可应用的章节大纲审查结果')
@@ -307,22 +334,38 @@ def apply_chapter_outline_review(store: LocalStore, adapter: AgentAdapter, proje
     store.save_outline_artifact(state, 'chapter_outline', source_outline)
     store.save_outline_stage(state, 'chapter_outline', source_outline)
     store.save_state(state)
+    baseline_content = source_outline.rstrip() + '\n'
     emit('ChapterOutlineReview', '正在应用章节大纲审查建议...')
     revised = NovelState.from_dict(run_outline_stage_node(state.to_dict(), adapter, store, progress or (lambda _stage, _message: None)))
+    revised_artifact = dict(revised.outline_stage_artifacts.get('chapter_outline') or {})
+    synthesis = str(revised_artifact.get('synthesis') or '').strip()
+    if synthesis:
+        artifact_content = synthesis.rstrip() + '\n'
+        store.save_outline_artifact(revised, 'chapter_outline', artifact_content)
+        store.save_outline_stage(revised, 'chapter_outline', artifact_content)
+    else:
+        artifact_content = store.load_outline_artifact(project_id, 'chapter_outline') if artifact_path.exists() else ''
+        if artifact_content and artifact_content != baseline_content:
+            store.save_outline_stage(revised, 'chapter_outline', artifact_content)
     revised.outline_review_applied_run_id = run_id
     revised.outline_review_run_id = run_id
-    revised.outline_review_status = str(report.get('status') or 'reviewed')
+    revised.outline_review_status = 'applied'
     revised.outline_review_score = int(report.get('score') or 0)
     revised.outline_review_summary = str(report.get('summary') or '')
-    revised.outline_review_report_path = report_path = chapter_outline_review_report_paths(store, project_id, run_id)[0].relative_to(store.project_dir(project_id)).as_posix()
+    revised.outline_review_report_path = chapter_outline_review_report_paths(store, project_id, run_id)[0].relative_to(store.project_dir(project_id)).as_posix()
     revised.review_status = 'approved'
-    revised.director_message = f'已采纳章节大纲审查建议并保存：{store.outline_artifact_path(project_id, "chapter_outline")}'
+    revised.director_message = f'已采纳章节大纲审查建议并保存：{artifact_path}'
     store.save_state(revised)
+    applied_report = mark_chapter_outline_review_applied(store, project_id, report, artifact_path)
     emit('ChapterOutlineReview', '章节大纲审查建议已应用并保存。')
     return {
         'project_id': project_id,
         'run_id': run_id,
+        'status': applied_report.get('status'),
         'applied': True,
-        'path': store.outline_artifact_path(project_id, 'chapter_outline').relative_to(store.project_dir(project_id)).as_posix(),
+        'applied_at': applied_report.get('applied_at'),
+        'applied_path': applied_report.get('applied_path'),
+        'path': default_applied_path,
+        'report': applied_report,
         'version_count': len(revised.outline_versions),
     }

@@ -8,6 +8,7 @@ from pathlib import Path
 from threading import Event, Thread
 
 from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError, AgentCallOptions
+from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore, LocalStoreError
 from ai_novelist.web import (
     chapter_actions,
@@ -742,6 +743,97 @@ def test_latest_chapter_outline_review_report_reads_saved_report(tmp_path: Path)
     latest = chapter_outline_actions.latest_chapter_outline_review_report(store, "web-demo")
 
     assert latest["run_id"] == "run-1"
+
+
+def test_apply_chapter_outline_review_marks_report_applied_and_updates_artifact(monkeypatch, tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+    state.outline_stage_artifacts["chapter_outline"] = {
+        "stage": "chapter_outline",
+        "status": "options_ready",
+        "metadata": {"total_volumes": 1, "current_volume_index": 1, "completed_volumes": []},
+    }
+    store.save_outline_artifact(state, "chapter_outline", "## 第一卷\n\n### 第 1 章：旧章纲\n")
+    store.save_outline_stage(state, "chapter_outline", "## 第一卷\n\n### 第 1 章：旧章纲\n")
+    store.save_state(state)
+    report_path, _ = chapter_outline_actions.chapter_outline_review_report_paths(store, "web-demo", "run-1")
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(
+            {
+                "project_id": "web-demo",
+                "run_id": "run-1",
+                "status": "reviewed",
+                "decision": "revise",
+                "score": 80,
+                "summary": "需要修正第 1 章",
+                "notes": "第 1 章目标不清。",
+                "revision_instruction": "把第 1 章目标改清楚。",
+                "source_outline": "## 第一卷\n\n### 第 1 章：旧章纲\n",
+                "source_outline_summary": "旧章纲",
+                "repair_suggestions": [
+                    {"id": "issue-1", "message": "目标不清", "recommendation": "明确目标", "selected": True}
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_run(data: dict, adapter: AgentAdapter, local_store: LocalStore, progress=None) -> dict:
+        updated = NovelState.from_dict(data)
+        updated.outline_stage_artifacts["chapter_outline"]["synthesis"] = "## 第一卷\n\n### 第 1 章：目标明确\n"
+        local_store.save_outline_artifact(updated, "chapter_outline", "## 第一卷\n\n### 第 1 章：目标明确\n")
+        return updated.to_dict()
+
+    monkeypatch.setattr(chapter_outline_actions, "run_outline_stage_node", fake_run)
+    result = chapter_outline_actions.apply_chapter_outline_review(
+        store, DummyAdapter(), "web-demo", "run-1", selected_issue_ids=["issue-1"]
+    )
+
+    assert result["applied"] is True
+    applied_report = chapter_outline_actions.load_chapter_outline_review_report(store, "web-demo", "run-1")
+    assert applied_report["status"] == "applied"
+    assert applied_report["applied"] is True
+    assert "目标明确" in store.load_outline_artifact("web-demo", "chapter_outline")
+
+
+def test_apply_chapter_outline_review_is_idempotent_after_report_applied(monkeypatch, tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+    state.outline_stage_artifacts["chapter_outline"] = {
+        "stage": "chapter_outline",
+        "status": "options_ready",
+        "metadata": {"total_volumes": 1, "current_volume_index": 1, "completed_volumes": []},
+    }
+    store.save_outline_artifact(state, "chapter_outline", "## 第一卷\n\n### 第 1 章：已应用\n")
+    store.save_state(state)
+    report_path, markdown_path = chapter_outline_actions.chapter_outline_review_report_paths(store, "web-demo", "run-1")
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report = {
+        "project_id": "web-demo",
+        "run_id": "run-1",
+        "status": "applied",
+        "applied": True,
+        "applied_at": "2026-05-29T00:00:00+00:00",
+        "applied_path": "outline/chapter_outline.md",
+        "decision": "revise",
+        "source_outline": "## 第一卷\n\n### 第 1 章：已应用\n",
+    }
+    report_path.write_text(json.dumps(report, ensure_ascii=False), encoding="utf-8")
+    markdown_path.write_text(chapter_outline_actions.render_chapter_outline_review_markdown(report), encoding="utf-8")
+
+    def fail_run(data: dict, adapter: AgentAdapter, local_store: LocalStore, progress=None) -> dict:
+        raise AssertionError("already-applied report should not invoke model work")
+
+    monkeypatch.setattr(chapter_outline_actions, "run_outline_stage_node", fail_run)
+    result = chapter_outline_actions.apply_chapter_outline_review(store, DummyAdapter(), "web-demo", "run-1")
+
+    assert result["applied"] is True
+    assert result["already_applied"] is True
+    assert result["status"] == "applied"
+    assert result["applied_at"] == "2026-05-29T00:00:00+00:00"
+    assert result["applied_path"] == "outline/chapter_outline.md"
 
 
 def test_extract_stage_pending_questions_from_markdown_filters_status_lines() -> None:
