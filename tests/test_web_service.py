@@ -77,15 +77,11 @@ class CapturingOutlineReviewAdapter(AgentAdapter):
 class CountingOutlineApplyAdapter(AgentAdapter):
     def __init__(self) -> None:
         self.reviser_calls = 0
-        self.comparator_calls = 0
 
     def complete(self, prompt: str, workspace: Path, options: AgentCallOptions | None = None) -> str:
         if "outline_reviser" in prompt:
             self.reviser_calls += 1
             return "# 最终锁定总大纲\n\n## 方向定位\n幂等采纳后的大纲。"
-        if "version_comparator" in prompt:
-            self.comparator_calls += 1
-            return "# 大纲版本比较\n\n幂等采纳只运行一次。"
         return "{}"
 
 
@@ -865,13 +861,18 @@ def test_outline_review_apply_marks_latest_report_applied(tmp_path: Path) -> Non
     latest = service.latest_outline_review_report(store, "web-demo")
 
     assert applied["applied"] is True
+    assert applied["status"] == "applied"
+    assert applied["applied_at"]
+    assert applied["applied_path"] == "outline.md"
+    assert "direction" in applied["updated_stages"]
+    assert isinstance(applied["skipped_stages"], list)
     assert latest["run_id"] == report["run_id"]
     assert latest["status"] == "applied"
     assert latest["applied"] is True
-    assert latest["applied_at"]
+    assert latest["applied_at"] == applied["applied_at"]
     assert latest["applied_path"] == "outline.md"
-    assert "direction" in latest["updated_stages"]
-    assert isinstance(latest["skipped_stages"], list)
+    assert latest["updated_stages"] == applied["updated_stages"]
+    assert latest["skipped_stages"] == applied["skipped_stages"]
 
 
 def test_apply_outline_review_is_idempotent_after_report_applied(tmp_path: Path) -> None:
@@ -889,9 +890,12 @@ def test_apply_outline_review_is_idempotent_after_report_applied(tmp_path: Path)
     assert first["applied"] is True
     assert second["applied"] is True
     assert second["already_applied"] is True
+    assert second["status"] == "applied"
+    assert second["applied_at"]
+    assert second["applied_path"] == "outline.md"
     assert second["updated_stages"] == first["updated_stages"]
+    assert second["skipped_stages"] == first["skipped_stages"]
     assert adapter.reviser_calls == 1
-    assert adapter.comparator_calls == 1
 
 
 def test_outline_review_apply_persists_new_baseline_for_manual_rereview(monkeypatch, tmp_path: Path) -> None:

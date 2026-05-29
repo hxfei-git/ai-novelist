@@ -37,15 +37,11 @@ In `tests/test_web_service.py`, add this adapter below `CapturingOutlineReviewAd
 class CountingOutlineApplyAdapter(AgentAdapter):
     def __init__(self) -> None:
         self.reviser_calls = 0
-        self.comparator_calls = 0
 
     def complete(self, prompt: str, workspace: Path, options: AgentCallOptions | None = None) -> str:
         if "outline_reviser" in prompt:
             self.reviser_calls += 1
             return "# 最终锁定总大纲\n\n## 方向定位\n幂等采纳后的大纲。"
-        if "version_comparator" in prompt:
-            self.comparator_calls += 1
-            return "# 大纲版本比较\n\n幂等采纳只运行一次。"
         return "{}"
 ```
 
@@ -87,9 +83,11 @@ def test_apply_outline_review_is_idempotent_after_report_applied(tmp_path: Path)
     assert first["applied"] is True
     assert second["applied"] is True
     assert second["already_applied"] is True
+    assert second["status"] == "applied"
+    assert second["applied_at"]
+    assert second["applied_path"] == "outline.md"
     assert second["updated_stages"] == first["updated_stages"]
     assert adapter.reviser_calls == 1
-    assert adapter.comparator_calls == 1
 ```
 
 - [x] **Step 2: Run backend RED tests**
@@ -246,7 +244,7 @@ git commit -m "fix: mark outline review apply complete"
 ```
 
 
-Backend Task 1 status: completed on 2026-05-29. RED failed for missing persisted `applied` status and duplicate `already_applied`; target backend/API verification passed with 5 selected tests. The backend commit includes code, tests, and docs per repository policy.
+Backend Task 1 status: completed on 2026-05-29 with a follow-up spec correction. RED failed for missing persisted `applied` status and duplicate `already_applied`; follow-up RED failed for missing `applied_at`/`applied_path` on apply responses. Target backend/API verification passed with 5 selected tests. The backend commits include code, tests, and docs per repository policy.
 
 ## Task 2: Frontend Review Completion State
 

@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from ai_novelist.adapters.base import AgentAdapter, AgentAdapterError
+from ai_novelist.adapters.base import AgentAdapter
 from ai_novelist.graph_outline import (
     advance_outline_stage_node,
     compare_outline_versions_node,
@@ -17,7 +17,6 @@ from ai_novelist.graph_outline import (
     run_outline_stage_node,
 )
 from ai_novelist.outline.stage_contracts import STAGE_LABELS
-from ai_novelist.prompts import load_prompt
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore, LocalStoreError, summarize_text
 from ai_novelist.web.outline_service import (
@@ -42,26 +41,6 @@ from ai_novelist.web.outline_service import (
 
 ProgressFunc = Callable[[str, str], None]
 
-
-def compare_outline_versions_for_review_apply(
-    store: LocalStore,
-    adapter: AgentAdapter,
-    project_id: str,
-    source_outline: str,
-    revised_outline: str,
-) -> str:
-    prompt = (
-        f"{load_prompt('version_comparator').rstrip()}\n\n"
-        "## 旧版大纲\n"
-        f"{source_outline.strip() or '暂无'}\n\n"
-        "## 新版大纲\n"
-        f"{revised_outline.strip() or '暂无'}"
-    )
-    try:
-        comparison = adapter.complete(prompt, store.project_dir(project_id))
-    except AgentAdapterError:
-        return ""
-    return str(comparison or "").strip()
 
 
 def load_outline_stage_payload(store: LocalStore, project_id: str, stage: str) -> dict[str, Any]:
@@ -178,15 +157,19 @@ def apply_outline_review(
     if report.get("applied") is True or str(report.get("status") or "").strip().lower() == "applied":
         updated_stages = report.get("updated_stages")
         skipped_stages = report.get("skipped_stages")
+        applied_path = str(
+            report.get("applied_path")
+            or store.outline_path(project_id).relative_to(store.project_dir(project_id)).as_posix()
+        )
         return {
             "project_id": project_id,
             "run_id": run_id,
+            "status": str(report.get("status") or "applied"),
             "applied": True,
             "already_applied": True,
-            "path": str(
-                report.get("applied_path")
-                or store.outline_path(project_id).relative_to(store.project_dir(project_id)).as_posix()
-            ),
+            "applied_at": str(report.get("applied_at") or ""),
+            "applied_path": applied_path,
+            "path": applied_path,
             "version_count": len(state.outline_versions),
             "updated_stages": [str(item) for item in updated_stages] if isinstance(updated_stages, list) else [],
             "skipped_stages": [str(item) for item in skipped_stages] if isinstance(skipped_stages, list) else [],
@@ -218,10 +201,12 @@ def apply_outline_review(
         return {
             "project_id": project_id,
             "run_id": run_id,
+            "status": applied_report.get("status"),
             "applied": True,
+            "applied_at": applied_report.get("applied_at"),
+            "applied_path": applied_report.get("applied_path"),
             "path": store.outline_path(project_id).relative_to(store.project_dir(project_id)).as_posix(),
             "version_count": len(state.outline_versions),
-            "status": applied_report.get("status"),
             "updated_stages": applied_report.get("updated_stages", []),
             "skipped_stages": applied_report.get("skipped_stages", []),
         }
@@ -233,9 +218,6 @@ def apply_outline_review(
     store.save_state(state)
     revised = NovelState.from_dict(revise_outline_node(state.to_dict(), adapter, store))
     compared = NovelState.from_dict(compare_outline_versions_node(revised.to_dict(), adapter, store))
-    comparison = compare_outline_versions_for_review_apply(store, adapter, project_id, source_outline, compared.outline)
-    if comparison:
-        compared.director_message = comparison
     compared.outline_review_applied_run_id = run_id
     compared.outline_review_run_id = run_id
     compared.outline_review_status = str(report.get("status") or "reviewed")
@@ -260,12 +242,14 @@ def apply_outline_review(
     return {
         "project_id": project_id,
         "run_id": run_id,
+        "status": applied_report.get("status"),
         "applied": True,
+        "applied_at": applied_report.get("applied_at"),
+        "applied_path": applied_report.get("applied_path"),
         "path": store.outline_path(project_id).relative_to(store.project_dir(project_id)).as_posix(),
         "version_count": len(compared.outline_versions),
-        "updated_stages": updated_stages,
-        "skipped_stages": skipped_stages,
-        "status": applied_report.get("status"),
+        "updated_stages": applied_report.get("updated_stages", []),
+        "skipped_stages": applied_report.get("skipped_stages", []),
     }
 
 def normalize_pending_answers(answers: Any) -> list[dict[str, str]]:
