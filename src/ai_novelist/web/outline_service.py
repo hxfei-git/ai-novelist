@@ -287,20 +287,30 @@ def extract_pending_questions_from_stage_markdown(text: str) -> list[str]:
 def extract_inline_pending_questions_from_stage_markdown(text: str) -> list[str]:
     questions: list[str] = []
     in_pending_section = False
+    in_feedback_section = False
     for line in str(text or "").splitlines():
         stripped = line.strip()
         if not stripped:
             continue
         if stripped.startswith("#"):
+            heading = re.sub(r"^#+\s*", "", stripped).strip()
             in_pending_section = bool(PENDING_SECTION_RE.match(stripped))
+            in_feedback_section = heading in {"用户本轮反馈", "本轮反馈", "修订反馈"}
             continue
-        if in_pending_section:
+        if in_pending_section or in_feedback_section:
             continue
         cleaned = clean_pending_question_line(stripped)
+        if is_submitted_pending_answer_line(cleaned):
+            continue
         if "待确认" not in cleaned or is_generic_pending_question(cleaned):
             continue
         questions.append(cleaned)
     return dedupe_pending_questions(questions)
+
+
+def is_submitted_pending_answer_line(text: str) -> bool:
+    cleaned = str(text or "").strip()
+    return cleaned.startswith(("问题：", "答案：", "针对当前阶段待确认项"))
 
 
 def collect_pending_questions_from_markdown(text: str) -> list[str]:

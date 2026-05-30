@@ -932,6 +932,29 @@ def test_extract_stage_pending_questions_from_markdown_filters_status_lines() ->
     ]
 
 
+def test_collect_pending_questions_ignores_submitted_answer_feedback_block() -> None:
+    markdown = """# 世界观设定
+
+## 用户本轮反馈
+针对当前阶段待确认项，按以下答案修订：
+1. 问题：针对当前阶段待确认项，按以下答案修订：
+   答案：推荐按“是”处理“针对当前阶段待确认项，按以下答案修订：”，将该结论纳入世界观设定；未确认细节不额外扩写。
+2. 问题：问题：答案：主角重生的“关键记忆节点”具体是哪一场内斗/事件？**（来源不足，按用户指示保留为待确认项，不额外扩写）
+   答案：推荐按“是”处理“问题：答案：主角重生的关键记忆节点”，将该结论纳入世界观设定；未确认细节不额外扩写。
+
+## 一、世界核心设定
+- 主角重生的关键记忆节点：待确认
+- 圣女与主角的初次接触方式：待后续填充。
+
+## 仍需确认的问题
+- 暂无，当前阶段可继续修改或确认进入下一阶段。
+"""
+
+    questions = outline_service.collect_pending_questions_from_markdown(markdown)
+
+    assert questions == ["主角重生的关键记忆节点：待确认"]
+
+
 def test_outline_stage_pending_payload_prefers_artifact_questions(tmp_path: Path) -> None:
     store = LocalStore(tmp_path)
     state = store.create_project("Web Demo", "web-demo")

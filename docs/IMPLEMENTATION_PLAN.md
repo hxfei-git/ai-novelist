@@ -325,3 +325,9 @@ npm --prefix web/frontend run build
 - Outline-stage lock guards now treat inline `待确认` markers in stage Markdown as real pending questions, even when the `仍需确认的问题` section says there are no explicit questions.
 - `collect_stage_pending_questions()` keeps artifact questions and current state questions as the authoritative sources when they contain real pending items; otherwise it falls back to Markdown explicit pending-section questions plus inline unresolved markers before computing `can_lock`.
 - This prevents stages such as `direction` from locking while body fields like `读者预期：待确认` or `内部冲突：待确认` remain unresolved.
+
+### Pending Feedback Loop Guard
+
+- Inline pending scanning now skips `用户本轮反馈` / `本轮反馈` / `修订反馈` sections and submitted answer lines beginning with `问题：`, `答案：`, or `针对当前阶段待确认项`.
+- This keeps submitted pending-answer instructions from being rediscovered as fresh pending questions on the next refresh or submit cycle.
+- The current ignored `projects/demo-web` worldbuilding mirrors were cleaned by removing the recursively generated `## 用户本轮反馈` block while preserving the worldbuilding body.
