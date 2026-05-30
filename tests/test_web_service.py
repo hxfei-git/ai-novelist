@@ -475,6 +475,43 @@ def test_outline_stage_payload_allows_lock_without_real_pending_questions(tmp_pa
     assert payload["action_state"]["lock_reason"] == ""
 
 
+def test_outline_stage_payload_blocks_lock_for_inline_pending_markers(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+    state.outline_stage = "direction"
+    state.outline_stage_status = "options_ready"
+    state.pending_questions = ["请确认是否锁定方向定位并进入下一阶段，或继续提出修改。"]
+    state.outline_stage_artifacts["direction"] = {
+        "stage": "direction",
+        "status": "options_ready",
+    }
+    store.save_outline_artifact(
+        state,
+        "direction",
+        """## 方向定位稿
+
+### 三、类型题材
+- 读者预期：待确认
+
+### 八、核心冲突
+- 内部冲突：待确认
+
+## 仍需确认的问题
+- 暂无，当前阶段可继续修改或确认进入下一阶段。
+""",
+    )
+    store.save_state(state)
+
+    payload = outline_service.outline_stage_payload(store, state, "direction")
+    pending = outline_actions.outline_stage_pending_payload(store, "web-demo", "direction")
+
+    assert payload["action_state"]["can_lock"] is False
+    assert "待确认问题" in payload["action_state"]["lock_reason"]
+    assert [item["question"] for item in pending["items"]] == ["读者预期：待确认", "内部冲突：待确认"]
+    with pytest.raises(LocalStoreError, match="待确认问题"):
+        outline_actions.lock_outline_stage(store, DummyAdapter(), "web-demo", "direction")
+
+
 def test_chapter_outline_workspace_payload_includes_volume_navigation(tmp_path: Path) -> None:
     store = LocalStore(tmp_path)
     state = store.create_project("Web Demo", "web-demo")

@@ -319,3 +319,9 @@ npm --prefix web/frontend run build
 - `AI_NOVELIST_DEEPSEEK_REASONING_EFFORT` controls the effort value for calls where the existing agent classification enables thinking. The default is `low`; invalid values fall back to `low`.
 - Existing disabled-thinking agent branches remain disabled and do not send `reasoning_effort`; their progress label reflects the configured effort as `disabled-low`, `disabled-medium`, or `disabled-high`.
 - `scripts/run_web.sh` now sources `~/.bashrc` before resolving provider/model defaults, so shell-configured DeepSeek settings are honored by script starts.
+
+### Inline Pending Lock Guard
+
+- Outline-stage lock guards now treat inline `待确认` markers in stage Markdown as real pending questions, even when the `仍需确认的问题` section says there are no explicit questions.
+- `collect_stage_pending_questions()` keeps artifact questions and current state questions as the authoritative sources when they contain real pending items; otherwise it falls back to Markdown explicit pending-section questions plus inline unresolved markers before computing `can_lock`.
+- This prevents stages such as `direction` from locking while body fields like `读者预期：待确认` or `内部冲突：待确认` remain unresolved.

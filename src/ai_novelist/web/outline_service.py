@@ -121,7 +121,7 @@ def write_outline_review_baseline_sections(store: LocalStore, state: NovelState,
         artifact = dict(state.outline_stage_artifacts.get(stage) or {})
         summary = summarize_outline_stage_for_artifact(stage, section_text)
         stage_memory = extract_outline_stage_memory_for_artifact(stage, section_text)
-        pending_questions = extract_pending_questions_from_stage_markdown(section_text)
+        pending_questions = collect_pending_questions_from_markdown(section_text)
         artifact.update(
             {
                 "stage": stage,
@@ -283,6 +283,34 @@ def extract_pending_questions_from_stage_markdown(text: str) -> list[str]:
         questions.append(cleaned)
     return dedupe_pending_questions(questions)
 
+
+def extract_inline_pending_questions_from_stage_markdown(text: str) -> list[str]:
+    questions: list[str] = []
+    in_pending_section = False
+    for line in str(text or "").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("#"):
+            in_pending_section = bool(PENDING_SECTION_RE.match(stripped))
+            continue
+        if in_pending_section:
+            continue
+        cleaned = clean_pending_question_line(stripped)
+        if "待确认" not in cleaned or is_generic_pending_question(cleaned):
+            continue
+        questions.append(cleaned)
+    return dedupe_pending_questions(questions)
+
+
+def collect_pending_questions_from_markdown(text: str) -> list[str]:
+    return dedupe_pending_questions(
+        [
+            *extract_pending_questions_from_stage_markdown(text),
+            *extract_inline_pending_questions_from_stage_markdown(text),
+        ]
+    )
+
 def normalize_pending_source(value: Any) -> list[str]:
     if isinstance(value, str):
         raw = [value]
@@ -335,7 +363,7 @@ def collect_stage_pending_questions(store: LocalStore, state: NovelState, stage:
         if state_questions:
             return state_questions
     markdown = load_stage_markdown(store, state, stage, artifact_dict)
-    return extract_pending_questions_from_stage_markdown(markdown)
+    return collect_pending_questions_from_markdown(markdown)
 
 def pending_item_id(stage: str, question: str) -> str:
     return hashlib.sha1(f"{stage}|{question}".encode("utf-8")).hexdigest()[:12]
