@@ -7,8 +7,8 @@ PID_FILE="$RUN_DIR/ai-novelist-web.pid"
 LOG_FILE="$RUN_DIR/ai-novelist-web.log"
 HOST="${AI_NOVELIST_WEB_HOST:-127.0.0.1}"
 PORT="${AI_NOVELIST_WEB_PORT:-8000}"
-PROVIDER="${AI_NOVELIST_MODEL_PROVIDER:-deepseek}"
-MODEL="${AI_NOVELIST_DEEPSEEK_MODEL:-deepseek-v4-pro}"
+PROVIDER="${AI_NOVELIST_MODEL_PROVIDER:-}"
+MODEL="${AI_NOVELIST_DEEPSEEK_MODEL:-}"
 TIMEOUT="${AI_NOVELIST_WEB_TIMEOUT:-180}"
 
 load_env() {
@@ -22,6 +22,12 @@ load_env() {
   fi
 }
 
+resolve_generation_defaults() {
+  PROVIDER="${PROVIDER:-${AI_NOVELIST_MODEL_PROVIDER:-deepseek}}"
+  MODEL="${MODEL:-${AI_NOVELIST_DEEPSEEK_MODEL:-deepseek-v4-flash}}"
+  export AI_NOVELIST_DEEPSEEK_REASONING_EFFORT="${AI_NOVELIST_DEEPSEEK_REASONING_EFFORT:-low}"
+}
+
 is_running() {
   [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null
 }
@@ -33,6 +39,7 @@ start() {
     return 0
   fi
   load_env
+  resolve_generation_defaults
   if [[ "$PROVIDER" == "deepseek" && -z "${DEEPSEEK_API_KEY:-}" ]]; then
     echo "DEEPSEEK_API_KEY is not set. Add it to ~/.bashrc or export it before running this script." >&2
     return 1

@@ -44,14 +44,13 @@ def describe_agent_call(
             thinking = getattr(adapter, "_thinking_strategy", None)
             if callable(thinking):
                 strategy = str(thinking(agent or ""))
-                if strategy == "enabled-high":
-                    effort = "high"
-                elif strategy == "disabled-medium":
-                    effort = "disabled-medium"
-                elif strategy == "enabled-medium":
-                    effort = "medium"
+                if strategy.startswith("enabled-"):
+                    effort = strategy.split("-", 1)[1] or "low"
+                elif strategy.startswith("disabled-"):
+                    configured = strategy.split("-", 1)[1] or "low"
+                    effort = f"disabled-{configured}"
                 else:
-                    effort = strategy or "medium"
+                    effort = strategy or "low"
             parts = [model, effort]
         else:
             codex_bin = str(getattr(adapter, "codex_bin", "codex")).strip() or "codex"

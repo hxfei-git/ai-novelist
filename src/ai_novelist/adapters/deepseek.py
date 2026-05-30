@@ -16,7 +16,7 @@ class DeepSeekAPIError(AgentAdapterError):
     """Raised when DeepSeek API cannot produce a usable response."""
 
 
-THINKING_DISABLED_MEDIUM_AGENTS = frozenset(
+THINKING_DISABLED_AGENTS = frozenset(
     {
         "outline_stage_role",
         "version_comparator",
@@ -39,7 +39,7 @@ THINKING_DISABLED_MEDIUM_AGENTS = frozenset(
     }
 )
 
-THINKING_ENABLED_MEDIUM_AGENTS = frozenset(
+THINKING_ENABLED_AGENTS = frozenset(
     {
         "outline_stage_synthesizer",
         "outline_planner",
@@ -52,7 +52,6 @@ THINKING_ENABLED_MEDIUM_AGENTS = frozenset(
     }
 )
 
-THINKING_ENABLED_HIGH_AGENTS = frozenset()
 
 _AGENT_HEADER_RE = re.compile(r"^AGENT:\s*([A-Za-z0-9_\-]+)\s*$")
 
@@ -60,7 +59,8 @@ _AGENT_HEADER_RE = re.compile(r"^AGENT:\s*([A-Za-z0-9_\-]+)\s*$")
 @dataclass
 class DeepSeekAdapter(AgentAdapter):
     api_key: str = ""
-    model: str = "deepseek-v4-pro"
+    model: str = "deepseek-v4-flash"
+    reasoning_effort: str = "low"
     base_url: str = "https://api.deepseek.com"
     timeout_seconds: int | None = None
     temperature: float = 0.7
@@ -110,15 +110,12 @@ class DeepSeekAdapter(AgentAdapter):
             "stream": False,
         }
         strategy = self._thinking_strategy(self._agent_name(prompt, options))
-        if strategy == "disabled-medium":
+        if strategy.startswith("disabled-"):
             payload["thinking"] = {"type": "disabled"}
             payload["temperature"] = self.temperature
-        elif strategy == "enabled-high":
-            payload["thinking"] = {"type": "enabled"}
-            payload["reasoning_effort"] = "high"
         else:
             payload["thinking"] = {"type": "enabled"}
-            payload["reasoning_effort"] = "medium"
+            payload["reasoning_effort"] = self._reasoning_effort()
         return payload
 
     def _agent_name(self, prompt: str, options: AgentCallOptions | None = None) -> str:
@@ -129,13 +126,16 @@ class DeepSeekAdapter(AgentAdapter):
         return match.group(1) if match else ""
 
     def _thinking_strategy(self, agent: str) -> str:
-        if agent in THINKING_DISABLED_MEDIUM_AGENTS:
-            return "disabled-medium"
-        if agent in THINKING_ENABLED_MEDIUM_AGENTS:
-            return "enabled-medium"
-        if agent in THINKING_ENABLED_HIGH_AGENTS:
-            return "enabled-high"
-        return "enabled-medium"
+        effort = self._reasoning_effort()
+        if agent in THINKING_DISABLED_AGENTS:
+            return f"disabled-{effort}"
+        if agent in THINKING_ENABLED_AGENTS:
+            return f"enabled-{effort}"
+        return f"enabled-{effort}"
+
+    def _reasoning_effort(self) -> str:
+        effort = self.reasoning_effort.strip().lower()
+        return effort if effort in {"low", "medium", "high"} else "low"
 
     def _extract_text(self, body: str) -> str:
         try:

@@ -48,6 +48,12 @@ def test_deepseek_adapter_posts_chat_completion(monkeypatch, tmp_path):
     assert captured["payload"]["messages"] == [{"role": "user", "content": "写一个大纲"}]
 
 
+def test_deepseek_adapter_defaults_to_flash_model():
+    adapter = DeepSeekAdapter(api_key="sk-test")
+
+    assert adapter.model == "deepseek-v4-flash"
+
+
 @pytest.mark.parametrize("agent", ["chapter_goal_agent"])
 def test_deepseek_disables_thinking_for_fast_agents(monkeypatch, tmp_path, agent):
     captured = capture_deepseek_payload(monkeypatch)
@@ -65,7 +71,7 @@ def test_deepseek_disables_thinking_for_fast_agents(monkeypatch, tmp_path, agent
     "agent",
     ["chapter_writer", "direct_chapter_writer", "volume_consistency_checker"],
 )
-def test_deepseek_enables_medium_thinking_for_synthesis_agents(monkeypatch, tmp_path, agent):
+def test_deepseek_enables_low_effort_thinking_for_synthesis_agents(monkeypatch, tmp_path, agent):
     captured = capture_deepseek_payload(monkeypatch)
     adapter = DeepSeekAdapter(api_key="sk-test")
 
@@ -73,11 +79,11 @@ def test_deepseek_enables_medium_thinking_for_synthesis_agents(monkeypatch, tmp_
 
     payload = captured["payload"]
     assert payload["thinking"] == {"type": "enabled"}
-    assert payload["reasoning_effort"] == "medium"
+    assert payload["reasoning_effort"] == "low"
     assert "temperature" not in payload
 
 
-def test_deepseek_defaults_unknown_prompt_to_medium_thinking(monkeypatch, tmp_path):
+def test_deepseek_defaults_unknown_prompt_to_low_effort_thinking(monkeypatch, tmp_path):
     captured = capture_deepseek_payload(monkeypatch)
     adapter = DeepSeekAdapter(api_key="sk-test")
 
@@ -85,8 +91,19 @@ def test_deepseek_defaults_unknown_prompt_to_medium_thinking(monkeypatch, tmp_pa
 
     payload = captured["payload"]
     assert payload["thinking"] == {"type": "enabled"}
-    assert payload["reasoning_effort"] == "medium"
+    assert payload["reasoning_effort"] == "low"
     assert "temperature" not in payload
+
+
+def test_deepseek_reasoning_effort_can_be_configured(monkeypatch, tmp_path):
+    captured = capture_deepseek_payload(monkeypatch)
+    adapter = DeepSeekAdapter(api_key="sk-test", reasoning_effort="high")
+
+    assert adapter.complete("AGENT: chapter_writer\n写作任务", tmp_path) == "完成"
+
+    payload = captured["payload"]
+    assert payload["thinking"] == {"type": "enabled"}
+    assert payload["reasoning_effort"] == "high"
 
 
 def test_deepseek_options_agent_overrides_prompt_header(monkeypatch, tmp_path):
@@ -104,7 +121,7 @@ def test_deepseek_options_agent_overrides_prompt_header(monkeypatch, tmp_path):
 
     payload = captured["payload"]
     assert payload["thinking"] == {"type": "enabled"}
-    assert payload["reasoning_effort"] == "medium"
+    assert payload["reasoning_effort"] == "low"
     assert "temperature" not in payload
 
 
@@ -116,7 +133,7 @@ def test_deepseek_ignores_reasoning_content(monkeypatch, tmp_path):
     adapter = DeepSeekAdapter(api_key="sk-test")
 
     assert adapter.complete("AGENT: chapter_writer\n写作任务", tmp_path) == "正文"
-    assert captured["payload"]["reasoning_effort"] == "medium"
+    assert captured["payload"]["reasoning_effort"] == "low"
 
 
 def test_deepseek_adapter_requires_api_key(tmp_path):
@@ -159,9 +176,8 @@ def test_deepseek_adapter_wraps_ssl_read_errors(monkeypatch, tmp_path):
 
 def test_deepseek_agent_categories_do_not_include_deleted_legacy_agents():
     from ai_novelist.adapters.deepseek import (
-        THINKING_DISABLED_MEDIUM_AGENTS,
-        THINKING_ENABLED_HIGH_AGENTS,
-        THINKING_ENABLED_MEDIUM_AGENTS,
+        THINKING_DISABLED_AGENTS,
+        THINKING_ENABLED_AGENTS,
     )
 
     deleted_agents = {
@@ -173,7 +189,6 @@ def test_deepseek_agent_categories_do_not_include_deleted_legacy_agents():
         "pacing_guard_editor",
         "retrieval_context_synthesizer",
     }
-    assert deleted_agents.isdisjoint(THINKING_DISABLED_MEDIUM_AGENTS)
-    assert deleted_agents.isdisjoint(THINKING_ENABLED_MEDIUM_AGENTS)
-    assert deleted_agents.isdisjoint(THINKING_ENABLED_HIGH_AGENTS)
+    assert deleted_agents.isdisjoint(THINKING_DISABLED_AGENTS)
+    assert deleted_agents.isdisjoint(THINKING_ENABLED_AGENTS)
 

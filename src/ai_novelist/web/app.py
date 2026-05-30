@@ -62,6 +62,7 @@ def make_app(
             return DeepSeekAdapter(
                 api_key=settings.deepseek_api_key,
                 model=str(payload.get("model") or default_model),
+                reasoning_effort=settings.deepseek_reasoning_effort,
                 base_url=settings.deepseek_base_url,
                 timeout_seconds=timeout_seconds,
             )

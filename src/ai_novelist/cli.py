@@ -36,7 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
     web_parser.add_argument("--mock", action="store_true", help="Web 生成接口默认使用本地 mock 输出")
     web_parser.add_argument("--timeout", type=int, help="真实模型调用超时时间，单位秒")
     web_parser.add_argument("--provider", choices=("codex", "deepseek"), help="模型提供方，默认读 AI_NOVELIST_MODEL_PROVIDER")
-    web_parser.add_argument("--model", help="模型名；DeepSeek 默认 deepseek-v4-pro")
+    web_parser.add_argument("--model", help="模型名；DeepSeek 默认 deepseek-v4-flash")
 
     return parser
 

@@ -14,7 +14,8 @@ class Settings:
     codex_bin: str = "codex"
     codex_timeout_seconds: int | None = None
     deepseek_api_key: str = ""
-    deepseek_model: str = "deepseek-v4-pro"
+    deepseek_model: str = "deepseek-v4-flash"
+    deepseek_reasoning_effort: str = "low"
     deepseek_base_url: str = "https://api.deepseek.com"
     search_provider: str = "mock"
     search_api_key: str = ""
@@ -37,7 +38,8 @@ def load_settings() -> Settings:
         codex_bin=os.getenv("AI_NOVELIST_CODEX_BIN", "codex"),
         codex_timeout_seconds=int(codex_timeout) if codex_timeout else None,
         deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
-        deepseek_model=os.getenv("AI_NOVELIST_DEEPSEEK_MODEL", "deepseek-v4-pro"),
+        deepseek_model=os.getenv("AI_NOVELIST_DEEPSEEK_MODEL", "deepseek-v4-flash").strip() or "deepseek-v4-flash",
+        deepseek_reasoning_effort=normalize_deepseek_reasoning_effort(os.getenv("AI_NOVELIST_DEEPSEEK_REASONING_EFFORT", "low")),
         deepseek_base_url=os.getenv("AI_NOVELIST_DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
         search_provider=os.getenv("AI_NOVELIST_SEARCH_PROVIDER", "mock").strip().lower(),
         search_api_key=search_api_key(os.getenv("AI_NOVELIST_SEARCH_PROVIDER", "mock")),
@@ -62,6 +64,12 @@ def search_api_key(provider: str | None = None) -> str:
     if provider == "exa":
         return os.getenv("EXA_API_KEY", "") or os.getenv("AI_NOVELIST_SEARCH_API_KEY", "")
     return os.getenv("AI_NOVELIST_SEARCH_API_KEY", "")
+
+
+def normalize_deepseek_reasoning_effort(value: str) -> str:
+    effort = value.strip().lower()
+    return effort if effort in {"low", "medium", "high"} else "low"
+
 
 def parse_bool(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "y", "on"}

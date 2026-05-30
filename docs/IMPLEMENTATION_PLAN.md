@@ -112,7 +112,8 @@ Important environment variables:
 - `AI_NOVELIST_CODEX_BIN`: Codex CLI binary, default `codex`
 - `AI_NOVELIST_CODEX_TIMEOUT`: optional Codex timeout in seconds
 - `DEEPSEEK_API_KEY`: DeepSeek API key
-- `AI_NOVELIST_DEEPSEEK_MODEL`: DeepSeek model, default `deepseek-v4-pro`
+- `AI_NOVELIST_DEEPSEEK_MODEL`: DeepSeek model, default `deepseek-v4-flash`
+- `AI_NOVELIST_DEEPSEEK_REASONING_EFFORT`: DeepSeek reasoning effort for enabled-thinking calls, default `low`; valid values are `low`, `medium`, and `high`
 - `AI_NOVELIST_DEEPSEEK_BASE_URL`: default `https://api.deepseek.com`
 
 Search and corpus settings still exist in configuration because some craft helpers and persisted-state compatibility may depend on them. They are pruning candidates only after reference-matrix verification.
@@ -134,7 +135,7 @@ Search and corpus settings still exist in configuration because some craft helpe
 
 - keep README and active docs aligned with `ai-novelist web`
 - ignore `.superpowers/`
-- align script/docs defaults with `deepseek-v4-pro`
+- align script/docs defaults with `deepseek-v4-flash` and `AI_NOVELIST_DEEPSEEK_REASONING_EFFORT=low`
 - keep tests passing
 
 ### P1: Verified Prune
@@ -311,3 +312,10 @@ npm --prefix web/frontend run build
 - Behavior changed: no production source changes were required; existing Web long-running handlers already release running/applying flags in `finally`, surface caught errors through `showError(error)`, and background post-stream refresh errors use `showBackgroundError`. Existing SSE streaming routes already convert service exceptions into `event: error` payloads.
 - Verification: focused frontend guard and SSE regressions passed; final requested verification passed with `.venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py tests/test_web_app.py -q` (49 passed in 0.95s), `npm --prefix web/frontend run build` (passed with the known Vite CJS deprecation warning), and `git diff --check`.
 - Remaining risk: coverage is source-structure and TestClient stream-level; no browser-level click or network-interruption run was performed.
+
+### DeepSeek Runtime Env Update
+
+- Default DeepSeek model is now `deepseek-v4-flash` in `Settings`, `DeepSeekAdapter`, CLI help, and `scripts/run_web.sh`.
+- `AI_NOVELIST_DEEPSEEK_REASONING_EFFORT` controls the effort value for calls where the existing agent classification enables thinking. The default is `low`; invalid values fall back to `low`.
+- Existing disabled-thinking agent branches remain disabled and do not send `reasoning_effort`; their progress label reflects the configured effort as `disabled-low`, `disabled-medium`, or `disabled-high`.
+- `scripts/run_web.sh` now sources `~/.bashrc` before resolving provider/model defaults, so shell-configured DeepSeek settings are honored by script starts.

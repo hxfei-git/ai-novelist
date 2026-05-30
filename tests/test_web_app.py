@@ -210,6 +210,30 @@ def test_outline_stage_pending_api_returns_recommended_options(tmp_path) -> None
     assert [option["id"] for option in payload["items"][0]["options"]] == ["accept", "defer", "custom"]
 
 
+def test_web_app_passes_deepseek_reasoning_effort_to_adapter(monkeypatch, tmp_path) -> None:
+    settings = Settings(
+        projects_dir=tmp_path,
+        model_provider="deepseek",
+        deepseek_api_key="sk-test",
+        deepseek_reasoning_effort="medium",
+    )
+    client = TestClient(web_app.make_app(settings, mock=False))
+    captured = {}
+
+    def fake_generate(store, adapter, project_id, stage, instruction="", progress=None):
+        captured["model"] = adapter.model
+        captured["reasoning_effort"] = adapter.reasoning_effort
+        return store.load_state(project_id)
+
+    monkeypatch.setattr(web_app.outline_actions, "generate_outline_stage", fake_generate)
+    assert client.post("/api/projects", json={"title": "Web Demo", "project_id": "web-demo"}).status_code == 200
+
+    response = client.post("/api/projects/web-demo/outline/stages/direction/generate", json={})
+
+    assert response.status_code == 200
+    assert captured == {"model": "deepseek-v4-flash", "reasoning_effort": "medium"}
+
+
 def test_run_web_command_passes_generation_defaults(monkeypatch, tmp_path) -> None:
     parser = build_parser()
     args = parser.parse_args(
