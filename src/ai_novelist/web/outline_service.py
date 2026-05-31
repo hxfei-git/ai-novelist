@@ -242,7 +242,7 @@ def markdown_sections(text: str) -> dict[str, str]:
     return {title: "\n".join(lines).strip() for title, lines in sections.items()}
 
 
-def extract_numbered_markdown_items(text: str) -> dict[int, str]:
+def extract_raw_numbered_markdown_items(text: str) -> dict[int, str]:
     items: dict[int, list[str]] = {}
     current: int | None = None
     for line in str(text or "").splitlines():
@@ -255,7 +255,14 @@ def extract_numbered_markdown_items(text: str) -> dict[int, str]:
             items[current] = [match.group(2).strip()]
         elif current is not None and not stripped.startswith("#"):
             items[current].append(clean_pending_question_line(stripped))
-    return {number: summarize_text(" ".join(parts), max_chars=180).strip() for number, parts in items.items()}
+    return {number: " ".join(parts).strip() for number, parts in items.items()}
+
+
+def extract_numbered_markdown_items(text: str) -> dict[int, str]:
+    return {
+        number: summarize_text(item, max_chars=180).strip()
+        for number, item in extract_raw_numbered_markdown_items(text).items()
+    }
 
 
 def first_numbered_section_items(sections: dict[str, str], titles: tuple[str, ...]) -> dict[int, str]:
@@ -317,7 +324,7 @@ def priority_outline_review_pairs(notes: str) -> list[tuple[str, str, str]]:
         priority = OUTLINE_REVIEW_PRIORITY_TITLES.get(title.strip())
         if not priority:
             continue
-        items = extract_numbered_markdown_items(body)
+        items = extract_raw_numbered_markdown_items(body)
         limit = OUTLINE_REVIEW_PRIORITY_CAPS[priority]
         for _, text in sorted(items.items())[:limit]:
             message, recommendation = split_recommendation_from_review_item(text)

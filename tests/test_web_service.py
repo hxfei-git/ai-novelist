@@ -1249,6 +1249,26 @@ def test_outline_review_priority_sections_parse_and_cap_items() -> None:
     assert "建议问题11。" not in [item["message"] for item in suggestions]
 
 
+def test_outline_review_priority_sections_split_long_items_before_summarizing() -> None:
+    long_issue = "这是一个需要保留完整建议标记之前内容的问题。" * 12
+    notes = "\n".join(
+        [
+            "STATUS: revise",
+            "QUALITY_SCORE: 70",
+            "",
+            "## 高优先级问题",
+            f"1. {long_issue}——推荐修改意见：将长问题拆分后保留独立修复建议。",
+        ]
+    )
+
+    suggestions = outline_service.build_outline_repair_suggestions(notes, "", "")
+
+    assert len(suggestions) == 1
+    assert suggestions[0]["priority"] == "high"
+    assert suggestions[0]["message"] != suggestions[0]["recommendation"]
+    assert suggestions[0]["recommendation"] == "将长问题拆分后保留独立修复建议。"
+
+
 def test_outline_review_legacy_pairing_defaults_to_low_priority() -> None:
     notes = """STATUS: revise
 QUALITY_SCORE: 82
