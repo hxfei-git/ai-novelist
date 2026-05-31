@@ -1,6 +1,6 @@
 # Session Summary
 
-Updated: 2026-05-29
+Updated: 2026-05-31
 Project path: `/home/ubuntu/1.project/ai-novelist`
 
 ## Current Goal
@@ -34,6 +34,14 @@ Removed from active CLI:
 - feishu command
 - research-only command
 - one-off writer/review/finalize/export/show commands
+
+## 2026-05-31 Web Frontend Loading Fix
+
+- Investigation found the Web process and API were healthy: `/`, `/api/projects`, project state, outline stages, chapter workspace, and chapter-outline workspace all returned successfully from `127.0.0.1:8000`.
+- nginx access logs for the reported browser session showed only `/` and `/assets/index-C0yUo9mO.js`, with no `/api/projects` request. The user agent was Chrome 83, while Vite 5 defaults production builds to `chrome87`.
+- `web/frontend/vite.config.ts` now sets `build.target` to `chrome80`, and `tests/test_frontend_review_tabs_structure.py` includes a source regression guard for that target.
+- Verification: the new regression test failed before the config change, then passed after it; `tests/test_frontend_review_tabs_structure.py` passed with 38 tests; `npm --prefix web/frontend run build` passed and regenerated the served frontend assets with the known Vite CJS deprecation warning.
+- Remaining risk: no live Chrome 83 browser automation is installed in this checkout, so browser confirmation still depends on a hard refresh in the affected client.
 
 ## Latest Audit Results
 

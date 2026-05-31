@@ -11,6 +11,7 @@ TYPES_TS = ROOT / "web" / "frontend" / "src" / "types.ts"
 API_TS = ROOT / "web" / "frontend" / "src" / "api.ts"
 STYLES_CSS = ROOT / "web" / "frontend" / "src" / "styles.css"
 PROGRESS_TS = ROOT / "web" / "frontend" / "src" / "progress.ts"
+VITE_CONFIG = ROOT / "web" / "frontend" / "vite.config.ts"
 WORKSPACES_DIR = ROOT / "web" / "frontend" / "src" / "workspaces"
 
 
@@ -105,6 +106,13 @@ def test_frontend_main_is_smaller_after_workspace_split() -> None:
     assert len(source.splitlines()) < 900
     assert "from './progress'" in source
     assert "from './workspaces/review'" in source
+
+
+def test_frontend_build_targets_chrome_80_for_older_browser_access() -> None:
+    source = VITE_CONFIG.read_text(encoding="utf-8")
+
+    assert "build:" in source
+    assert re.search(r"\btarget:\s*['\"]chrome80['\"]", source) is not None
 
 
 def test_top_navigation_has_three_workspaces() -> None:

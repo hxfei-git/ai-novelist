@@ -1,6 +1,6 @@
 # AI Novelist Web-Only Architecture Plan
 
-Updated: 2026-05-28
+Updated: 2026-05-31
 
 ## Current State
 
@@ -15,6 +15,7 @@ The historical chat, compose, feishu, research-only, export, finalize, and one-o
 ## Runtime Architecture
 
 - 2026-05-29: Web operation hardening started with explicit project-scoped progress log writes, chapter detail loading cleanup, and chapter batch running guards. Public API paths remain unchanged.
+- 2026-05-31: Frontend production builds now target Chrome 80 explicitly so older Chromium clients, including the Chrome 83 client observed in access logs, can execute the Vite bundle instead of stalling before API initialization.
 
 ```text
 Browser
