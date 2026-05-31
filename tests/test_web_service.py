@@ -1380,13 +1380,17 @@ def test_outline_review_revision_instruction_orders_selected_items_by_priority()
         report,
         selected_issue_ids=None,
         decisions=[
-            {"issue_id": "suggestion-1", "decision": "recommended", "custom_answer": ""},
             {"issue_id": "low-1", "decision": "recommended", "custom_answer": ""},
-            {"issue_id": "high-1", "decision": "recommended", "custom_answer": ""},
+            {
+                "issue_id": "high-1",
+                "decision": "custom",
+                "custom_answer": "按高优先级自定义处理。",
+            },
+            {"issue_id": "suggestion-1", "decision": "recommended", "custom_answer": ""},
         ],
     )
 
-    assert instruction.index("高优先级项。 -> 高优先级修复。") < instruction.index("低优先级项。 -> 低优先级修复。")
+    assert instruction.index("高优先级项。 -> 按高优先级自定义处理。") < instruction.index("低优先级项。 -> 低优先级修复。")
     assert instruction.index("低优先级项。 -> 低优先级修复。") < instruction.index("建议项。 -> 建议项修复。")
 
 

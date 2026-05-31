@@ -565,18 +565,19 @@ def outline_revision_instruction_from_decisions(
 ) -> str:
     _ = report
     suggestions_by_id = {str(item.get("id") or ""): item for item in suggestions}
-    selected_items: list[dict[str, Any]] = []
-    custom_lines: list[tuple[int, str]] = []
-    for raw_decision in decisions:
+    ranked_lines: list[tuple[int, int, str]] = []
+    for decision_index, raw_decision in enumerate(decisions):
         issue_id = str(raw_decision.get("issue_id") or "").strip()
         decision = str(raw_decision.get("decision") or "").strip()
         if issue_id not in suggestions_by_id:
             raise LocalStoreError("未找到选中的大纲审查建议")
         suggestion = suggestions_by_id[issue_id]
+        priority_rank = outline_review_priority_rank(suggestion.get("priority"))
         if decision == "skip":
             continue
         if decision == "recommended":
-            selected_items.append(suggestion)
+            for line in outline_revision_instruction_lines([suggestion]):
+                ranked_lines.append((priority_rank, decision_index, line))
             continue
         if decision == "custom":
             custom_answer = str(raw_decision.get("custom_answer") or "").strip()
@@ -584,13 +585,10 @@ def outline_revision_instruction_from_decisions(
                 raise LocalStoreError("我的意见不能为空")
             message = str(suggestion.get("message") or "").strip()
             line = f"- {message} -> {custom_answer}" if message else f"- {custom_answer}"
-            custom_lines.append((outline_review_priority_rank(suggestion.get("priority")), line))
+            ranked_lines.append((priority_rank, decision_index, line))
             continue
         raise LocalStoreError("不支持的大纲审查处理方式")
-    lines: list[str] = []
-    for item in sorted(selected_items, key=lambda item: outline_review_priority_rank(item.get("priority"))):
-        lines.extend(outline_revision_instruction_lines([item]))
-    lines.extend(line for _, line in sorted(custom_lines, key=lambda item: item[0]))
+    lines = [line for _, _, line in sorted(ranked_lines, key=lambda item: (item[0], item[1]))]
     if not lines:
         raise LocalStoreError("请选择至少一条大纲审查建议")
     return "按用户逐项确认采纳以下大纲审查意见：\n" + "\n".join(lines)
