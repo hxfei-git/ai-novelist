@@ -70,6 +70,72 @@ class OutlineReviewAdapter(AgentAdapter):
         return "{}"
 
 
+class CappedHighPriorityOutlineReviewAdapter(AgentAdapter):
+    def __init__(self) -> None:
+        self.review_calls = 0
+
+    def complete(self, prompt: str, workspace: Path, options: AgentCallOptions | None = None) -> str:
+        if "outline_editor" in prompt:
+            self.review_calls += 1
+            if "继续审查尚未列出的高优先级阻塞项" in prompt:
+                return "\n".join(
+                    [
+                        "## 高优先级问题",
+                        "1. 续审高优先级问题11。——推荐修改意见：补充续审修复11。",
+                        "2. 续审高优先级问题12。——推荐修改意见：补充续审修复12。",
+                        "3. 续审高优先级问题13。——推荐修改意见：补充续审修复13。",
+                    ]
+                )
+            return "\n".join(
+                [
+                    "STATUS: revise",
+                    "QUALITY_SCORE: 62",
+                    "",
+                    "## 总体判断",
+                    "高优先级问题很多，首批列出十条。",
+                    "",
+                    "## 高优先级问题",
+                    *[
+                        f"{index}. 首批高优先级问题{index}。——推荐修改意见：补充首批修复{index}。"
+                        for index in range(1, 11)
+                    ],
+                    "",
+                    "## 低优先级问题",
+                    "暂无",
+                    "",
+                    "## 建议问题",
+                    "暂无",
+                ]
+            )
+        if "outline_reviser" in prompt:
+            return "# 最终锁定总大纲\n\n## 方向定位\n已补强结尾收束。"
+        if "version_comparator" in prompt:
+            return "# 大纲版本比较\n\n修订补强了结尾收束。"
+        return "{}"
+
+
+class TwentyHighPriorityOutlineReviewAdapter(AgentAdapter):
+    def __init__(self) -> None:
+        self.review_calls = 0
+
+    def complete(self, prompt: str, workspace: Path, options: AgentCallOptions | None = None) -> str:
+        if "outline_editor" in prompt:
+            self.review_calls += 1
+            return "\n".join(
+                [
+                    "STATUS: revise",
+                    "QUALITY_SCORE: 60",
+                    "",
+                    "## 高优先级问题",
+                    *[
+                        f"{index}. 高优先级问题{index}。——推荐修改意见：补充修复{index}。"
+                        for index in range(1, 21)
+                    ],
+                ]
+            )
+        return "{}"
+
+
 class CapturingOutlineReviewAdapter(AgentAdapter):
     def __init__(self) -> None:
         self.reviser_prompt = ""
@@ -1247,6 +1313,36 @@ def test_outline_review_priority_sections_parse_and_cap_items() -> None:
     assert suggestions[11]["message"] == "高优先级问题12。"
     assert "低优先级问题21。" not in [item["message"] for item in suggestions]
     assert "建议问题11。" not in [item["message"] for item in suggestions]
+
+
+def test_outline_review_continues_when_high_priority_batch_stops_at_ten(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+    state.outline = "# 最终锁定总大纲\n\n## 章节大纲\n旧稿。"
+    store.save_state(state)
+    adapter = CappedHighPriorityOutlineReviewAdapter()
+
+    report = outline_actions.review_outline(store, adapter, "web-demo", "请检查总纲")
+
+    suggestions = report["repair_suggestions"]
+    assert adapter.review_calls == 2
+    assert len(suggestions) == 13
+    assert [item["priority"] for item in suggestions] == ["high"] * 13
+    assert suggestions[9]["message"] == "首批高优先级问题10。"
+    assert suggestions[10]["message"] == "续审高优先级问题11。"
+
+
+def test_outline_review_does_not_continue_when_initial_high_priority_batch_exceeds_ten(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+    state.outline = "# 最终锁定总大纲\n\n## 章节大纲\n旧稿。"
+    store.save_state(state)
+    adapter = TwentyHighPriorityOutlineReviewAdapter()
+
+    report = outline_actions.review_outline(store, adapter, "web-demo", "请检查总纲")
+
+    assert adapter.review_calls == 1
+    assert len(report["repair_suggestions"]) == 20
 
 
 def test_outline_review_priority_sections_split_long_items_before_summarizing() -> None:

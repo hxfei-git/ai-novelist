@@ -21,6 +21,7 @@ from ai_novelist.outline.stage_contracts import STAGE_LABELS
 from ai_novelist.state import NovelState
 from ai_novelist.storage.local_store import LocalStore, LocalStoreError, summarize_text
 from ai_novelist.web.outline_service import (
+    OUTLINE_REVIEW_PRIORITY_CAPS,
     build_outline_repair_suggestions,
     collect_stage_pending_questions,
     default_pending_options,
@@ -111,6 +112,91 @@ def outline_stage_pending_payload(store: LocalStore, project_id: str, stage: str
         ],
     }
 
+
+def outline_review_high_priority_count(suggestions: list[dict[str, Any]]) -> int:
+    return sum(1 for item in suggestions if str(item.get("priority") or "low") == "high")
+
+
+def outline_review_needs_high_priority_continuation(
+    suggestions: list[dict[str, Any]],
+    last_high_priority_batch_count: int,
+) -> bool:
+    high_count = outline_review_high_priority_count(suggestions)
+    return last_high_priority_batch_count == 10 and high_count < OUTLINE_REVIEW_PRIORITY_CAPS["high"]
+
+
+def outline_review_high_priority_continuation_prompt(
+    state: NovelState,
+    report: dict[str, Any],
+    suggestions: list[dict[str, Any]],
+) -> str:
+    existing = [
+        str(item.get("message") or "").strip()
+        for item in suggestions
+        if str(item.get("priority") or "low") == "high" and str(item.get("message") or "").strip()
+    ]
+    existing_lines = "\n".join(f"{index}. {message}" for index, message in enumerate(existing, 1)) or "暂无"
+    return (
+        "AGENT: outline_editor\n\n"
+        "任务：继续审查尚未列出的高优先级阻塞项。上一批高优先级问题正好停在 10 条，"
+        "这通常表示输出被默认列表长度截断；请只补充未列出的高优先级阻塞项。\n\n"
+        "要求：\n"
+        "- 只寻找会阻塞章节细纲、违反 locked_constraints、造成硬冲突或必须先决策的结构缺口。\n"
+        "- 不得重复已列问题；没有新增阻塞项则在 `## 高优先级问题` 下写“暂无”。\n"
+        f"- 本轮最多补充 {OUTLINE_REVIEW_PRIORITY_CAPS['high'] - len(existing)} 条，总数达到工程安全上限即停止。\n"
+        "- 每条必须使用编号列表，并包含“——推荐修改意见：”。\n"
+        "- 不输出低优先级问题、建议问题或长篇分析。\n\n"
+        "## 已列高优先级问题\n"
+        f"{existing_lines}\n\n"
+        "## 当前审查摘要\n"
+        f"{str(report.get('summary') or '暂无')}\n\n"
+        "## 当前大纲\n"
+        f"{state.outline or report.get('source_outline') or '暂无'}\n\n"
+        "## 锁定约束\n"
+        f"{', '.join(state.locked_constraints) or '暂无'}\n\n"
+        "输出格式：\n"
+        "## 高优先级问题\n"
+        "1. 问题描述。——推荐修改意见：具体修复建议。\n"
+    )
+
+
+def continue_outline_review_high_priority_items(
+    store: LocalStore,
+    adapter: AgentAdapter,
+    state: NovelState,
+    report: dict[str, Any],
+) -> None:
+    suggestions = [item for item in report.get("repair_suggestions", []) if isinstance(item, dict)]
+    last_high_priority_batch_count = outline_review_high_priority_count(suggestions)
+    continuation_rounds = 0
+    while (
+        outline_review_needs_high_priority_continuation(suggestions, last_high_priority_batch_count)
+        and continuation_rounds < 4
+    ):
+        continuation_rounds += 1
+        prompt = outline_review_high_priority_continuation_prompt(state, report, suggestions)
+        try:
+            continuation = adapter.complete(prompt, store.project_dir(state.project_id))
+        except AgentAdapterError:
+            break
+        continuation_suggestions = build_outline_repair_suggestions(continuation, "", "")
+        existing_ids = {str(item.get("id") or "") for item in suggestions}
+        new_high_items = [
+            item
+            for item in continuation_suggestions
+            if item.get("priority") == "high" and str(item.get("id") or "") not in existing_ids
+        ]
+        if not new_high_items:
+            break
+        report["notes"] = f"{str(report.get('notes') or '').rstrip()}\n\n{continuation.strip()}".strip()
+        report["repair_suggestions"] = build_outline_repair_suggestions(
+            str(report.get("notes") or ""),
+            str(report.get("revision_instruction") or ""),
+            str(report.get("summary") or ""),
+        )
+        last_high_priority_batch_count = len(new_high_items)
+        suggestions = [item for item in report.get("repair_suggestions", []) if isinstance(item, dict)]
+
 def review_outline(store: LocalStore, adapter: AgentAdapter, project_id: str, instruction: str = "", progress: ProgressFunc | None = None) -> dict[str, Any]:
     emit = progress or (lambda _stage, _message: None)
     state = store.load_state(project_id)
@@ -145,6 +231,7 @@ def review_outline(store: LocalStore, adapter: AgentAdapter, project_id: str, in
         str(report.get("revision_instruction") or ""),
         str(report.get("summary") or ""),
     )
+    continue_outline_review_high_priority_items(store, adapter, reviewed, report)
     report_path, _markdown_path = write_outline_review_report(store, reviewed, report)
     reviewed.outline_review_run_id = run_id
     reviewed.outline_review_status = str(report["status"])
