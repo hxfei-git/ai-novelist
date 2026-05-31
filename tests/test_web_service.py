@@ -1352,6 +1352,44 @@ def test_apply_outline_review_uses_only_selected_suggestions(tmp_path: Path) -> 
     assert unselected["recommendation"] not in adapter.reviser_prompt
 
 
+def test_outline_review_revision_instruction_orders_selected_items_by_priority() -> None:
+    report = {
+        "repair_suggestions": [
+            {
+                "id": "suggestion-1",
+                "message": "建议项。",
+                "recommendation": "建议项修复。",
+                "priority": "suggestion",
+            },
+            {
+                "id": "low-1",
+                "message": "低优先级项。",
+                "recommendation": "低优先级修复。",
+                "priority": "low",
+            },
+            {
+                "id": "high-1",
+                "message": "高优先级项。",
+                "recommendation": "高优先级修复。",
+                "priority": "high",
+            },
+        ]
+    }
+
+    instruction = outline_service.selected_outline_revision_instruction(
+        report,
+        selected_issue_ids=None,
+        decisions=[
+            {"issue_id": "suggestion-1", "decision": "recommended", "custom_answer": ""},
+            {"issue_id": "low-1", "decision": "recommended", "custom_answer": ""},
+            {"issue_id": "high-1", "decision": "recommended", "custom_answer": ""},
+        ],
+    )
+
+    assert instruction.index("高优先级项。 -> 高优先级修复。") < instruction.index("低优先级项。 -> 低优先级修复。")
+    assert instruction.index("低优先级项。 -> 低优先级修复。") < instruction.index("建议项。 -> 建议项修复。")
+
+
 def test_apply_outline_review_uses_recommended_custom_and_skip_decisions(tmp_path: Path) -> None:
     store = LocalStore(tmp_path)
     state = store.create_project("Web Demo", "web-demo")

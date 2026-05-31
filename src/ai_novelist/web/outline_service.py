@@ -292,6 +292,11 @@ def normalize_outline_review_priority(value: Any) -> str:
     return priority if priority in OUTLINE_REVIEW_PRIORITY_ORDER else "low"
 
 
+def outline_review_priority_rank(value: Any) -> int:
+    priority = normalize_outline_review_priority(value)
+    return OUTLINE_REVIEW_PRIORITY_ORDER.index(priority)
+
+
 def split_recommendation_from_review_item(text: str) -> tuple[str, str]:
     cleaned = str(text or "").strip()
     for marker in ("——推荐修改意见：", "--推荐修改意见：", "推荐修改意见：", "——修改建议：", "修改建议：", "——建议：", "建议："):
@@ -560,28 +565,32 @@ def outline_revision_instruction_from_decisions(
 ) -> str:
     _ = report
     suggestions_by_id = {str(item.get("id") or ""): item for item in suggestions}
-    lines: list[str] = []
+    selected_items: list[dict[str, Any]] = []
+    custom_lines: list[tuple[int, str]] = []
     for raw_decision in decisions:
         issue_id = str(raw_decision.get("issue_id") or "").strip()
         decision = str(raw_decision.get("decision") or "").strip()
         if issue_id not in suggestions_by_id:
             raise LocalStoreError("未找到选中的大纲审查建议")
+        suggestion = suggestions_by_id[issue_id]
         if decision == "skip":
             continue
         if decision == "recommended":
-            lines.extend(outline_revision_instruction_lines([suggestions_by_id[issue_id]]))
+            selected_items.append(suggestion)
             continue
         if decision == "custom":
             custom_answer = str(raw_decision.get("custom_answer") or "").strip()
             if not custom_answer:
                 raise LocalStoreError("我的意见不能为空")
-            message = str(suggestions_by_id[issue_id].get("message") or "").strip()
-            if message:
-                lines.append(f"- {message} -> {custom_answer}")
-            else:
-                lines.append(f"- {custom_answer}")
+            message = str(suggestion.get("message") or "").strip()
+            line = f"- {message} -> {custom_answer}" if message else f"- {custom_answer}"
+            custom_lines.append((outline_review_priority_rank(suggestion.get("priority")), line))
             continue
         raise LocalStoreError("不支持的大纲审查处理方式")
+    lines: list[str] = []
+    for item in sorted(selected_items, key=lambda item: outline_review_priority_rank(item.get("priority"))):
+        lines.extend(outline_revision_instruction_lines([item]))
+    lines.extend(line for _, line in sorted(custom_lines, key=lambda item: item[0]))
     if not lines:
         raise LocalStoreError("请选择至少一条大纲审查建议")
     return "按用户逐项确认采纳以下大纲审查意见：\n" + "\n".join(lines)
