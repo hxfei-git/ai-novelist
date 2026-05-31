@@ -206,6 +206,28 @@ def outline_suggestion_identifier(message: str, recommendation: str) -> str:
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:12]
 
 
+OUTLINE_REVIEW_PRIORITY_ORDER = ("high", "low", "suggestion")
+OUTLINE_REVIEW_PRIORITY_LABELS = {
+    "high": "高优先级问题",
+    "low": "低优先级问题",
+    "suggestion": "建议问题",
+}
+OUTLINE_REVIEW_PRIORITY_TITLES = {
+    "高优先级问题": "high",
+    "高优先级": "high",
+    "阻塞问题": "high",
+    "低优先级问题": "low",
+    "低优先级": "low",
+    "建议问题": "suggestion",
+    "建议项": "suggestion",
+}
+OUTLINE_REVIEW_PRIORITY_CAPS = {
+    "high": 50,
+    "low": 20,
+    "suggestion": 10,
+}
+
+
 def markdown_sections(text: str) -> dict[str, str]:
     sections: dict[str, list[str]] = {}
     current = ""
@@ -258,18 +280,69 @@ def outline_review_issue_recommendation_pairs(notes: str) -> list[tuple[str, str
     return pairs
 
 
+def normalize_outline_review_priority(value: Any) -> str:
+    priority = str(value or "").strip().lower()
+    return priority if priority in OUTLINE_REVIEW_PRIORITY_ORDER else "low"
+
+
+def split_recommendation_from_review_item(text: str) -> tuple[str, str]:
+    cleaned = str(text or "").strip()
+    for marker in ("——推荐修改意见：", "--推荐修改意见：", "推荐修改意见：", "——修改建议：", "修改建议：", "——建议：", "建议："):
+        if marker in cleaned:
+            message, recommendation = cleaned.split(marker, 1)
+            message = message.strip()
+            recommendation = recommendation.strip()
+            return message, recommendation or message
+    return cleaned, cleaned
+
+
+def build_outline_repair_suggestion(message: str, recommendation: str, priority: str = "low") -> dict[str, Any]:
+    normalized_priority = normalize_outline_review_priority(priority)
+    category = "revision" if re.search(r"建议|补|改|修|强化|调整|明确|确认|锁定|删除|统一", recommendation) else "issue"
+    return {
+        "id": outline_suggestion_identifier(message, recommendation),
+        "severity": "normal",
+        "category": category,
+        "message": message,
+        "recommendation": recommendation,
+        "priority": normalized_priority,
+        "selected": True,
+    }
+
+
+def priority_outline_review_pairs(notes: str) -> list[tuple[str, str, str]]:
+    sections = markdown_sections(notes)
+    pairs: list[tuple[str, str, str]] = []
+    for title, body in sections.items():
+        priority = OUTLINE_REVIEW_PRIORITY_TITLES.get(title.strip())
+        if not priority:
+            continue
+        items = extract_numbered_markdown_items(body)
+        limit = OUTLINE_REVIEW_PRIORITY_CAPS[priority]
+        for _, text in sorted(items.items())[:limit]:
+            message, recommendation = split_recommendation_from_review_item(text)
+            if message.strip():
+                pairs.append((message.strip(), recommendation.strip() or message.strip(), priority))
+    return pairs
+
+
 def build_outline_repair_suggestions(notes: str, revision_instruction: str, summary: str) -> list[dict[str, Any]]:
-    raw_pairs = outline_review_issue_recommendation_pairs(notes)
+    raw_pairs = priority_outline_review_pairs(notes)
+    if not raw_pairs:
+        raw_pairs = [
+            (message, recommendation, "low")
+            for message, recommendation in outline_review_issue_recommendation_pairs(notes)
+        ]
     if not raw_pairs:
         raw_items = [*extract_markdown_bullets(notes), *extract_markdown_bullets(revision_instruction)]
         if not raw_items:
             fallback = str(revision_instruction or summary or notes or "").strip()
             if fallback:
                 raw_items = [fallback]
-        raw_pairs = [(item, item) for item in raw_items]
+        raw_pairs = [(item, item, "low") for item in raw_items]
     suggestions: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for raw_message, raw_recommendation in raw_pairs:
+    for raw_message, raw_recommendation, raw_priority in raw_pairs:
         message = summarize_text(raw_message, max_chars=180).strip()
         recommendation = summarize_text(raw_recommendation, max_chars=180).strip()
         if not message or not recommendation:
@@ -278,16 +351,7 @@ def build_outline_repair_suggestions(notes: str, revision_instruction: str, summ
         if key in seen:
             continue
         seen.add(key)
-        category = "revision" if re.search(r"建议|补|改|修|强化|调整|明确", recommendation) else "issue"
-        suggestion = {
-            "id": outline_suggestion_identifier(message, recommendation),
-            "severity": "normal",
-            "category": category,
-            "message": message,
-            "recommendation": recommendation,
-            "selected": True,
-        }
-        suggestions.append(suggestion)
+        suggestions.append(build_outline_repair_suggestion(message, recommendation, raw_priority))
     return suggestions
 
 PENDING_SECTION_RE = re.compile(r"^#{1,6}\s*(?:[一二三四五六七八九十]+、)?(?:待确认问题|仍需确认的问题)\s*$")

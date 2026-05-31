@@ -1204,6 +1204,77 @@ def test_outline_review_report_exposes_selectable_suggestions(tmp_path: Path) ->
     assert any("补强最后一卷的收束钩子" in item["recommendation"] for item in suggestions)
 
 
+def test_outline_review_priority_sections_parse_and_cap_items() -> None:
+    high_lines = [
+        f"{index}. 高优先级问题{index}。——推荐修改意见：高优先级修复{index}。"
+        for index in range(1, 13)
+    ]
+    low_lines = [
+        f"{index}. 低优先级问题{index}。——推荐修改意见：低优先级修复{index}。"
+        for index in range(1, 26)
+    ]
+    suggestion_lines = [
+        f"{index}. 建议问题{index}。——推荐修改意见：建议处理{index}。"
+        for index in range(1, 13)
+    ]
+    notes = "\n".join(
+        [
+            "STATUS: revise",
+            "QUALITY_SCORE: 70",
+            "",
+            "## 高优先级问题",
+            *high_lines,
+            "",
+            "## 低优先级问题",
+            *low_lines,
+            "",
+            "## 建议问题",
+            *suggestion_lines,
+            "",
+            "## 锁定约束检查",
+            "未发现。",
+        ]
+    )
+
+    suggestions = outline_service.build_outline_repair_suggestions(notes, "", "")
+
+    priorities = [item["priority"] for item in suggestions]
+    assert priorities.count("high") == 12
+    assert priorities.count("low") == 20
+    assert priorities.count("suggestion") == 10
+    assert suggestions[0]["message"] == "高优先级问题1。"
+    assert suggestions[0]["recommendation"] == "高优先级修复1。"
+    assert suggestions[11]["message"] == "高优先级问题12。"
+    assert "低优先级问题21。" not in [item["message"] for item in suggestions]
+    assert "建议问题11。" not in [item["message"] for item in suggestions]
+
+
+def test_outline_review_legacy_pairing_defaults_to_low_priority() -> None:
+    notes = """STATUS: revise
+QUALITY_SCORE: 82
+
+## 主要问题
+1. 温和派候选人战死与萧琅终局牺牲冲突，归属未定。
+
+## 修改建议
+1. 将温和派候选人归入萧琅早期伪装，删除独立角色。
+"""
+
+    suggestions = outline_service.build_outline_repair_suggestions(notes, "", "")
+
+    assert suggestions == [
+        {
+            "id": suggestions[0]["id"],
+            "severity": "normal",
+            "category": "revision",
+            "message": "温和派候选人战死与萧琅终局牺牲冲突，归属未定。",
+            "recommendation": "将温和派候选人归入萧琅早期伪装，删除独立角色。",
+            "priority": "low",
+            "selected": True,
+        }
+    ]
+
+
 def test_outline_review_suggestions_pair_numbered_issues_with_recommendations() -> None:
     notes = """STATUS: revise
 QUALITY_SCORE: 82
