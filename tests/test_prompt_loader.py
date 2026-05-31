@@ -74,6 +74,8 @@ def test_outline_editor_prompt_keeps_parseable_status_and_review_boundary():
     assert "低优先级问题" in prompt
     assert "建议问题" in prompt
     assert "高优先级问题必须尽量一次性列全" in prompt
+    assert "不得因为数量超过 10 条而省略真实阻塞项" in prompt
+    assert "高优先级问题工程安全上限 50 条" in prompt
     assert "低优先级问题最多 20 条" in prompt
     assert "建议问题最多 10 条" in prompt
     assert "推荐修改意见" in prompt
