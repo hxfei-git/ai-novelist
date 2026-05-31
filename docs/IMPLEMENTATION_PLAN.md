@@ -344,8 +344,8 @@ npm --prefix web/frontend run build
 ### Outline Review Priority Audit
 
 - Overall outline review suggestions now support high, low, and suggestion priority groups.
-- Priority section extraction uses safety caps of 50 high-priority items, 20 low-priority items, and 10 suggestion items.
-- The outline editor prompt now requests explicit priority sections so new review reports can preserve high/low/suggestion grouping.
+- Priority section extraction uses safety caps of 50 high-priority items, 20 low-priority items, and 10 suggestion items, and accepts both numbered Markdown lists and bullet lists inside priority sections.
+- The outline editor prompt now requests explicit priority sections and requires numbered lists so new review reports can preserve high/low/suggestion grouping with stable parsing.
 - The frontend `OutlineReviewSuggestion` type exposes optional `priority`; the decision board groups high/low/suggestion items, defaults high and low items to recommended, and defaults suggestion items to skipped.
 - Legacy flat or paired review reports that do not provide priority sections continue to default suggestions to low priority.
 - Apply instruction generation orders selected decisions by priority rank, including custom decisions, while preserving submitted order within the same priority.

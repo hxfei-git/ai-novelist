@@ -258,6 +258,24 @@ def extract_raw_numbered_markdown_items(text: str) -> dict[int, str]:
     return {number: " ".join(parts).strip() for number, parts in items.items()}
 
 
+def extract_raw_markdown_list_items(text: str) -> list[str]:
+    items: list[list[str]] = []
+    current: list[str] | None = None
+    for line in str(text or "").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        numbered_match = re.match(r"^\d+[.)、]\s*(.+)$", stripped)
+        bullet_match = re.match(r"^[-*+\u2022]\s+(.+)$", stripped)
+        if numbered_match or bullet_match:
+            current = [(numbered_match or bullet_match).group(1).strip()]
+            items.append(current)
+            continue
+        if current is not None and not stripped.startswith("#"):
+            current.append(clean_pending_question_line(stripped))
+    return [" ".join(parts).strip() for parts in items if " ".join(parts).strip()]
+
+
 def extract_numbered_markdown_items(text: str) -> dict[int, str]:
     return {
         number: summarize_text(item, max_chars=180).strip()
@@ -329,9 +347,9 @@ def priority_outline_review_pairs(notes: str) -> list[tuple[str, str, str]]:
         priority = OUTLINE_REVIEW_PRIORITY_TITLES.get(title.strip())
         if not priority:
             continue
-        items = extract_raw_numbered_markdown_items(body)
+        items = extract_raw_markdown_list_items(body)
         limit = OUTLINE_REVIEW_PRIORITY_CAPS[priority]
-        for _, text in sorted(items.items())[:limit]:
+        for text in items[:limit]:
             message, recommendation = split_recommendation_from_review_item(text)
             if message.strip():
                 pairs.append((message.strip(), recommendation.strip() or message.strip(), priority))

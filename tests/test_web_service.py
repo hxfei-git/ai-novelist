@@ -1269,6 +1269,28 @@ def test_outline_review_priority_sections_split_long_items_before_summarizing() 
     assert suggestions[0]["recommendation"] == "将长问题拆分后保留独立修复建议。"
 
 
+def test_outline_review_priority_sections_parse_bullet_items() -> None:
+    notes = """STATUS: revise
+QUALITY_SCORE: 72
+
+## 高优先级问题
+- 温和派候选人战死与萧琅终局牺牲冲突，归属未定。——推荐修改意见：锁定温和派候选人与萧琅牺牲的归属关系。
+
+## 低优先级问题
+- 鬼哭涧是否为唯一秘境名称，未同步至人物关系文档。——推荐修改意见：同步秘境命名到人物关系文档。
+
+## 建议问题
+- 古丹来源仍为待确认，未锁定至世界观已有设定。——推荐修改意见：后置确认古丹来源是否引用已有设定。
+"""
+
+    suggestions = outline_service.build_outline_repair_suggestions(notes, "", "")
+
+    assert [item["priority"] for item in suggestions] == ["high", "low", "suggestion"]
+    assert suggestions[0]["message"] == "温和派候选人战死与萧琅终局牺牲冲突，归属未定。"
+    assert suggestions[0]["recommendation"] == "锁定温和派候选人与萧琅牺牲的归属关系。"
+    assert suggestions[2]["message"] != suggestions[2]["recommendation"]
+
+
 def test_outline_review_legacy_pairing_defaults_to_low_priority() -> None:
     notes = """STATUS: revise
 QUALITY_SCORE: 82

@@ -79,6 +79,7 @@ def test_outline_editor_prompt_keeps_parseable_status_and_review_boundary():
     assert "低优先级问题最多 20 条" in prompt
     assert "建议问题最多 10 条" in prompt
     assert "推荐修改意见" in prompt
+    assert "必须使用编号列表" in prompt
     assert "主要问题最多 10 条" not in prompt
     assert "修改建议最多 10 条" not in prompt
     assert "不得把建议写成新的稳定设定" in prompt
