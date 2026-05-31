@@ -390,6 +390,31 @@ def test_outline_review_workspace_renders_apply_completion_state() -> None:
     assert "disabled={running || applying || reviewApplied || review?.decision === 'stop'}" in source
 
 
+def test_outline_review_suggestion_type_exposes_priority() -> None:
+    source = read_types()
+
+    assert "export type OutlineReviewSuggestionPriority = 'high' | 'low' | 'suggestion';" in source
+    assert "priority?: OutlineReviewSuggestionPriority" in source
+
+
+def test_outline_review_decisions_default_by_priority() -> None:
+    source = read_main()
+
+    assert "function outlineReviewSuggestionPriority" in source
+    assert "item.priority || 'low'" in source
+    assert "priority === 'suggestion' ? 'skip' : 'recommended'" in source
+
+
+def test_outline_review_decision_board_groups_by_priority() -> None:
+    source = read_workspace("review.tsx")
+
+    assert "const OUTLINE_REPAIR_PRIORITY_GROUPS" in source
+    assert "高优先级问题" in source
+    assert "低优先级问题" in source
+    assert "建议问题" in source
+    assert "group.items.map" in source
+
+
 def test_outline_review_apply_spinner_styles_exist() -> None:
     styles = read_styles()
 

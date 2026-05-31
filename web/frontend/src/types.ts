@@ -108,6 +108,7 @@ export type ReviewReportData = {
   issues: ReviewIssue[];
   repair_suggestions?: ReviewSuggestion[];
 };
+export type OutlineReviewSuggestionPriority = 'high' | 'low' | 'suggestion';
 export type OutlineReview = {
   project_id: string;
   run_id: string;
@@ -129,6 +130,7 @@ export type OutlineReview = {
 };
 export type OutlineReviewSuggestion = {
   id: string;
+  priority?: OutlineReviewSuggestionPriority;
   severity: string;
   category: string;
   message: string;

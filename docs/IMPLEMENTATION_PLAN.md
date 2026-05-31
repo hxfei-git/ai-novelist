@@ -301,6 +301,8 @@ npm --prefix web/frontend run build
 - `docs/superpowers/plans/2026-05-29-outline-save-progress-completion.md`
 - `docs/superpowers/plans/2026-05-29-stage-refresh-fallback.md`
 - `docs/superpowers/plans/2026-05-29-outline-review-apply-completion.md`
+- `docs/superpowers/specs/2026-05-31-outline-review-priority-audit-design.md`
+- `docs/superpowers/plans/2026-05-31-outline-review-priority-audit.md`
 
 ### Task 7: Chapter Batch Selection And Context Slice Proof
 - Files changed: context builder manifest source tagging, shared chapter outline extraction, direct chapter write and volume-write outline-slice guards, context-builder/graph regression tests, docs.
@@ -346,3 +348,4 @@ npm --prefix web/frontend run build
 - Legacy flat or paired review reports that do not provide priority sections continue to default suggestions to low priority.
 - The outline editor prompt now requests explicit priority sections so new review reports can preserve high/low/suggestion grouping.
 - Apply instruction generation orders selected decisions by priority rank, including custom decisions, while preserving submitted order within the same priority.
+- The frontend `OutlineReviewSuggestion` type exposes optional `priority`; decision defaults treat `suggestion` priority as skipped by default and render the review decision board in high/low/suggestion groups.

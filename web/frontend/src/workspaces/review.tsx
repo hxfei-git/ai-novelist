@@ -8,6 +8,26 @@ import type {
   ReviewSuggestion,
 } from '../types';
 
+const OUTLINE_REPAIR_PRIORITY_GROUPS = [
+  { priority: 'high', label: '高优先级问题' },
+  { priority: 'low', label: '低优先级问题' },
+  { priority: 'suggestion', label: '建议问题' },
+] as const;
+
+function outlineRepairPriority(item: OutlineReviewSuggestion) {
+  const priority = item.priority || 'low';
+  return priority === 'high' || priority === 'low' || priority === 'suggestion' ? priority : 'low';
+}
+
+function groupOutlineRepairSuggestions(suggestions: OutlineReviewSuggestion[]) {
+  return OUTLINE_REPAIR_PRIORITY_GROUPS
+    .map((group) => ({
+      ...group,
+      items: suggestions.filter((item) => outlineRepairPriority(item) === group.priority),
+    }))
+    .filter((group) => group.items.length > 0);
+}
+
 function groupRepairSuggestions(suggestions: ReviewSuggestion[]) {
   const groups = new Map<number | null, ReviewSuggestion[]>();
   suggestions.forEach((item) => {
@@ -118,40 +138,48 @@ export function OutlineRepairDecisionBoard({
   onDecisionChange: (id: string, decision: OutlineRepairDecisionValue) => void;
   onCustomAnswerChange: (id: string, value: string) => void;
 }) {
+  const groups = groupOutlineRepairSuggestions(suggestions);
   return (
-    <div className="outline-repair-table outline-repair-decisions" role="table" aria-label="大纲审查建议">
-      <div className="outline-repair-row outline-repair-decision-head" role="row">
-        <span role="columnheader">问题</span>
-        <span role="columnheader">推荐修改意见</span>
-        <span role="columnheader">暂不修改</span>
-        <span role="columnheader">我的意见</span>
-      </div>
-      {suggestions.map((item) => {
-        const value = decisions[item.id] || { decision: 'recommended', custom_answer: '' };
-        return (
-          <div className="outline-repair-row outline-repair-decision-row" role="row" key={item.id}>
-            <span role="cell">
-              <strong>{item.message}</strong>
-              <small>{item.severity || 'normal'} · {item.category || 'review'}</small>
-            </span>
-            <label role="cell">
-              <input type="radio" name={`outline-repair-${item.id}`} checked={value.decision === 'recommended'} onChange={() => onDecisionChange(item.id, 'recommended')} />
-              <span>{item.recommendation}</span>
-            </label>
-            <label role="cell">
-              <input type="radio" name={`outline-repair-${item.id}`} checked={value.decision === 'skip'} onChange={() => onDecisionChange(item.id, 'skip')} />
-              <span>暂不修改</span>
-            </label>
-            <label role="cell" className="custom-repair-choice">
-              <span>
-                <input type="radio" name={`outline-repair-${item.id}`} checked={value.decision === 'custom'} onChange={() => onDecisionChange(item.id, 'custom')} />
-                我的意见
-              </span>
-              <textarea value={value.custom_answer} onChange={(event) => onCustomAnswerChange(item.id, event.target.value)} disabled={value.decision !== 'custom'} placeholder="写入你的采纳意见" />
-            </label>
+    <div className="outline-repair-decisions" aria-label="大纲审查建议">
+      {groups.map((group) => (
+        <section className="outline-repair-priority-group" key={group.priority}>
+          <h2>{group.label}</h2>
+          <div className="outline-repair-table" role="table" aria-label={group.label}>
+            <div className="outline-repair-row outline-repair-decision-head" role="row">
+              <span role="columnheader">问题</span>
+              <span role="columnheader">推荐修改意见</span>
+              <span role="columnheader">暂不修改</span>
+              <span role="columnheader">我的意见</span>
+            </div>
+            {group.items.map((item) => {
+              const value = decisions[item.id] || { decision: 'recommended', custom_answer: '' };
+              return (
+                <div className="outline-repair-row outline-repair-decision-row" role="row" key={item.id}>
+                  <span role="cell">
+                    <strong>{item.message}</strong>
+                    <small>{item.severity || 'normal'} · {item.category || 'review'}</small>
+                  </span>
+                  <label role="cell">
+                    <input type="radio" name={`outline-repair-${item.id}`} checked={value.decision === 'recommended'} onChange={() => onDecisionChange(item.id, 'recommended')} />
+                    <span>{item.recommendation}</span>
+                  </label>
+                  <label role="cell">
+                    <input type="radio" name={`outline-repair-${item.id}`} checked={value.decision === 'skip'} onChange={() => onDecisionChange(item.id, 'skip')} />
+                    <span>暂不修改</span>
+                  </label>
+                  <label role="cell" className="custom-repair-choice">
+                    <span>
+                      <input type="radio" name={`outline-repair-${item.id}`} checked={value.decision === 'custom'} onChange={() => onDecisionChange(item.id, 'custom')} />
+                      我的意见
+                    </span>
+                    <textarea value={value.custom_answer} onChange={(event) => onCustomAnswerChange(item.id, event.target.value)} disabled={value.decision !== 'custom'} placeholder="写入你的采纳意见" />
+                  </label>
+                </div>
+              );
+            })}
           </div>
-        );
-      })}
+        </section>
+      ))}
     </div>
   );
 }

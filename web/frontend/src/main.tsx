@@ -58,10 +58,19 @@ function buildOutlineRepairSelectionMap(suggestions: OutlineReviewSuggestion[]) 
   return next;
 }
 
+function outlineReviewSuggestionPriority(item: OutlineReviewSuggestion) {
+  const priority = item.priority || 'low';
+  return priority === 'high' || priority === 'low' || priority === 'suggestion' ? priority : 'low';
+}
+
 function buildOutlineRepairDecisionMap(suggestions: OutlineReviewSuggestion[]) {
   const next: Record<string, OutlineRepairDecision> = {};
   suggestions.forEach((item) => {
-    next[item.id] = { decision: item.selected === false ? 'skip' : 'recommended', custom_answer: '' };
+    const priority = outlineReviewSuggestionPriority(item);
+    next[item.id] = {
+      decision: item.selected === false ? 'skip' : priority === 'suggestion' ? 'skip' : 'recommended',
+      custom_answer: '',
+    };
   });
   return next;
 }
