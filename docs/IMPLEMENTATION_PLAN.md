@@ -338,3 +338,11 @@ npm --prefix web/frontend run build
 - Overall outline review suggestion building now pairs numbered `## 主要问题` entries with same-numbered `## 修改建议` entries before falling back to flat bullet extraction.
 - The Web review decision board receives distinct `message` and `recommendation` values, so the recommended-choice column no longer repeats the problem text when a structured review report provides repair suggestions.
 - Existing applied `demo-web` review reports remain applied; future review reports generated through the service use the paired payload.
+
+### Outline Review Priority Audit Progress
+
+- Overall outline review now parses priority-aware repair suggestions from high, low, and suggestion groups.
+- Priority section extraction uses safety caps of 50 high-priority items, 20 low-priority items, and 10 suggestion items.
+- Legacy flat or paired review reports that do not provide priority sections continue to default suggestions to low priority.
+- The outline editor prompt now requests explicit priority sections so new review reports can preserve high/low/suggestion grouping.
+- Apply instruction generation orders selected decisions by priority rank, including custom decisions, while preserving submitted order within the same priority.
