@@ -205,26 +205,86 @@ def outline_suggestion_identifier(message: str, recommendation: str) -> str:
     text = f"outline_review|{message}|{recommendation}"
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:12]
 
+
+def markdown_sections(text: str) -> dict[str, str]:
+    sections: dict[str, list[str]] = {}
+    current = ""
+    for line in str(text or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            current = re.sub(r"^#+\s*", "", stripped).strip()
+            sections.setdefault(current, [])
+            continue
+        if current:
+            sections.setdefault(current, []).append(line)
+    return {title: "\n".join(lines).strip() for title, lines in sections.items()}
+
+
+def extract_numbered_markdown_items(text: str) -> dict[int, str]:
+    items: dict[int, list[str]] = {}
+    current: int | None = None
+    for line in str(text or "").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        match = re.match(r"^(\d+)[.)、]\s*(.+)$", stripped)
+        if match:
+            current = int(match.group(1))
+            items[current] = [match.group(2).strip()]
+        elif current is not None and not stripped.startswith("#"):
+            items[current].append(clean_pending_question_line(stripped))
+    return {number: summarize_text(" ".join(parts), max_chars=180).strip() for number, parts in items.items()}
+
+
+def first_numbered_section_items(sections: dict[str, str], titles: tuple[str, ...]) -> dict[int, str]:
+    for title in titles:
+        body = sections.get(title, "")
+        items = extract_numbered_markdown_items(body)
+        if items:
+            return items
+    return {}
+
+
+def outline_review_issue_recommendation_pairs(notes: str) -> list[tuple[str, str]]:
+    sections = markdown_sections(notes)
+    issues = first_numbered_section_items(sections, ("主要问题", "问题", "审查问题", "风险问题"))
+    recommendations = first_numbered_section_items(sections, ("修改建议", "修订建议", "建议", "推荐修改意见"))
+    pairs: list[tuple[str, str]] = []
+    for number in sorted(issues):
+        message = issues.get(number, "").strip()
+        recommendation = recommendations.get(number, "").strip()
+        if message and recommendation:
+            pairs.append((message, recommendation))
+    return pairs
+
+
 def build_outline_repair_suggestions(notes: str, revision_instruction: str, summary: str) -> list[dict[str, Any]]:
-    raw_items = [*extract_markdown_bullets(notes), *extract_markdown_bullets(revision_instruction)]
-    if not raw_items:
-        fallback = str(revision_instruction or summary or notes or "").strip()
-        if fallback:
-            raw_items = [fallback]
+    raw_pairs = outline_review_issue_recommendation_pairs(notes)
+    if not raw_pairs:
+        raw_items = [*extract_markdown_bullets(notes), *extract_markdown_bullets(revision_instruction)]
+        if not raw_items:
+            fallback = str(revision_instruction or summary or notes or "").strip()
+            if fallback:
+                raw_items = [fallback]
+        raw_pairs = [(item, item) for item in raw_items]
     suggestions: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for item in raw_items:
-        text = summarize_text(item, max_chars=180).strip()
-        if not text or text in seen:
+    for raw_message, raw_recommendation in raw_pairs:
+        message = summarize_text(raw_message, max_chars=180).strip()
+        recommendation = summarize_text(raw_recommendation, max_chars=180).strip()
+        if not message or not recommendation:
             continue
-        seen.add(text)
-        category = "revision" if re.search(r"建议|补|改|修|强化|调整|明确", text) else "issue"
+        key = f"{message}\n{recommendation}"
+        if key in seen:
+            continue
+        seen.add(key)
+        category = "revision" if re.search(r"建议|补|改|修|强化|调整|明确", recommendation) else "issue"
         suggestion = {
-            "id": outline_suggestion_identifier(text, text),
+            "id": outline_suggestion_identifier(message, recommendation),
             "severity": "normal",
             "category": category,
-            "message": text,
-            "recommendation": text,
+            "message": message,
+            "recommendation": recommendation,
             "selected": True,
         }
         suggestions.append(suggestion)

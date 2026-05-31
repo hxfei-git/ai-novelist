@@ -1204,6 +1204,39 @@ def test_outline_review_report_exposes_selectable_suggestions(tmp_path: Path) ->
     assert any("补强最后一卷的收束钩子" in item["recommendation"] for item in suggestions)
 
 
+def test_outline_review_suggestions_pair_numbered_issues_with_recommendations() -> None:
+    notes = """STATUS: revise
+QUALITY_SCORE: 82
+
+## 总体判断
+需要修订后再进入下一阶段。
+
+## 主要问题
+1. 温和派候选人战死与萧琅终局牺牲冲突，归属未定。
+2. 古丹来源仍为待确认，未锁定至世界观已有设定。
+3. 鬼哭涧是否为唯一秘境名称，未同步至人物关系文档。
+
+## 修改建议
+1. 将温和派候选人归入萧琅早期伪装，删除独立角色。
+2. 将古丹来源锁定为“逆修遗产”，与世界观一致。
+3. 确认鬼哭涧为唯一秘境名称，同步至所有文档。
+"""
+
+    suggestions = outline_service.build_outline_repair_suggestions(notes, "", "")
+
+    assert [item["message"] for item in suggestions] == [
+        "温和派候选人战死与萧琅终局牺牲冲突，归属未定。",
+        "古丹来源仍为待确认，未锁定至世界观已有设定。",
+        "鬼哭涧是否为唯一秘境名称，未同步至人物关系文档。",
+    ]
+    assert [item["recommendation"] for item in suggestions] == [
+        "将温和派候选人归入萧琅早期伪装，删除独立角色。",
+        "将古丹来源锁定为“逆修遗产”，与世界观一致。",
+        "确认鬼哭涧为唯一秘境名称，同步至所有文档。",
+    ]
+    assert all(item["message"] != item["recommendation"] for item in suggestions)
+
+
 def test_apply_outline_review_uses_only_selected_suggestions(tmp_path: Path) -> None:
     store = LocalStore(tmp_path)
     state = store.create_project("Web Demo", "web-demo")

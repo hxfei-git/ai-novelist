@@ -332,3 +332,9 @@ npm --prefix web/frontend run build
 - Inline pending scanning now skips `用户本轮反馈` / `本轮反馈` / `修订反馈` sections and submitted answer lines beginning with `问题：`, `答案：`, or `针对当前阶段待确认项`.
 - This keeps submitted pending-answer instructions from being rediscovered as fresh pending questions on the next refresh or submit cycle.
 - The current ignored `projects/demo-web` worldbuilding mirrors were cleaned by removing the recursively generated `## 用户本轮反馈` block while preserving the worldbuilding body.
+
+### Outline Review Recommendation Pairing
+
+- Overall outline review suggestion building now pairs numbered `## 主要问题` entries with same-numbered `## 修改建议` entries before falling back to flat bullet extraction.
+- The Web review decision board receives distinct `message` and `recommendation` values, so the recommended-choice column no longer repeats the problem text when a structured review report provides repair suggestions.
+- Existing applied `demo-web` review reports remain applied; future review reports generated through the service use the paired payload.
