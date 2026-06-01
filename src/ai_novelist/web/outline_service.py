@@ -107,6 +107,25 @@ def split_outline_review_sections(text: str) -> dict[str, str]:
         sections[current_title] = "\n".join(current_lines).strip()
     return sections
 
+PATCH_SHELL_HEADINGS = ("修订摘要", "变更区块", "保留约束", "未改动内容")
+
+
+def is_patch_only_outline_text(text: str) -> bool:
+    cleaned = str(text or "").strip()
+    if not cleaned:
+        return True
+    sections = markdown_sections(cleaned)
+    section_titles = set(sections) | {
+        re.sub(r"^\d+[.)、．]\s*", "", title).strip()
+        for title in sections
+    }
+    patch_heading_count = sum(1 for heading in PATCH_SHELL_HEADINGS if heading in section_titles)
+    if patch_heading_count < 2:
+        return False
+    effective_sections = split_outline_review_sections(cleaned)
+    return not any(value.strip() for value in effective_sections.values())
+
+
 def write_outline_review_baseline_sections(store: LocalStore, state: NovelState, outline_text: str) -> tuple[list[str], list[str]]:
     sections = split_outline_review_sections(outline_text)
     updated_stages: list[str] = []

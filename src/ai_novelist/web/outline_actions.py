@@ -29,6 +29,7 @@ from ai_novelist.web.outline_service import (
     ensure_outline_stage_mutable,
     ensure_valid_stage,
     has_outline_stage_content,
+    is_patch_only_outline_text,
     load_outline_review_report,
     mark_outline_review_applied,
     outline_review_source_text,
@@ -334,10 +335,20 @@ def _apply_outline_review_locked(
     emit("OutlineReview", "正在应用大纲审查建议...")
     state.outline = source_outline
     state.revision_instruction = selected_outline_revision_instruction(report, selected_issue_ids, decisions)
+    state.revision_instruction = (
+        f"{state.revision_instruction}\n\n"
+        "应用要求：请输出完整有效大纲正文，不要只输出“修订摘要”或“变更区块”。"
+    ).strip()
     state.editor_notes = state.revision_instruction if selected_issue_ids is not None or decisions is not None else str(report.get("notes") or "")
     state.review_status = "draft"
     store.save_state(state)
     revised = NovelState.from_dict(revise_outline_node(state.to_dict(), adapter, store))
+    if is_patch_only_outline_text(revised.outline):
+        state.outline = source_outline
+        store.save_state(state)
+        store.save_outline(state)
+        store.outline_path(project_id).write_text(state.outline, encoding="utf-8")
+        raise LocalStoreError("修订结果不是完整有效大纲，已保留原大纲。")
     compared = NovelState.from_dict(compare_outline_versions_node(revised.to_dict(), adapter, store))
     compared.outline_review_applied_run_id = run_id
     compared.outline_review_run_id = run_id

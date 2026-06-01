@@ -70,6 +70,29 @@ class OutlineReviewAdapter(AgentAdapter):
         return "{}"
 
 
+class PatchShellOutlineApplyAdapter(AgentAdapter):
+    def complete(self, prompt: str, workspace: Path, options: AgentCallOptions | None = None) -> str:
+        if "outline_reviser" in prompt:
+            return """### 1. 修订摘要
+
+| 编号 | 变更项 |
+| :--- | :--- |
+| 1 | 清理版本。 |
+
+### 2. 变更区块
+
+#### 变更项 1：清理重复版本
+- **执行**：删除版本0、版本1，确认当前有效版本为版本2。
+
+### 3. 保留约束
+- **锁定约束**：暂无。
+
+### 4. 未改动内容
+保持原意。
+"""
+        return "{}"
+
+
 class CappedHighPriorityOutlineReviewAdapter(AgentAdapter):
     def __init__(self) -> None:
         self.review_calls = 0
@@ -1128,6 +1151,22 @@ def test_outline_review_roundtrip_and_apply_updates_outline(tmp_path: Path) -> N
     saved = store.load_state("web-demo")
     assert saved.outline_review_applied_run_id == report["run_id"]
     assert saved.outline_review_run_id == report["run_id"]
+
+
+def test_apply_outline_review_rejects_patch_only_reviser_output(tmp_path: Path) -> None:
+    store = LocalStore(tmp_path)
+    state = store.create_project("Web Demo", "web-demo")
+    state.outline = "# 最终锁定总大纲\n\n## 方向定位\n旧有效大纲。"
+    store.save_outline(state)
+    store.save_state(state)
+    report = outline_actions.review_outline(store, OutlineReviewAdapter(), "web-demo", "请检查总纲")
+
+    with pytest.raises(LocalStoreError, match="修订结果不是完整有效大纲"):
+        outline_actions.apply_outline_review(store, PatchShellOutlineApplyAdapter(), "web-demo", report["run_id"])
+
+    saved = store.load_state("web-demo")
+    assert saved.outline == "# 最终锁定总大纲\n\n## 方向定位\n旧有效大纲。"
+    assert store.outline_path("web-demo").read_text(encoding="utf-8") == saved.outline
 
 
 def test_outline_review_apply_marks_latest_report_applied(tmp_path: Path) -> None:
