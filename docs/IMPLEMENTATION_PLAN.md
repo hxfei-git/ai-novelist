@@ -363,3 +363,4 @@ npm --prefix web/frontend run build
 - Repair suggestions are deduplicated by normalized issue message.
 - Automatic high-priority continuation is disabled until a deterministic truncation signal exists.
 - `projects/demo-web` was restored to a single effective outline for future reviews.
+- `projects/demo-web` now has a clean latest outline review reset report (`20260602000000-cleaned`) so the Web latest-review surface no longer shows the stale stopped report.

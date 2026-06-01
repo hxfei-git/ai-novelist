@@ -436,7 +436,7 @@ Any pruning batch must update this summary with:
 
 ### 2026-06-02 Outline review context cleanup
 
-Implemented the approved cleanup for overall outline review context. Verified focused outline review parser/apply tests and cleaned `projects/demo-web` so its current outline is no longer a revision-summary shell.
+Implemented the approved cleanup for overall outline review context. Verified focused outline review parser/apply tests and cleaned `projects/demo-web` so its current outline is no longer a revision-summary shell. Added a clean latest outline review reset report (`20260602000000-cleaned`) so the stale stopped report is no longer surfaced as the latest review.
 
 Verification:
 - `.venv/bin/python -m pytest tests/test_web_service.py::test_outline_editor_prompt_omits_numbered_recent_outline_versions tests/test_web_service.py::test_outline_review_deduplicates_same_message_with_different_recommendations tests/test_web_service.py::test_outline_review_does_not_continue_when_initial_high_priority_batch_is_exactly_ten tests/test_web_service.py::test_apply_outline_review_rejects_patch_only_reviser_output tests/test_web_service.py::test_outline_review_roundtrip_and_apply_updates_outline tests/test_web_service.py::test_outline_review_priority_sections_parse_bullet_items tests/test_web_service.py::test_outline_review_legacy_pairing_defaults_to_low_priority -q`
