@@ -1463,11 +1463,14 @@ def compare_outline_versions_node(data: dict, adapter: AgentAdapter, store: Loca
 
 def build_outline_prompt(state: NovelState, prompt_name: str) -> str:
     template = load_prompt(prompt_name)
-    versions = "\n\n".join(
-        f"版本 {idx}: {item.get('label', '')}\n{item.get('content', '')}"
-        for idx, item in enumerate(state.outline_versions[-3:])
-    )
-    return (
+    recent_versions = ""
+    if prompt_name != "outline_editor":
+        versions = "\n\n".join(
+            f"版本 {idx}: {item.get('label', '')}\n{item.get('content', '')}"
+            for idx, item in enumerate(state.outline_versions[-3:])
+        )
+        recent_versions = f"最近大纲版本：\n{versions or '暂无'}\n"
+    prompt = (
         f"{template.rstrip()}\n\n"
         "## 项目上下文\n"
         f"标题：{state.title}\n"
@@ -1485,8 +1488,8 @@ def build_outline_prompt(state: NovelState, prompt_name: str) -> str:
         f"原作不确定点：{', '.join(state.research_uncertainties) or '暂无'}\n"
         "如果存在原作不确定点，必须要求用户确认，不得擅自补完原作设定。\n"
         f"编辑意见：\n{state.editor_notes or '暂无'}\n\n"
-        f"最近大纲版本：\n{versions or '暂无'}\n"
     )
+    return prompt + recent_versions
 
 
 def format_retrieval_sources(sources: list[dict]) -> str:

@@ -121,8 +121,8 @@ def outline_review_needs_high_priority_continuation(
     suggestions: list[dict[str, Any]],
     last_high_priority_batch_count: int,
 ) -> bool:
-    high_count = outline_review_high_priority_count(suggestions)
-    return last_high_priority_batch_count == 10 and high_count < OUTLINE_REVIEW_PRIORITY_CAPS["high"]
+    del suggestions, last_high_priority_batch_count
+    return False
 
 
 def outline_review_high_priority_continuation_prompt(

@@ -206,6 +206,10 @@ def outline_suggestion_identifier(message: str, recommendation: str) -> str:
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:12]
 
 
+def normalize_outline_review_message(message: str) -> str:
+    return re.sub(r"\s+", "", str(message or "")).rstrip("。；;,.，")
+
+
 OUTLINE_REVIEW_PRIORITY_ORDER = ("high", "low", "suggestion")
 OUTLINE_REVIEW_PRIORITY_LABELS = {
     "high": "高优先级问题",
@@ -377,8 +381,8 @@ def build_outline_repair_suggestions(notes: str, revision_instruction: str, summ
         recommendation = summarize_text(raw_recommendation, max_chars=180).strip()
         if not message or not recommendation:
             continue
-        key = f"{message}\n{recommendation}"
-        if key in seen:
+        key = normalize_outline_review_message(message)
+        if not key or key in seen:
             continue
         seen.add(key)
         suggestions.append(build_outline_repair_suggestion(message, recommendation, raw_priority))
