@@ -355,3 +355,11 @@ npm --prefix web/frontend run build
 - Overall outline review now treats high-priority batches that stop at exactly 10 newly returned items as a likely model truncation signal and performs bounded continuation prompts inside the same Web review action.
 - Continuation prompts ask only for high-priority blockers not already listed, merge non-duplicate high-priority suggestions back into the same report, and stop when no new blocker is returned or the 50-item high-priority safety cap is reached.
 - Frontend rendering remains unchanged because the API still returns a single `repair_suggestions` list grouped by priority; the difference is that reports generated from one click can now contain more than the model's first 10 high-priority items.
+
+### 2026-06-02 Outline Review Context Cleanup
+
+- Overall outline review now receives only the current effective outline, not numbered recent outline versions.
+- Outline review apply rejects patch-only reviser output before saving `outline.md`.
+- Repair suggestions are deduplicated by normalized issue message.
+- Automatic high-priority continuation is disabled until a deterministic truncation signal exists.
+- `projects/demo-web` was restored to a single effective outline for future reviews.

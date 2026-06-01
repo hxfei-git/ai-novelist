@@ -433,3 +433,14 @@ Any pruning batch must update this summary with:
 - Verification so far: RED `.venv/bin/python -m pytest tests/test_web_service.py::test_outline_review_continues_when_high_priority_batch_stops_at_ten -q` first failed with `adapter.review_calls == 1`; after the fix it passed with 1 passed in 0.20s. A boundary RED for `test_outline_review_does_not_continue_when_initial_high_priority_batch_exceeds_ten` first failed with `adapter.review_calls == 2`; after narrowing continuation to the last returned batch size, the two focused tests passed with 2 passed in 0.16s.
 - Final affected verification: `.venv/bin/python -m pytest tests/test_web_service.py tests/test_web_app.py -q` -> 105 passed in 4.37s; `.venv/bin/python -m pytest tests/test_frontend_review_tabs_structure.py -q` -> 41 passed in 0.31s; `npm --prefix web/frontend run build` -> passed, 1590 modules transformed, built in 5.55s, with the known Vite CJS Node API deprecation warning.
 - Remaining risk: no live model or browser click run was performed; verification covers backend generation/merge behavior, Web route/service regressions, frontend source structure, and TypeScript production build.
+
+### 2026-06-02 Outline review context cleanup
+
+Implemented the approved cleanup for overall outline review context. Verified focused outline review parser/apply tests and cleaned `projects/demo-web` so its current outline is no longer a revision-summary shell.
+
+Verification:
+- `.venv/bin/python -m pytest tests/test_web_service.py::test_outline_editor_prompt_omits_numbered_recent_outline_versions tests/test_web_service.py::test_outline_review_deduplicates_same_message_with_different_recommendations tests/test_web_service.py::test_outline_review_does_not_continue_when_initial_high_priority_batch_is_exactly_ten tests/test_web_service.py::test_apply_outline_review_rejects_patch_only_reviser_output tests/test_web_service.py::test_outline_review_roundtrip_and_apply_updates_outline tests/test_web_service.py::test_outline_review_priority_sections_parse_bullet_items tests/test_web_service.py::test_outline_review_legacy_pairing_defaults_to_low_priority -q`
+- `.venv/bin/python -m pytest tests/test_web_outline_service.py tests/test_web_chapter_service.py -q`
+
+Remaining risk:
+- Full real Codex review behavior was not exercised; verification used deterministic adapters and local project state.
