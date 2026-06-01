@@ -1270,6 +1270,29 @@ def test_outline_review_report_exposes_selectable_suggestions(tmp_path: Path) ->
     assert any("补强最后一卷的收束钩子" in item["recommendation"] for item in suggestions)
 
 
+def test_outline_editor_prompt_omits_numbered_recent_outline_versions(tmp_path: Path) -> None:
+    from ai_novelist.graph_outline import build_outline_prompt
+
+    state = NovelState(project_id="web-demo", title="Web Demo", idea="修仙复仇")
+    state.outline = "# 当前有效大纲\n\n## 方向定位\n只审查这一份。"
+    state.outline_versions = [
+        {"label": "修订后大纲", "content": "旧版本 A"},
+        {"label": "修订后大纲", "content": "旧版本 B"},
+        {"label": "修订后大纲", "content": "旧版本 C"},
+    ]
+
+    prompt = build_outline_prompt(state, "outline_editor")
+
+    assert "当前大纲：\n# 当前有效大纲" in prompt
+    assert "最近大纲版本：" not in prompt
+    assert "版本 0:" not in prompt
+    assert "版本 1:" not in prompt
+    assert "版本 2:" not in prompt
+    assert "旧版本 A" not in prompt
+    assert "旧版本 B" not in prompt
+    assert "旧版本 C" not in prompt
+
+
 def test_outline_review_priority_sections_parse_and_cap_items() -> None:
     high_lines = [
         f"{index}. 高优先级问题{index}。——推荐修改意见：高优先级修复{index}。"
@@ -1315,21 +1338,19 @@ def test_outline_review_priority_sections_parse_and_cap_items() -> None:
     assert "建议问题11。" not in [item["message"] for item in suggestions]
 
 
-def test_outline_review_continues_when_high_priority_batch_stops_at_ten(tmp_path: Path) -> None:
+
+def test_outline_review_does_not_continue_when_initial_high_priority_batch_is_exactly_ten(tmp_path: Path) -> None:
     store = LocalStore(tmp_path)
     state = store.create_project("Web Demo", "web-demo")
-    state.outline = "# 最终锁定总大纲\n\n## 章节大纲\n旧稿。"
+    state.outline = "# 最终锁定总大纲\n\n## 方向定位\n已有单一大纲。"
     store.save_state(state)
     adapter = CappedHighPriorityOutlineReviewAdapter()
 
     report = outline_actions.review_outline(store, adapter, "web-demo", "请检查总纲")
 
-    suggestions = report["repair_suggestions"]
-    assert adapter.review_calls == 2
-    assert len(suggestions) == 13
-    assert [item["priority"] for item in suggestions] == ["high"] * 13
-    assert suggestions[9]["message"] == "首批高优先级问题10。"
-    assert suggestions[10]["message"] == "续审高优先级问题11。"
+    assert adapter.review_calls == 1
+    assert len(report["repair_suggestions"]) == 10
+    assert all("续审" not in item["message"] for item in report["repair_suggestions"])
 
 
 def test_outline_review_does_not_continue_when_initial_high_priority_batch_exceeds_ten(tmp_path: Path) -> None:
@@ -1343,6 +1364,22 @@ def test_outline_review_does_not_continue_when_initial_high_priority_batch_excee
 
     assert adapter.review_calls == 1
     assert len(report["repair_suggestions"]) == 20
+
+
+def test_outline_review_deduplicates_same_message_with_different_recommendations() -> None:
+    notes = """STATUS: revise
+QUALITY_SCORE: 70
+
+## 高优先级问题
+1. 版本2中“修订摘要”与“变更区块”内容重复，冗余。——推荐修改意见：精简版本2“修订摘要”表格，仅保留变更项编号和简要描述。
+2. 版本2中“修订摘要”与“变更区块”内容重复，冗余。——推荐修改意见：删除“修订摘要”表格，仅保留“变更区块”作为唯一修订记录。
+"""
+
+    suggestions = outline_service.build_outline_repair_suggestions(notes, "", "")
+
+    assert len(suggestions) == 1
+    assert suggestions[0]["message"] == "版本2中“修订摘要”与“变更区块”内容重复，冗余。"
+    assert suggestions[0]["recommendation"] == "精简版本2“修订摘要”表格，仅保留变更项编号和简要描述。"
 
 
 def test_outline_review_priority_sections_split_long_items_before_summarizing() -> None:
